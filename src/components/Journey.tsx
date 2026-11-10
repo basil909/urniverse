@@ -12,6 +12,8 @@ import Lenis from 'lenis'
 import UniverseCanvas from './experience/UniverseCanvas'
 
 import Loader from './ui/Loader'
+import DetailPanel from './ui/DetailPanel'
+import { WORLD_DETAILS } from '../data/worlds'
 
 
 
@@ -599,6 +601,10 @@ export default function Journey() {
   const [textOn, setTextOn] = useState(true)
   // filled in on the client so it is always the visitor's own date
   const [today, setToday] = useState('')
+  // deep-dive panel for the current world
+  const [detailOpen, setDetailOpen] = useState(false)
+  const detailOpenRef = useRef(false)
+  detailOpenRef.current = detailOpen
 
   const rootRef = useRef<HTMLElement>(null)
   const lenisRef = useRef<Lenis | null>(null)
@@ -691,6 +697,10 @@ export default function Journey() {
 
     lenis.options.virtualScroll = ({ deltaX, deltaY, event }) => {
       if (snapping) return true // locked: Lenis cancels the event
+
+      // scrolling inside the details panel: let it scroll natively
+      const target = event.target as Element | null
+      if (target?.closest?.('[data-lenis-prevent]')) return true
 
       const isTouch = event.type.includes('touch')
       const swallow = () => {
@@ -847,6 +857,7 @@ export default function Journey() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (detailOpenRef.current) return
       const forward = ['ArrowDown', 'ArrowRight', 'PageDown']
       const back = ['ArrowUp', 'ArrowLeft', 'PageUp']
       if (forward.includes(event.key)) {
@@ -861,6 +872,10 @@ export default function Journey() {
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section])
+
+  useEffect(() => {
+    setDetailOpen(false)
+  }, [section, textOn])
 
   const active =
     section >= 1 && section <= JOURNEY.length
@@ -881,7 +896,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${canSpin ? 'can-spin' : ''}`}
+      className={`universe-page ${canSpin ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -893,6 +908,13 @@ export default function Journey() {
       </div>
 
       <Loader />
+
+      <DetailPanel
+        open={detailOpen}
+        name={planetName}
+        detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
+        onClose={() => setDetailOpen(false)}
+      />
 
       <div className="universe-vignette" />
       <div className="universe-aura" />
@@ -1121,6 +1143,18 @@ export default function Journey() {
                     If the Sun were a door 2 m tall, {scale.name} would be{' '}
                     {scale.size} across ({scale.like}) and {scale.distance} away.
                   </motion.p>
+                )}
+
+                {WORLD_DETAILS[activeChapter.id] && (
+                  <button
+                    type="button"
+                    className="detail-open"
+                    onClick={() => setDetailOpen(true)}
+                    aria-expanded={detailOpen}
+                  >
+                    More about {planetName}
+                    <span aria-hidden="true">+</span>
+                  </button>
                 )}
 
                 <button

@@ -946,3 +946,186 @@ html.is-spinning * {
   white-space: nowrap;
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95);
 }
+
+/* ============================================================
+   DEEP-DIVE PANEL ("More about …")
+   ============================================================ */
+
+.detail-open {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 22px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--planet-accent);
+  transition: gap 0.35s var(--ease), color 0.25s;
+}
+
+.detail-open span {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.detail-open:hover {
+  gap: 12px;
+  color: var(--text-1);
+}
+
+.detail-open + .journey-hint { margin-top: 12px; }
+
+/* the chapter text steps back while the panel covers it (on the stage
+   itself: the text's own entrance animation sets an inline opacity) */
+.stage { transition: opacity 0.3s; }
+.detail-is-open .stage-chapter {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 120;
+  width: min(500px, 40vw);
+  padding: 88px 40px 56px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: linear-gradient(90deg, rgba(2, 4, 9, 0.82), rgba(2, 4, 9, 0.95) 18%);
+  border-left: 1px solid var(--hairline);
+  scrollbar-width: thin;
+}
+
+.detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.detail-eyebrow {
+  font-size: var(--size-label);
+  font-weight: 500;
+  color: var(--planet-accent);
+}
+
+.detail-title {
+  margin-top: 6px;
+  font-family: var(--serif);
+  font-size: clamp(40px, 3.4vw, 54px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--text-1);
+}
+
+.detail-close {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-2);
+  transition: border-color 0.25s, color 0.25s;
+}
+
+.detail-close:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+  color: var(--text-1);
+}
+
+.detail-glance {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+  margin-top: 28px;
+  padding: 20px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.detail-glance-row dt {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.detail-glance-row dd {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-1);
+}
+
+.detail-section { margin-top: 28px; }
+
+.detail-section h3 {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 400;
+  color: var(--text-1);
+}
+
+.detail-section p {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-2);
+  text-wrap: pretty;
+}
+
+.detail-missions {
+  margin-top: 12px;
+  list-style: none;
+}
+
+.detail-missions li {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.detail-missions li:first-child { border-top: 0; }
+
+.detail-year {
+  font-variant-numeric: tabular-nums;
+  color: var(--planet-accent);
+}
+
+.detail-missions b {
+  display: block;
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.detail-source {
+  margin-top: 32px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+@media (max-width: 1100px) {
+  .detail-panel { width: min(480px, 52vw); padding: 80px 28px 48px; }
+}
+
+@media (max-width: 760px) {
+  .detail-panel {
+    width: 100%;
+    top: 56px;
+    padding: 28px 20px 48px;
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+    background: rgba(2, 4, 9, 0.96);
+  }
+  .detail-glance { grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+}
