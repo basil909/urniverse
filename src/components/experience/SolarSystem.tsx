@@ -78,12 +78,14 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
       {
         /* aurora ovals near 67 degrees from the equator, rippling curtains */
         float lat = (vMapUv.y - 0.5) * 180.0;
-        float oval = exp(-pow((abs(lat) - 67.0) / 3.5, 2.0));
+        float oval = exp(-pow((abs(lat) - 67.0) / 2.6, 2.0));
         float x = vMapUv.x * 6.28318;
-        float curtain = 0.55 + 0.45 * sin(x * 14.0 + uTime * 0.5 + 2.0 * sin(x * 5.0 - uTime * 0.2));
-        curtain *= 0.65 + 0.35 * sin(x * 37.0 - uTime * 0.9);
+        /* fine, folding curtains rather than separate patches */
+        float curtain = 0.6
+          + 0.25 * sin(x * 46.0 + uTime * 0.6 + 3.0 * sin(x * 7.0 - uTime * 0.15))
+          + 0.15 * sin(x * 13.0 - uTime * 0.4);
         float dark = 1.0 - smoothstep(-0.3, 0.02, sunFacing);
-        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.5;
+        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.36;
       }
       #endif`,
       )
@@ -112,7 +114,7 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
         /* sun glint: a tight, bright highlight where the water mirrors the Sun */
         vec3 V = normalize(vViewPosition);
         vec3 H = normalize(sunV + V);
-        float spot = pow(max(dot(N, H), 0.0), 220.0) * 2.4 + pow(max(dot(N, H), 0.0), 28.0) * 0.12;
+        float spot = pow(max(dot(N, H), 0.0), 140.0) * 1.1 + pow(max(dot(N, H), 0.0), 24.0) * 0.12;
         reflectedLight.directSpecular += vec3(1.0, 0.92, 0.78) * spot * specularStrength * shade * smoothstep(0.0, 0.12, mu);
       }
       #endif`,
@@ -2261,6 +2263,18 @@ function Hotspots({
   )
 }
 
+/* Uranus's rings: [radius, width, opacity], in planet radii */
+const URANUS_RINGS: [number, number, number][] = [
+  [1.65, 0.005, 0.12],
+  [1.67, 0.005, 0.12],
+  [1.75, 0.005, 0.14],
+  [1.79, 0.005, 0.14],
+  [1.84, 0.004, 0.1],
+  [1.86, 0.005, 0.14],
+  [1.9, 0.006, 0.16],
+  [2.0, 0.016, 0.28],
+]
+
 function PlanetRings({
   planet,
   radius,
@@ -2288,7 +2302,28 @@ function PlanetRings({
     )
   const isNeptune = planet.name === 'Neptune'
 
-  // Uranus and Neptune have thin, faint rings: a broad band read as a dark hole
+  // Uranus: a set of narrow, dark rings (6, 5, 4, alpha, beta, eta, gamma,
+  // delta, and the widest, epsilon), not one bright band
+  if (isUranus) {
+    return (
+      <>
+        {URANUS_RINGS.map(([at, width, opacity]) => (
+          <mesh key={at} rotation={[Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[radius * at, radius * (at + width), 160]} />
+            <meshBasicMaterial
+              color="#8a9496"
+              transparent
+              opacity={opacity}
+              side={THREE.DoubleSide}
+              depthWrite={false}
+            />
+          </mesh>
+        ))}
+      </>
+    )
+  }
+
+  // Neptune has thin, faint rings: a broad band read as a dark hole
   const outer = isSaturn
     ? radius * 2.65
     : isUranus

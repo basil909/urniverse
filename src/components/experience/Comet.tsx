@@ -6,6 +6,7 @@ import * as THREE from 'three'
 
 import { orbitalDisplayDistance, solveKepler } from './orbit'
 import { simClock } from './simClock'
+import { lens } from './lens'
 
 /* A comet on a long, eccentric orbit, timed to swing past the Sun about
    half a minute into the opening view (time runs at days per second
@@ -26,7 +27,7 @@ const ARG_PERIHELION = 75 * DEG
 /* days after the visitor's "today" when the comet rounds the Sun */
 const PERIHELION_DELAY = 140
 
-const TAIL_COUNT = 1400
+const TAIL_COUNT = 6000
 
 const _ecl = new THREE.Vector3()
 
@@ -86,8 +87,10 @@ void main() {
     + (side * aSpread.x + up * aSpread.y) * width * (0.15 + t)
     + side * ripple;
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_PointSize = clamp((aKind > 0.5 ? 0.12 : 0.07) * uScale / -mv.z, 1.0 * uPixelRatio, 6.0 * uPixelRatio);
-  vAlpha = pow(1.0 - t, aKind > 0.5 ? 1.6 : 1.2);
+  /* many soft, faint grains blend into a continuous veil (few bright
+     ones read as a dotted line) */
+  gl_PointSize = clamp((aKind > 0.5 ? 0.28 : 0.14) * uScale / -mv.z, 2.0 * uPixelRatio, 18.0 * uPixelRatio);
+  vAlpha = pow(1.0 - t, aKind > 0.5 ? 1.6 : 1.2) * (aKind > 0.5 ? 0.16 : 0.22);
   vKind = aKind;
   gl_Position = projectionMatrix * mv;
 }`
@@ -98,7 +101,7 @@ varying float vAlpha;
 varying float vKind;
 void main() {
   float d = length(gl_PointCoord - 0.5);
-  float a = 1.0 - smoothstep(0.0, 0.5, d);
+  float a = pow(1.0 - smoothstep(0.0, 0.5, d), 2.0);
   vec3 ion = vec3(0.45, 0.7, 1.0);
   vec3 dust = vec3(1.0, 0.92, 0.75);
   gl_FragColor = vec4(mix(ion, dust, vKind) * a * vAlpha * uBright, 1.0);
@@ -228,7 +231,8 @@ export default function Comet() {
     // active only when the Sun warms it: tails grow inside ~3 AU
     const activity = THREE.MathUtils.clamp((3.2 - r) / 2.4, 0, 1)
     shared.uLength.value = 1.4 + 8 * activity * activity
-    shared.uBright.value = 0.15 + 0.85 * activity
+    // only in the wide views: during a close-up the comet steps aside
+    shared.uBright.value = (0.15 + 0.85 * activity) * (1 - lens.closeUp)
     shared.uTime.value += delta
     const ratio = gl.getPixelRatio()
     shared.uPixelRatio.value = ratio
