@@ -116,6 +116,9 @@ const _side = new THREE.Vector3()
 const _worldUp = new THREE.Vector3(0, 1, 0)
 const _viewDir = new THREE.Vector3()
 
+/* Share of the view each rocky planet fills: Mercury, Venus, Earth, Mars */
+const ROCKY_FILL: (number | undefined)[] = [0.045, 0.06, 0.063, 0.05]
+
 const BLEND = 0.18
 
 const isPlanetChapter = (chapter: number) =>
@@ -164,11 +167,17 @@ function calculatePlanetPose(
 
   const visualRadius = getPlanetVisualRadius(planetIndex)
   // Tighter framing so the planet fills the centre of the screen
+  // Rocky planets: frame by how much of the view they fill (radius / distance)
+  // so small worlds like Mercury and Mars are not lost inside the reticle.
+  // Earth keeps its previous framing (~0.063); smaller worlds stay smaller.
+  const rockyFill = ROCKY_FILL[planetIndex]
   const heroDistance =
-    Math.max(
-      config.minHeroDistance,
-      visualRadius * config.radiusMultiplier,
-    ) * (planetIndex === 5 ? 1.9 : planetIndex >= 4 ? 1.2 : 0.95)
+    rockyFill !== undefined
+      ? visualRadius / rockyFill
+      : Math.max(
+          config.minHeroDistance,
+          visualRadius * config.radiusMultiplier,
+        ) * (planetIndex === 5 ? 1.9 : 1.2)
   const arrivalDistance = heroDistance * 2.35
 
   outTarget

@@ -760,6 +760,8 @@ export default function Journey() {
 
   const telemetry = activeChapter ? TELEMETRY[activeChapter.id] : null
   const showReticle = textOn && active >= 0 && active <= 8
+  // planets only (not the Sun): these can be dragged to spin
+  const canSpin = textOn && active >= 1 && active <= 8
   const planetName = activeChapter
     ? activeChapter.label.charAt(0) + activeChapter.label.slice(1).toLowerCase()
     : ''
@@ -771,7 +773,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className="universe-page"
+      className={`universe-page ${canSpin ? 'can-spin' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -806,6 +808,9 @@ export default function Journey() {
         <span className="reticle-tag reticle-tag-tl">
           TARGET LOCK
           <b>{activeChapter?.label ?? ''}</b>
+        </span>
+        <span className={`reticle-hint ${canSpin ? 'is-on' : ''}`}>
+          <i aria-hidden="true">⟷</i> Drag to spin
         </span>
         <span className="reticle-tag reticle-tag-br">
           {activeChapter?.stats[0]?.value ?? ''}

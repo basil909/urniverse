@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
+import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 
 import {
@@ -41,6 +42,102 @@ const EARTH_SPECULAR = new THREE.Color('#2b4766')
 const MOON_SPECULAR = new THREE.Color('#222222')
 
 const _scratchOrbitPos = new THREE.Vector3()
+
+/* ============================================================
+   DRAG TO SPIN
+   One shared state: the window pointer handler writes it, the
+   focused planet reads it. `pending` is rotation from the drag in
+   progress; `velocity` keeps it turning (with friction) on release.
+============================================================ */
+
+// `hold` freezes the planet while a point of interest is hovered or open
+type SpinState = {
+  pending: number
+  velocity: number
+  dragging: boolean
+  hold: boolean
+}
+
+/* Planet chapters are 2-9; text (and interaction) lives in this window */
+const FOCUS_IN = 0.16
+const FOCUS_OUT = 0.93
+
+function focusedPlanetIndex(progress: number) {
+  const chapter = Math.floor(progress)
+  const local = progress - chapter
+  if (chapter < 2 || chapter > 9) return -1
+  return local >= FOCUS_IN && local < FOCUS_OUT ? chapter - 2 : -1
+}
+
+/* ============================================================
+   POINTS OF INTEREST
+   Positions checked against the texture maps (lon -180..180, east +).
+============================================================ */
+
+type Hotspot = { name: string; fact: string; lat: number; lon: number }
+
+const HOTSPOTS: Record<number, Hotspot[]> = {
+  2: [
+    {
+      name: 'Himalayas',
+      fact: 'Home of Mount Everest, 8,849 m above sea level: the highest point on Earth.',
+      lat: 28.0,
+      lon: 86.9,
+    },
+    {
+      name: 'Sahara',
+      fact: 'The largest hot desert on Earth, roughly the size of the United States.',
+      lat: 23.0,
+      lon: 13.0,
+    },
+    {
+      name: 'Amazon rainforest',
+      fact: 'The largest tropical rainforest, covering about 5.5 million km².',
+      lat: -3.5,
+      lon: -62.0,
+    },
+  ],
+  3: [
+    {
+      name: 'Olympus Mons',
+      fact: 'The tallest volcano in the Solar System: about 22 km high, roughly 2.5 times Everest.',
+      lat: 18.65,
+      lon: -133.8,
+    },
+    {
+      name: 'Valles Marineris',
+      fact: 'A canyon system more than 4,000 km long and up to 7 km deep.',
+      lat: -13.9,
+      lon: -59.2,
+    },
+  ],
+  4: [
+    {
+      name: 'Great Red Spot',
+      fact: 'A storm wider than Earth, observed continuously for at least 190 years.',
+      lat: -21.1,
+      lon: -46.4,
+    },
+  ],
+}
+
+/* Same mapping three.js SphereGeometry uses for its UVs */
+function latLonToSphere(lat: number, lon: number, radius: number) {
+  const u = (lon + 180) / 360
+  const v = (90 - lat) / 180
+  const phi = u * Math.PI * 2
+  const theta = v * Math.PI
+  return new THREE.Vector3(
+    -Math.cos(phi) * Math.sin(theta) * radius,
+    Math.cos(theta) * radius,
+    Math.sin(phi) * Math.sin(theta) * radius,
+  )
+}
+
+const _hotspotWorld = new THREE.Vector3()
+const _hotspotCenter = new THREE.Vector3()
+const _hotspotNormal = new THREE.Vector3()
+const _hotspotToCamera = new THREE.Vector3()
 
 /* Planet surface maps by orbit index (Earth uses EARTH_LOCAL_TEXTURES) */
 const PLANET_TEXTURES: (string | undefined)[] = [
@@ -340,6 +437,62 @@ export default function SolarSystem({
     return positions
   }, [])
 
+  const spin = useRef<SpinState>({
+    pending: 0,
+    velocity: 0,
+    dragging: false,
+    hold: false,
+  })
+
+  useEffect(() => {
+    let lastX = 0
+    let lastTime = 0
+
+    const blocked = (target: EventTarget | null) =>
+      target instanceof Element &&
+      !!target.closest(
+        'button, a, .story-content, .return-content, .intro-content, .rail, .hud-top, .hotspot',
+      )
+
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0 || blocked(event.target)) return
+      if (focusedPlanetIndex(progressRef.current ?? 0) < 0) return
+      spin.current.dragging = true
+      spin.current.velocity = 0
+      lastX = event.clientX
+      lastTime = event.timeStamp
+      document.documentElement.classList.add('is-spinning')
+    }
+
+    const onMove = (event: PointerEvent) => {
+      if (!spin.current.dragging) return
+      const dx = event.clientX - lastX
+      const dt = Math.max(1, event.timeStamp - lastTime) / 1000
+      const angle = dx * 0.008
+      spin.current.pending += angle
+      spin.current.velocity = angle / dt
+      lastX = event.clientX
+      lastTime = event.timeStamp
+    }
+
+    const onUp = () => {
+      if (!spin.current.dragging) return
+      spin.current.dragging = false
+      document.documentElement.classList.remove('is-spinning')
+    }
+
+    window.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      window.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [progressRef])
+
   /* Milky Way finale (chapter 11): the whole Solar System shrinks to
      nothing, so the galaxy's "You are here" marker stands for it */
   const system = useRef<THREE.Group>(null)
@@ -368,6 +521,7 @@ export default function SolarSystem({
           planet={planet}
           index={index}
           progressRef={progressRef}
+          spin={spin}
         />
       ))}
 
@@ -525,7 +679,9 @@ function Planet({
   planet,
   index,
   progressRef,
+  spin,
 }: {
+  spin: RefObject<SpinState>
   planet: (typeof PLANETS)[number]
   index: number
   progressRef: RefObject<number>
@@ -806,7 +962,25 @@ function Planet({
       body.current.material.uniforms.uTime.value = time
     }
 
-    body.current.rotation.y += delta * rotationSpeed
+    // drag to spin: only the planet in focus responds
+    const spinState = spin.current
+    const isFocused = focusedPlanetIndex(safeProgress) === index
+    const held = isFocused && !!spinState?.hold
+
+    if (!held) {
+      body.current.rotation.y += delta * rotationSpeed
+    } else if (spinState) {
+      spinState.velocity = 0
+    }
+
+    if (spinState && isFocused) {
+      body.current.rotation.y += spinState.pending
+      spinState.pending = 0
+      if (!spinState.dragging) {
+        body.current.rotation.y += spinState.velocity * delta
+        spinState.velocity *= Math.exp(-delta * 2.2)
+      }
+    }
   })
 
   return (
@@ -819,6 +993,14 @@ function Planet({
       <group ref={orbit}>
         <group rotation={[0, 0, axialTilt]}>
           <mesh ref={body} scale={visualRadius}>
+            {HOTSPOTS[index] && (
+              <Hotspots
+                index={index}
+                spots={HOTSPOTS[index]}
+                progressRef={progressRef}
+                spin={spin}
+              />
+            )}
             <sphereGeometry args={[1, 96, 96]} />
 
             {planet.name === 'Earth' && earthMap ? (
@@ -1083,6 +1265,120 @@ function SaturnRing({ radius }: { radius: number }) {
         />
       )}
     </mesh>
+  )
+}
+
+/* Clickable markers pinned to the planet surface. They rotate with the
+   body, fade out as they turn away from the camera, and only appear
+   while the planet is in focus. */
+function Hotspots({
+  index,
+  spots,
+  progressRef,
+  spin,
+}: {
+  index: number
+  spots: Hotspot[]
+  progressRef: RefObject<number>
+  spin: RefObject<SpinState>
+}) {
+  const hovered = useRef(false)
+  const wasFocused = useRef(false)
+  const group = useRef<THREE.Group>(null)
+  const items = useRef<(HTMLDivElement | null)[]>([])
+  const camera = useThree((state) => state.camera)
+  const [open, setOpen] = useState<number | null>(null)
+  const openRef = useRef<number | null>(null)
+  openRef.current = open
+
+  const anchors = useMemo(
+    () => spots.map((spot) => latLonToSphere(spot.lat, spot.lon, 1.02)),
+    [spots],
+  )
+
+  useFrame(() => {
+    if (!group.current) return
+    const focused = focusedPlanetIndex(progressRef.current ?? 0) === index
+
+    if (!focused && openRef.current !== null) {
+      openRef.current = null
+      setOpen(null)
+    }
+    // only the focused planet's markers own the pause flag
+    if (spin.current) {
+      if (focused) {
+        spin.current.hold = hovered.current || openRef.current !== null
+      } else if (wasFocused.current) {
+        spin.current.hold = false
+        hovered.current = false
+      }
+    }
+    wasFocused.current = focused
+
+    group.current.getWorldPosition(_hotspotCenter)
+
+    anchors.forEach((anchor, i) => {
+      const element = items.current[i]
+      if (!element) return
+
+      _hotspotWorld.copy(anchor).applyMatrix4(group.current!.matrixWorld)
+      _hotspotNormal.copy(_hotspotWorld).sub(_hotspotCenter).normalize()
+      _hotspotToCamera.copy(camera.position).sub(_hotspotWorld).normalize()
+      const facing = _hotspotNormal.dot(_hotspotToCamera)
+
+      const opacity = focused
+        ? THREE.MathUtils.smoothstep(facing, 0.12, 0.4)
+        : 0
+      element.style.opacity = opacity.toFixed(3)
+
+      const usable = opacity > 0.5
+      const button = element.firstElementChild as HTMLButtonElement | null
+      if (button && button.tabIndex !== (usable ? 0 : -1)) {
+        button.tabIndex = usable ? 0 : -1
+      }
+      element.style.pointerEvents = usable ? 'auto' : 'none'
+    })
+  })
+
+  return (
+    <group ref={group}>
+      {spots.map((spot, i) => (
+        <Html
+          key={spot.name}
+          position={anchors[i]}
+          center
+          zIndexRange={[6, 0]}
+          style={{ pointerEvents: 'none' }}
+        >
+          <div
+            ref={(element) => {
+              items.current[i] = element
+            }}
+            className={`hotspot ${open === i ? 'is-open' : ''}`}
+            style={{ opacity: 0 }}
+            onPointerEnter={() => {
+              hovered.current = true
+            }}
+            onPointerLeave={() => {
+              hovered.current = false
+            }}
+          >
+            <button
+              type="button"
+              className="hotspot-dot"
+              tabIndex={-1}
+              aria-label={`${spot.name}: ${spot.fact}`}
+              aria-expanded={open === i}
+              onClick={() => setOpen(open === i ? null : i)}
+            />
+            <div className="hotspot-card" role="note">
+              <b>{spot.name}</b>
+              <span>{spot.fact}</span>
+            </div>
+          </div>
+        </Html>
+      ))}
+    </group>
   )
 }
 
