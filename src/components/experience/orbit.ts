@@ -28,13 +28,8 @@ export function getPlanetVisualRadius(index: number) {
 
   if (!planet) return EARTH_RENDER_RADIUS
 
-  let renderRadius =
-    (planet.radiusKm / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
-
-  if (planet.name === 'Jupiter') renderRadius *= 0.64
-  if (planet.name === 'Saturn') renderRadius *= 0.66
-
-  return renderRadius
+  // true relative sizes (distances are compressed, sizes are not)
+  return (planet.radiusKm / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
 }
 
 export const PLANETS: readonly PlanetDefinition[] = [

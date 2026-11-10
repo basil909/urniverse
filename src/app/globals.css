@@ -1306,3 +1306,20 @@ html.is-spinning * {
 .inline-stat strong {
   font-variant-numeric: tabular-nums;
 }
+
+/* the simulated date, top right */
+.sim-date {
+  position: absolute;
+  top: 24px;
+  right: var(--pad);
+  font: 400 var(--size-label) / 1 var(--sans);
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  pointer-events: auto;
+}
+.sim-date-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  opacity: 0.7;
+  margin-right: 0.35em;
+}

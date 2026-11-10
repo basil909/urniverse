@@ -190,7 +190,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Day', value: '9 h 56 min' },
       { label: 'Year', value: '11.9 Earth years' },
       { label: 'Cloud tops', value: 'About −110 °C' },
-      { label: 'Moons', value: '95 known' },
+      { label: 'Moons', value: '95+ known' },
       { label: 'Axial tilt', value: '3.1°' },
     ],
     sections: [
@@ -288,7 +288,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Day', value: '16 h 6 min' },
       { label: 'Year', value: '165 Earth years' },
       { label: 'Cloud tops', value: 'About −200 °C' },
-      { label: 'Moons', value: '16 known' },
+      { label: 'Moons', value: '16 known (2024)' },
       { label: 'Axial tilt', value: '28.3°' },
     ],
     sections: [

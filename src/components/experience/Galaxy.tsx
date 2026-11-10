@@ -21,6 +21,11 @@ const DUST_COUNT = 4000
 const CLUSTER_COUNT = 80
 
 const ARM_COUNT = 4
+
+/* the central bar's direction in the disc */
+const BAR_ANGLE = 0.45
+const BAR_COS = Math.cos(BAR_ANGLE)
+const BAR_SIN = Math.sin(BAR_ANGLE)
 export const GALAXY_RADIUS = 22
 
 // Far backdrop, upper right of the intro view, so it never sits behind the Sun
@@ -217,7 +222,13 @@ const glowFragmentShader = /* glsl */ `
     float mottle = 0.7 + 0.6 * fbm(vPos * 0.45 + 3.0);
     float edge = 1.0 - smoothstep(uRadius * 0.7, uRadius * 1.05, r);
 
-    vec3 core = vec3(1.0, 0.82, 0.58) * (exp(-r / 1.6) * 1.25 + exp(-r / 4.5) * 0.35);
+    vec3 core = vec3(1.0, 0.82, 0.58) * (exp(-r / 1.6) * 1.0 + exp(-r / 4.5) * 0.3);
+    /* the central bar (disc x = vPos.x, disc z = -vPos.y) */
+    vec2 inPlane = vec2(vPos.x, -vPos.y);
+    vec2 axis = vec2(${BAR_COS.toFixed(4)}, ${BAR_SIN.toFixed(4)});
+    float along = dot(inPlane, axis);
+    float across = dot(inPlane, vec2(-axis.y, axis.x));
+    core += vec3(1.0, 0.84, 0.62) * exp(-(along * along) / 14.0 - (across * across) / 1.1) * 0.55;
     vec3 disc = vec3(0.62, 0.72, 1.0) * exp(-r / 9.0) * (0.12 + 0.55 * arms) * mottle;
     vec3 light = (core + disc) * (1.0 - lanes * 0.75) * edge;
 
@@ -524,6 +535,17 @@ export default function Galaxy({
       positions[i3 + 2] =
         Math.sin(angle) *
         radius
+
+      /* the Milky Way is a barred spiral: the bulge is drawn out into a
+         bar about 3 times longer than it is wide */
+      if (population < 0.16) {
+        const along = positions[i3] * BAR_COS + positions[i3 + 2] * BAR_SIN
+        const across = -positions[i3] * BAR_SIN + positions[i3 + 2] * BAR_COS
+        const a = along * 1.55
+        const b = across * 0.55
+        positions[i3] = a * BAR_COS - b * BAR_SIN
+        positions[i3 + 2] = a * BAR_SIN + b * BAR_COS
+      }
 
       /* ------------------------------------------------------
          STELLAR POPULATION COLOUR

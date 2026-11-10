@@ -26,6 +26,23 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - **Accessible.** All chapter text is available to screen readers, there is keyboard navigation, and the OS "reduce motion" setting turns off smooth scrolling and camera drift.
 - **Fast first load.** The first load needs only the 2K WebP textures (about 2 MB), self-hosted fonts and a loading screen that tracks real progress.
 
+## What is real, and what is simplified
+
+**Real**
+- Planet positions and orbits for the simulated date (JPL orbital elements), their spin axes and tilts (IAU), relative rotation rates and directions.
+- Planet sizes relative to each other (Jupiter is 11 Earths wide, Saturn 9).
+- Earth's orientation: it is turned by sidereal time, so the day and night sides (and the city lights) match the simulated moment.
+- The Moon's position and phase (a short lunar series, good to about a degree), with its near side always facing Earth.
+- Jupiter's four large moons at their real orbital longitudes (Lieske's E5 mean longitudes); every moon at its real period on the same clock.
+- The bright stars (positions and colours), the Milky Way's angle across the sky, Neptune in true colour.
+- Figures and facts in the text and panels (NASA fact sheets; dated where they change).
+
+**Simplified**
+- Distances are compressed so everything fits on screen; the Sun is drawn much smaller than its true 109 Earth-widths; moons are enlarged and drawn closer to their planets. The text gives the true scale model.
+- The simulated date starts at today and runs forward as you travel (fast in the wide views, slowly in close-ups); it is shown at the top right.
+- The comet is illustrative, not a real comet. Saturn's, Mars's and Uranus's moons have real periods but not real positions. The Milky Way model is a stylised barred spiral.
+- Weather details (Jupiter's flowing bands, Neptune's dark spot, Mars's dust storm) are artistic, based on what spacecraft have seen.
+
 ## Tech stack
 
 | | |

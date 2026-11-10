@@ -8,7 +8,8 @@ import { orbitalDisplayDistance, solveKepler } from './orbit'
 import { simClock } from './simClock'
 import { lens } from './lens'
 
-/* A comet on a long, eccentric orbit, timed to swing past the Sun about
+/* An illustrative comet (not a real one): a long, eccentric orbit, timed
+   to swing past the Sun about
    half a minute into the opening view (time runs at days per second
    there). Two tails, as on real comets:
    - the ion tail: blue, straight, pointing directly away from the Sun

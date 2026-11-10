@@ -32,7 +32,7 @@ export const INTERIORS: Record<number, Layer[]> = {
   ],
   // Jupiter
   4: [
-    { to: 0.15, color: '#f2c27a', name: 'Dense, fuzzy core', hot: true },
+    { to: 0.3, color: '#f2c27a', name: 'Dilute core of rock and ice, blended with hydrogen', hot: true },
     { to: 0.8, color: '#8fa3c4', name: 'Metallic hydrogen' },
     { to: 1, color: '#dcc7a2', name: 'Hydrogen and helium' },
   ],

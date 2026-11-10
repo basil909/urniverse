@@ -14,6 +14,7 @@ import UniverseCanvas from './experience/UniverseCanvas'
 import Loader from './ui/Loader'
 import DetailPanel from './ui/DetailPanel'
 import CountUp from './ui/CountUp'
+import SimDate from './ui/SimDate'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
@@ -92,7 +93,7 @@ const JOURNEY: Chapter[] = [
 
     title: 'A world of extremes.',
 
-    description: 'Mercury is the smallest planet and the closest to the Sun. With almost no substantial atmosphere to redistribute heat, its surface swings between extreme temperatures. Its ancient surface is covered with impact craters, preserving a record of the early Solar System.',
+    description: 'Mercury is the smallest planet and the closest to the Sun. With almost no atmosphere to hold heat, its surface swings from about 430 °C by day to −180 °C at night. Its ancient surface is covered with impact craters, preserving a record of the early Solar System.',
 
     facts: [
 
@@ -242,13 +243,13 @@ const JOURNEY: Chapter[] = [
 
     eyebrow: '06 · JUPITER',
 
-    title: 'A planet that almost became a star.',
+    title: 'The giant that shapes the rest.',
 
-    description: 'Jupiter is the giant of the Solar System. Its mass is more than twice that of all the other planets combined. Deep inside, pressure turns hydrogen into exotic states of matter, while its atmosphere is sculpted by enormous storms and fast-moving jet streams.',
+    description: 'Jupiter is the giant of the Solar System, with more than twice the mass of all the other planets combined. Its gravity has shaped the orbits of asteroids and comets since the Solar System formed. Deep inside, pressure turns hydrogen into a liquid metal, while its atmosphere is sculpted by enormous storms and fast jet streams.',
 
     facts: [
 
-      'Jupiter is the largest planet in the Solar System.',
+      'Jupiter is the largest planet, but it would need about 80 times its mass to shine as a star.',
 
       'Its Great Red Spot is a long-lived storm larger than Earth.',
 
@@ -358,7 +359,7 @@ const JOURNEY: Chapter[] = [
 
     title: 'The dark, distant giant.',
 
-    description: 'Neptune is the farthest of the eight planets from the Sun. Despite receiving very little sunlight, its atmosphere is extraordinarily active, with some of the fastest winds measured on any planet. Its deep blue appearance comes from atmospheric chemistry rather than simply being a reflection of Earth’s sky.',
+    description: 'Neptune is the farthest of the eight planets from the Sun. Despite receiving very little sunlight, its atmosphere is extraordinarily active, with the fastest winds measured on any planet. In true colour it is a pale blue, only a little bluer than Uranus: the deep blue of famous Voyager images came from enhanced contrast.',
 
     facts: [
 
@@ -368,7 +369,7 @@ const JOURNEY: Chapter[] = [
 
       'Triton, Neptune’s largest moon, probably originated in the Kuiper Belt.',
 
-      'Neptune radiates more energy than it receives from the Sun.',
+      'Neptune radiates more than twice as much energy as it receives from the Sun.',
 
     ],
 
@@ -382,7 +383,7 @@ const JOURNEY: Chapter[] = [
 
     ],
 
-    accent: '#527ee8',
+    accent: '#79aee0',
 
   },
 
@@ -974,6 +975,8 @@ export default function Journey() {
           <span className="brand-name">You Are Here</span>
         </button>
 
+        {/* the simulated moment: time runs on as you travel */}
+        {section > 0 && <SimDate />}
       </header>
 
       {/* LEFT CHAPTER RAIL */}
@@ -1099,7 +1102,7 @@ export default function Journey() {
               </button>
               {today && (
                 <p className="hero-note">
-                  Planets shown where they are today, {today}
+                  Planets start where they are today, {today}, then time runs forward
                 </p>
               )}
             </motion.div>

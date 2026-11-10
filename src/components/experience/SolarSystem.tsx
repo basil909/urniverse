@@ -139,8 +139,59 @@ const MOON_LOCAL_TEXTURES = {
 
 const MOON_RENDER_RADIUS = 0.072
 const MOON_ORBIT_RADIUS = 1.28
-const MOON_ORBIT_INCLINATION = THREE.MathUtils.degToRad(5.145)
-const MOON_ORBIT_SPEED = 0.055
+/* The Moon's direction from Earth at a Julian Date: a short series for
+   its ecliptic longitude and latitude (good to about a degree), so it
+   sits where it really is, with its real phase. */
+const _moonEarth = new THREE.Vector3()
+
+/* Earth's real rotation: Greenwich sidereal time gives where the prime
+   meridian points (relative to the vernal equinox) at a Julian Date. The
+   angle is returned for Earth's own spin axis (its tilt group's y), so the
+   right side is in daylight for the simulated moment. */
+const _meridian = new THREE.Vector3()
+const _tiltInverse = new THREE.Quaternion()
+function earthSpinAngle(jd: number, tilt: THREE.Quaternion) {
+  const gmst = ((280.46061837 + 360.98564736629 * (jd - 2451545.0)) * Math.PI) / 180
+  const eps = 0.4090928
+  // prime meridian direction, equatorial -> ecliptic -> scene
+  const x = Math.cos(gmst)
+  const y = Math.sin(gmst)
+  _meridian.set(x, -y * Math.sin(eps), -y * Math.cos(eps))
+  _meridian.applyQuaternion(_tiltInverse.copy(tilt).invert())
+  // the map's longitude 0 sits on the body's local +x
+  return Math.atan2(-_meridian.z, _meridian.x)
+}
+
+/* a vector's angle about a tilted body's spin axis, in that body's frame */
+const _ref = new THREE.Vector3()
+function angleInFrame(direction: THREE.Vector3, tilt: THREE.Quaternion) {
+  _ref.copy(direction).applyQuaternion(_tiltInverse.copy(tilt).invert())
+  return Math.atan2(-_ref.z, _ref.x)
+}
+const VERNAL_EQUINOX = new THREE.Vector3(1, 0, 0) // ecliptic x in the scene
+function moonDirection(jd: number, out: THREE.Vector3) {
+  const d = jd - 2451545.0
+  const rad = Math.PI / 180
+  const L = 218.316 + 13.176396 * d // mean longitude
+  const M = (134.963 + 13.064993 * d) * rad // mean anomaly
+  const F = (93.272 + 13.22935 * d) * rad // argument of latitude
+  const D = (297.85 + 12.190749 * d) * rad // mean elongation from the Sun
+  const Ms = (357.529 + 0.98560028 * d) * rad // the Sun's mean anomaly
+  const lambda =
+    (L +
+      6.289 * Math.sin(M) +
+      1.274 * Math.sin(2 * D - M) +
+      0.658 * Math.sin(2 * D) -
+      0.186 * Math.sin(Ms)) *
+    rad
+  const beta = 5.128 * Math.sin(F) * rad
+  // ecliptic -> scene (x -> X, north -> Y, y -> -Z)
+  return out.set(
+    Math.cos(beta) * Math.cos(lambda),
+    Math.sin(beta),
+    -Math.cos(beta) * Math.sin(lambda),
+  )
+}
 
 
 const EARTH_SPECULAR = new THREE.Color('#2b4766')
@@ -178,7 +229,7 @@ const ATMOSPHERE_LOOK: Record<string, { color: string; dusk: string; intensity: 
   Jupiter: { color: '#e9d6b4', dusk: '#d9a878', intensity: 0.3, thickness: 0.4 },
   Saturn: { color: '#efdcb4', dusk: '#d8b07a', intensity: 0.28, thickness: 0.4 },
   Uranus: { color: '#a7e5e6', dusk: '#7fc4d6', intensity: 0.4, thickness: 0.5 },
-  Neptune: { color: '#5a8ee0', dusk: '#3f6cc4', intensity: 0.45, thickness: 0.5 },
+  Neptune: { color: '#8fc0e6', dusk: '#6a9cd0', intensity: 0.42, thickness: 0.5 },
 }
 
 /* atmosphere shell size in planet radii: thick hazes stand off the
@@ -729,7 +780,13 @@ void main() {
       float chevron = sin(x * 2.0 + abs(lat) * 3.5 + fbm(vec3(vUv * vec2(5.0, 9.0), uTime * 0.01)) * 2.5);
       surface *= 1.0 - 0.07 * smoothstep(0.2, 1.0, chevron) * cos(lat);
     }
-    if (uPlanet == 7) surface = neptuneWeather(surface, vUv);
+    if (uPlanet == 7) {
+      /* true colour (Irwin et al. 2024): the familiar deep blue came from
+         contrast-enhanced Voyager images; the planet is a pale azure */
+      float lum = dot(surface, vec3(0.299, 0.587, 0.114));
+      surface = mix(surface, vec3(0.62, 0.8, 0.9) * (0.55 + lum * 0.8), 0.7);
+      surface = neptuneWeather(surface, vUv);
+    }
     else if (uPlanet == 6) surface = uranusWeather(surface, vUv);
     else if (uPlanet == 3) surface = marsDust(surface, vUv, p);
     else if (uPlanet == 5) surface = saturnPole(surface, vUv);
@@ -1264,6 +1321,9 @@ function Planet({
 
   // real spin axis (IAU pole), so tilt, seasons and ring angle are true
   const poleQuaternion = useMemo(() => getPlanetPoleQuaternion(index), [index])
+  // Earth: rotation added by dragging, on top of its true orientation
+  const userSpin = useRef(0)
+  const lastTrueSpin = useRef(0)
   const planetType =
     planet.type === 'earth'
       ? 1
@@ -1649,20 +1709,32 @@ function Planet({
       earthNight.uTime.value = time
     }
 
+    // Earth turns with the simulated clock to its real orientation; the
+    // others spin at their real relative rates. Dragging adds an offset.
+    const trueSpin = planet.name === 'Earth' ? earthSpinAngle(simClock.jd, poleQuaternion) : null
+    if (trueSpin !== null && held) {
+      // a hovered marker holds Earth still: absorb the clock's turn
+      userSpin.current -= trueSpin - lastTrueSpin.current
+    }
+    if (trueSpin !== null) lastTrueSpin.current = trueSpin
+
     if (!held) {
-      body.current.rotation.y += delta * rotationSpeed
+      if (trueSpin === null) body.current.rotation.y += delta * rotationSpeed
     } else if (spinState) {
       spinState.velocity = 0
     }
 
     if (spinState && isFocused) {
-      body.current.rotation.y += spinState.pending
+      userSpin.current += spinState.pending
+      if (trueSpin === null) body.current.rotation.y += spinState.pending
       spinState.pending = 0
       if (!spinState.dragging) {
-        body.current.rotation.y += spinState.velocity * delta
+        userSpin.current += spinState.velocity * delta
+        if (trueSpin === null) body.current.rotation.y += spinState.velocity * delta
         spinState.velocity *= Math.exp(-delta * 2.2)
       }
     }
+    if (trueSpin !== null) body.current.rotation.y = trueSpin + userSpin.current
   })
 
   return (
@@ -1748,6 +1820,7 @@ function Planet({
               planetRadius={visualRadius}
               shadowUniforms={uniforms}
               sunlight={sunlight}
+              tilt={poleQuaternion}
             />
           )}
         </group>
@@ -1898,25 +1971,24 @@ function Moon({ sharp }: { sharp: boolean }) {
   useFrame((_, delta) => {
     const time = (timeRef.current += delta)
 
-    if (orbit.current) {
-      orbit.current.rotation.y = time * MOON_ORBIT_SPEED
-    }
-
-    if (body.current) {
-      body.current.rotation.y += delta * 0.004
+    void time
+    const moon = body.current
+    if (moon) {
+      // where the Moon really is, seen from Earth (distance compressed)
+      moonDirection(simClock.jd, moon.position).multiplyScalar(MOON_ORBIT_RADIUS)
+      // tidally locked: the near side (longitude 0) always faces Earth
+      moon.parent?.getWorldPosition(_moonEarth)
+      moon.lookAt(_moonEarth)
+      moon.rotateY(-Math.PI / 2)
     }
   })
 
   if (!map) return null
 
   return (
-    <group rotation={[MOON_ORBIT_INCLINATION, 0, 0]}>
+    <group>
       <group ref={orbit}>
-        <mesh
-          ref={body}
-          position={[MOON_ORBIT_RADIUS, 0, 0]}
-          scale={MOON_RENDER_RADIUS}
-        >
+        <mesh ref={body} scale={MOON_RENDER_RADIUS}>
           <sphereGeometry args={[1, 96, 96]} />
           <meshPhongMaterial
             map={sharpMap ?? map}
@@ -1952,6 +2024,9 @@ type MoonSpec = {
   haze?: string
   /* surface map (Galileo / Voyager mosaics, USGS, public domain) */
   map?: string
+  /* mean longitude at J2000 (degrees) and its daily motion: the moon's
+     real position (Galilean moons, from Lieske's E5 theory) */
+  longitude?: [number, number]
 }
 
 type MoonSystemSpec = {
@@ -1971,10 +2046,10 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
   Jupiter: {
     baseSeconds: 30,
     moons: [
-      { name: 'Io', map: '/textures/moons/io.webp', color: '#d8bb63', radius: 0.065, distance: 1.85, periodDays: 1.769, phase: 0.3 },
-      { name: 'Europa', map: '/textures/moons/europa.webp', color: '#cdbfa3', radius: 0.056, distance: 2.3, periodDays: 3.551, phase: 2.2 },
-      { name: 'Ganymede', map: '/textures/moons/ganymede.webp', color: '#9c8f80', radius: 0.094, distance: 2.95, periodDays: 7.155, phase: 4.1 },
-      { name: 'Callisto', map: '/textures/moons/callisto.webp', color: '#6e6359', radius: 0.086, distance: 3.7, periodDays: 16.689, phase: 5.5 },
+      { name: 'Io', longitude: [106.07719, 203.48895579], map: '/textures/moons/io.webp', color: '#d8bb63', radius: 0.065, distance: 1.85, periodDays: 1.769, phase: 0.3 },
+      { name: 'Europa', longitude: [175.73161, 101.374724735], map: '/textures/moons/europa.webp', color: '#cdbfa3', radius: 0.056, distance: 2.3, periodDays: 3.551, phase: 2.2 },
+      { name: 'Ganymede', longitude: [120.55883, 50.317609207], map: '/textures/moons/ganymede.webp', color: '#9c8f80', radius: 0.094, distance: 2.95, periodDays: 7.155, phase: 4.1 },
+      { name: 'Callisto', longitude: [84.44459, 21.571071177], map: '/textures/moons/callisto.webp', color: '#6e6359', radius: 0.086, distance: 3.7, periodDays: 16.689, phase: 5.5 },
     ],
   },
   Saturn: {
@@ -1998,11 +2073,14 @@ function MoonSystem({
   planetRadius,
   shadowUniforms,
   sunlight,
+  tilt,
 }: {
   system: MoonSystemSpec
   planetRadius: number
   shadowUniforms?: MoonShadowUniforms
   sunlight?: { strength: number; tint: THREE.Color }
+  /* the planet's spin-axis orientation (its equatorial frame) */
+  tilt?: THREE.Quaternion
 }) {
   const moonColors = useMemo(
     () =>
@@ -2046,15 +2124,19 @@ function MoonSystem({
     [system, sunlight],
   )
   const time = useRef(0)
-  const referencePeriod = system.moons[0]?.periodDays ?? 1
 
   useFrame((_, delta) => {
     time.current += delta
+    // on the shared simulated clock, at their real periods; the Galilean
+    // moons at their real longitudes (measured from the vernal equinox)
+    const days = simClock.jd - 2451545.0
+    const equinox = tilt ? angleInFrame(VERNAL_EQUINOX, tilt) : 0
     system.moons.forEach((moon, i) => {
       const arm = arms.current[i]
       if (!arm) return
-      const seconds = system.baseSeconds * (moon.periodDays / referencePeriod)
-      arm.rotation.y = moon.phase + (time.current / seconds) * Math.PI * 2
+      arm.rotation.y = moon.longitude
+        ? equinox + ((moon.longitude[0] + moon.longitude[1] * days) * Math.PI) / 180
+        : moon.phase + (days / moon.periodDays) * Math.PI * 2
     })
 
     // tell the planet where its moons are, so they can cast shadows on it
