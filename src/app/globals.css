@@ -157,6 +157,24 @@ a:focus-visible {
   );
 }
 
+/* lens glow: when the Sun is just outside the frame, a soft warm light
+   spills in from that edge (position and strength set per frame) */
+.sun-glare {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0;
+  background: radial-gradient(
+    circle 70vmax at var(--gx, 50%) var(--gy, 50%),
+    rgba(255, 205, 150, 0.5),
+    rgba(255, 170, 110, 0.16) 32%,
+    rgba(255, 150, 90, 0.04) 55%,
+    transparent 75%
+  );
+}
+
 /* colour grade: a faint soft-light wash, warm near the Sun, cool far out */
 .universe-grade {
   position: fixed;

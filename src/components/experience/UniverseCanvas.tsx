@@ -11,7 +11,7 @@ import {
 } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { PerformanceMonitor, useProgress } from '@react-three/drei'
-import { memo, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { memo, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import * as THREE from 'three'
 
 import SolarSystem from './SolarSystem'
@@ -23,6 +23,7 @@ import Galaxy, {
   GALAXY_TILT,
 } from './Galaxy'
 import Starfield from './Starfield'
+import { lens } from './lens'
 import {
   SYSTEM_OFFSET,
   getPlanetPosition,
@@ -1175,7 +1176,76 @@ function MilkyWaySky({
   )
 }
 
-function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
+/* ============================================================
+   LENS
+   Close-ups ease the background stars slightly out of focus, and when the
+   Sun sits just outside the frame a soft warm glow spills in from that
+   edge, as it does in a real lens. The glow is a screen-blended layer
+   over the canvas (see .sun-glare); this only moves and fades it.
+============================================================ */
+
+const _sunNdc = new THREE.Vector3()
+const _forward = new THREE.Vector3()
+const _sunDir = new THREE.Vector3()
+
+function Lens({
+  progressRef,
+  glare,
+}: {
+  progressRef: MutableRefObject<number>
+  glare: RefObject<HTMLDivElement | null>
+}) {
+  const camera = useThree((state) => state.camera)
+  const level = useRef(0)
+
+  useFrame((_, delta) => {
+    const progress = progressRef.current ?? 0
+    const chapter = Math.floor(progress)
+    const local = progress - chapter
+
+    // close-up: settled on a planet (its text is showing)
+    const settled = chapter >= 2 && chapter <= 9 && local >= 0.16 && local < 0.93
+    lens.closeUp += ((settled ? 1 : 0) - lens.closeUp) * (1 - Math.exp(-delta * 1.4))
+
+    const element = glare.current
+    if (!element) return
+
+    camera.getWorldDirection(_forward)
+    _sunDir.copy(SYSTEM_OFFSET).sub(camera.position)
+    const distance = _sunDir.length()
+    const facing = _forward.dot(_sunDir.normalize())
+    _sunNdc.copy(SYSTEM_OFFSET).project(camera)
+
+    let target = 0
+    // not in the Milky Way finale, where the Solar System is a point
+    if (facing > 0 && progress < 10.95) {
+      const outside = Math.max(Math.abs(_sunNdc.x), Math.abs(_sunNdc.y)) - 1
+      target =
+        outside < 0
+          ? 0.3 // in view: the bloom already does most of the work
+          : Math.max(0, 1 - outside / 1.3)
+      // fainter the further out we are
+      target *= THREE.MathUtils.clamp(14 / distance, 0.3, 1)
+    }
+    level.current += (target - level.current) * (1 - Math.exp(-delta * 2.5))
+
+    const x = THREE.MathUtils.clamp(_sunNdc.x, -2.5, 2.5)
+    const y = THREE.MathUtils.clamp(_sunNdc.y, -2.5, 2.5)
+    element.style.opacity = (level.current * 0.55).toFixed(3)
+    element.style.setProperty('--gx', `${((x * 0.5 + 0.5) * 100).toFixed(2)}%`)
+    element.style.setProperty('--gy', `${((0.5 - y * 0.5) * 100).toFixed(2)}%`)
+  })
+
+  return null
+}
+
+function Scene({
+  progressRef,
+  glare,
+}: {
+  progressRef: MutableRefObject<number>
+  glare: RefObject<HTMLDivElement | null>
+}) {
 
   return (
 
@@ -1183,6 +1253,8 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
       {/* first, so the date is advanced before planets and camera read it */}
       <Clock progressRef={progressRef} />
+
+      <Lens progressRef={progressRef} glare={glare} />
 
       <MilkyWaySky progressRef={progressRef} />
 
@@ -1285,9 +1357,10 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
   const [dpr, setDpr] = useState(() =>
     Math.min(1.5, typeof window === 'undefined' ? 1 : window.devicePixelRatio),
   )
+  const glare = useRef<HTMLDivElement>(null)
 
   return (
-
+    <>
     <Canvas
 
       camera={{ position: [0, 0, 8], fov: 42, near: 0.08, far: 2000 }}
@@ -1330,9 +1403,11 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
 
       <PerformanceMonitor onDecline={() => setDpr((current) => Math.min(current, 1))} />
 
-      <Scene progressRef={progressRef} />
+      <Scene progressRef={progressRef} glare={glare} />
 
     </Canvas>
+    <div ref={glare} className="sun-glare" aria-hidden="true" />
+    </>
 
   )
 

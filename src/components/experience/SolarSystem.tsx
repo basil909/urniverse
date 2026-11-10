@@ -17,6 +17,7 @@ import {
   SYSTEM_OFFSET,
 } from './orbit'
 import { simClock } from './simClock'
+import Belts from './Belts'
 import {
   SHARP_EARTH_MAPS,
   SHARP_PLANET_MAPS,
@@ -268,10 +269,14 @@ void main() {
   float mu = clamp(dot(n, viewDir), 0.0, 1.0);
   vec3 p = normalize(vLocalPosition);
 
-  /* granulation: a fine, slowly churning cell pattern */
-  float cells = 1.0 - abs(noise(p * 42.0 + vec3(0.0, uTime * 0.08, uTime * 0.05)) * 2.0 - 1.0);
-  cells = pow(cells, 2.6);
-  float churn = fbm(p * 2.4 + vec3(uTime * 0.012, 0.0, 0.0));
+  /* granulation: two scales of slowly churning convection cells (fine
+     granules inside a larger supergranule network) */
+  float cells = 1.0 - abs(noise(p * 74.0 + vec3(0.0, uTime * 0.03, uTime * 0.02)) * 2.0 - 1.0);
+  float fine = 1.0 - abs(noise(p * 150.0 - vec3(uTime * 0.025, 0.0, uTime * 0.02)) * 2.0 - 1.0);
+  cells = pow(cells, 2.6) * 0.7 + pow(fine, 3.0) * 0.3;
+  float network = 1.0 - abs(noise(p * 16.0 + vec3(uTime * 0.006)) * 2.0 - 1.0);
+  cells *= 0.82 + 0.18 * smoothstep(0.3, 0.9, network);
+  float churn = fbm(p * 2.4 + vec3(uTime * 0.006, 0.0, 0.0));
 
   /* faculae (bright active regions) and rare, small sunspots */
   float faculae = smoothstep(0.6, 0.8, fbm(p * 5.5 - vec3(0.0, uTime * 0.01, 0.0)));
@@ -601,26 +606,6 @@ export default function SolarSystem({
 }: {
   progressRef: RefObject<number>
 }) {
-  const asteroidPositions = useMemo(() => {
-    const count = 1800
-    const positions = new Float32Array(count * 3)
-    const inner = orbitalDisplayDistance(2.1)
-    const outer = orbitalDisplayDistance(3.3)
-
-    for (let i = 0; i < count; i += 1) {
-      const angle = seededRandom(i * 2.17) * Math.PI * 2
-      const radius =
-        inner + seededRandom(i * 3.71) * (outer - inner)
-      const height = (seededRandom(i * 5.17) - 0.5) * 0.18
-
-      positions[i * 3] = Math.cos(angle) * radius
-      positions[i * 3 + 1] = height
-      positions[i * 3 + 2] = Math.sin(angle) * radius
-    }
-
-    return positions
-  }, [])
-
   const spin = useRef<SpinState>({
     pending: 0,
     velocity: 0,
@@ -715,23 +700,7 @@ export default function SolarSystem({
       ))}
 
       <group position={SYSTEM_OFFSET}>
-        <points>
-          <bufferGeometry>
-            <bufferAttribute
-              attach="attributes-position"
-              args={[asteroidPositions, 3]}
-            />
-          </bufferGeometry>
-          <pointsMaterial
-            color="#81786b"
-            size={0.010}
-            sizeAttenuation
-            transparent
-            opacity={0.42}
-            depthWrite={false}
-            fog={false}
-          />
-        </points>
+        <Belts />
       </group>
       </group>
     </group>
@@ -805,6 +774,48 @@ uniform float uTime;
 uniform float uOpacity;
 uniform float uHalf;
 varying vec2 vUv;
+
+float hash1(float n) { return fract(sin(n) * 43758.5453); }
+float noise2(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float a = hash1(i.x + i.y * 57.0), b = hash1(i.x + 1.0 + i.y * 57.0);
+  float c = hash1(i.x + (i.y + 1.0) * 57.0), d = hash1(i.x + 1.0 + (i.y + 1.0) * 57.0);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+/* Prominences: loops of glowing plasma standing on the limb. Each one
+   rises, lives for a minute or two and fades, and a new one appears
+   somewhere else. Shape: a thin, filamentary arch between two footpoints. */
+float prominences(float r, float a) {
+  float z = r - 1.0;
+  if (z < 0.0) return 0.0;
+  float total = 0.0;
+  for (int k = 0; k < 6; k++) {
+    float fk = float(k);
+    float life = uTime * 0.009 + hash1(fk * 7.13);
+    float cycle = floor(life);
+    float phase = fract(life);
+    float seed = fk * 13.7 + cycle * 3.1;
+    float at = hash1(seed) * 6.28318;
+    float halfWidth = mix(0.08, 0.2, hash1(seed + 1.0));
+    float height = mix(0.05, 0.17, hash1(seed + 2.0)) * (0.55 + 0.45 * phase);
+    float da = mod(a - at + 3.14159, 6.28318) - 3.14159;
+    vec2 q = vec2(da * r / halfWidth, z / height);
+    /* lean and wobble: no two loops alike, none a perfect arch */
+    q.x += q.y * (hash1(seed + 3.0) - 0.5) * 1.2;
+    q += (vec2(noise2(q * 2.3 + seed + uTime * 0.05), noise2(q * 2.3 - seed)) - 0.5) * 0.35;
+    float e = length(q);
+    float along = atan(q.y, q.x);
+    float threads = pow(noise2(vec2(along * 11.0 + seed, uTime * 0.1 + e * 6.0)), 1.6)
+      * (0.6 + 0.4 * noise2(vec2(along * 3.0 - seed, uTime * 0.04)));
+    float arch = 1.0 - smoothstep(0.0, 0.11, abs(e - 1.0));
+    float veil = (1.0 - smoothstep(0.5, 1.0, e)) * 0.1 * noise2(q * 5.0 + seed);
+    float alive = sin(phase * 3.14159);
+    total += (arch * threads * 1.6 + veil) * alive * smoothstep(0.0, 0.015, z);
+  }
+  return total;
+}
+
 void main() {
   vec2 c = vUv * 2.0 - 1.0;
   float r = length(c) * uHalf; // distance from the centre, in Sun radii
@@ -820,7 +831,10 @@ void main() {
   float glow = exp(-above * 3.4) * 0.55 + exp(-above * 1.0) * 0.16 * streamers;
   glow *= 1.0 - smoothstep(uHalf * 0.72, uHalf, r);
 
-  gl_FragColor = vec4(vec3(1.0, 0.68, 0.34) * glow * uOpacity, 1.0);
+  /* hydrogen-alpha red, as prominences look at the solar limb */
+  vec3 plasma = vec3(1.0, 0.3, 0.16) * prominences(r, a) * 1.5;
+
+  gl_FragColor = vec4((vec3(1.0, 0.68, 0.34) * glow + plasma) * uOpacity, 1.0);
 }`
 
 function Corona() {

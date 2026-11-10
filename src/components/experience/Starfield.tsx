@@ -4,6 +4,8 @@ import { useMemo, useRef, useEffect } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
+import { lens } from './lens'
+
 /* ============================================================
    STARFIELD
 
@@ -76,6 +78,7 @@ const STAR_VERTEX_SHADER = /* glsl */ `
   varying float vBrightness;
 
   uniform float uPixelRatio;
+  uniform float uSoften;
 
   void main() {
     vColor = aColor;
@@ -89,6 +92,9 @@ const STAR_VERTEX_SHADER = /* glsl */ `
     // Clamp minimum size so distant stars remain visible
     gl_PointSize = max(gl_PointSize, 0.5 * uPixelRatio);
 
+    // close-ups: background stars slightly out of focus (larger, softer, dimmer)
+    gl_PointSize *= 1.0 + uSoften * 0.9;
+
     gl_Position = projectionMatrix * mvPosition;
   }
 `
@@ -98,6 +104,7 @@ const STAR_FRAGMENT_SHADER = /* glsl */ `
   varying float vBrightness;
 
   uniform float uTime;
+  uniform float uSoften;
 
   void main() {
     // Circular point sprite with soft falloff
@@ -108,7 +115,7 @@ const STAR_FRAGMENT_SHADER = /* glsl */ `
 
     // Smooth circular alpha with a slightly brighter core
     float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
-    alpha = pow(alpha, 1.4);
+    alpha = pow(alpha, mix(1.4, 0.9, uSoften)) * mix(1.0, 0.42, uSoften);
 
     // Subtle per-star twinkling using screen position as phase offset
     // This is intentionally very gentle — barely perceptible
@@ -222,6 +229,7 @@ export default function Starfield() {
       uniforms: {
         uPixelRatio: { value: pixelRatio },
         uTime: { value: 0 },
+        uSoften: { value: 0 },
       },
       transparent: true,
       depthWrite: false,
@@ -250,6 +258,7 @@ export default function Starfield() {
 
     // Update twinkle time uniform
     material.uniforms.uTime.value = state.clock.elapsedTime
+    material.uniforms.uSoften.value = lens.closeUp
 
     // Stars should NOT visibly rotate like a skybox
     group.current.rotation.y += delta * 0.00035
