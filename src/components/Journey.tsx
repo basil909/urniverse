@@ -491,6 +491,25 @@ function scaleSentence(id: string, name: string) {
   }
 }
 
+/* Colour grade per section: warm and golden near the Sun, neutral at
+   Earth, cooling to deep blue in the outer system and beyond. Applied as a
+   faint soft-light wash over the whole scene. */
+const GRADE_BY_SECTION = [
+  '#c9a77a', // intro
+  '#ffb055', // Sun
+  '#ffa860', // Mercury
+  '#ffbf72', // Venus
+  '#9fb7d6', // Earth
+  '#e2a582', // Mars
+  '#d8b48a', // Jupiter
+  '#cdb894', // Saturn
+  '#86c3e0', // Uranus
+  '#6f8fe8', // Neptune
+  '#6a7fd8', // beyond
+  '#8b80ec', // Milky Way
+  '#a7a7c8', // return
+]
+
 /* Scroll model: intro (0), 10 chapters (1-10), return (11).
    Text for a section is shown only inside its window, so it never appears
    while the camera is still flying between planets. */
@@ -889,6 +908,11 @@ export default function Journey() {
 
       <div className="universe-vignette" />
       <div className="universe-aura" />
+      <div
+        className="universe-grade"
+        style={{ background: GRADE_BY_SECTION[section] ?? GRADE_BY_SECTION[0] }}
+        aria-hidden="true"
+      />
 
       {/* Shows briefly on each planet, then fades away on its own */}
       {canSpin && (

@@ -157,6 +157,16 @@ a:focus-visible {
   );
 }
 
+/* colour grade: a faint soft-light wash, warm near the Sun, cool far out */
+.universe-grade {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+  opacity: 0.22;
+}
+
 /* ============================================================
    SCROLL TRACK + PINNED STAGE
    ============================================================ */

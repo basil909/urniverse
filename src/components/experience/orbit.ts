@@ -353,3 +353,27 @@ export function getPlanetPoleQuaternion(index: number) {
   const axis = new THREE.Vector3(ex, ez, -ey).normalize()
   return new THREE.Quaternion().setFromUnitVectors(UP, axis)
 }
+
+/** Eccentric anomaly of the planet at a Julian Date (for drawing trails) */
+export function getPlanetEccentricAnomaly(index: number, jd: number) {
+  const orbit = orbitAt(index, jd)
+  return orbit ? solveKepler(orbit.meanAnomaly, orbit.e) : 0
+}
+
+/* Sunlight at the planet: dims gently with distance (a soft version of
+   the inverse-square law, so the outer planets stay visible) and shifts
+   from slightly warm near the Sun to cool far out. */
+const WARM_LIGHT = new THREE.Color(1.0, 0.93, 0.84)
+const COOL_LIGHT = new THREE.Color(0.84, 0.92, 1.08)
+
+export function getPlanetSunlight(index: number) {
+  const au = PLANETS[index]?.distanceAU ?? 1
+  const strength = THREE.MathUtils.clamp(Math.pow(1 / au, 0.3), 0.36, 1.25)
+  const t = THREE.MathUtils.clamp(
+    (Math.log(au) + 1) / (Math.log(30) + 1),
+    0,
+    1,
+  )
+  const tint = WARM_LIGHT.clone().lerp(COOL_LIGHT, t)
+  return { strength, tint }
+}

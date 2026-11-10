@@ -9,6 +9,8 @@ import {
   getPlanetOrbitEllipsePoint,
   getPlanetOrbitPosition,
   getPlanetPoleQuaternion,
+  getPlanetEccentricAnomaly,
+  getPlanetSunlight,
   orbitalDisplayDistance,
   getPlanetVisualRadius,
   PLANETS,
@@ -66,6 +68,39 @@ const EARTH_SPECULAR = new THREE.Color('#2b4766')
 const MOON_SPECULAR = new THREE.Color('#222222')
 
 const _scratchOrbitPos = new THREE.Vector3()
+const _trailPoint = new THREE.Vector3()
+
+/* orbit trails: how far behind each planet the arc reaches, and its detail */
+const TRAIL_SPAN = Math.PI * 0.6 // radians of eccentric anomaly (~108 degrees)
+const TRAIL_POINTS = 72
+
+const TRAIL_VERTEX = /* glsl */ `
+attribute float aFade;
+varying float vFade;
+void main() {
+  vFade = aFade;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+
+const TRAIL_FRAGMENT = /* glsl */ `
+uniform vec3 uColor;
+uniform float uOpacity;
+varying float vFade;
+void main() {
+  gl_FragColor = vec4(uColor, vFade * uOpacity);
+}`
+
+/* Atmosphere character per planet: day colour, dusk colour (near the
+   day/night line), strength and thickness (0 thin .. ~1.2 thick haze) */
+const ATMOSPHERE_LOOK: Record<string, { color: string; dusk: string; intensity: number; thickness: number }> = {
+  Venus: { color: '#f0d39a', dusk: '#e8a35c', intensity: 0.75, thickness: 1.1 },
+  Earth: { color: '#5aa9ff', dusk: '#ff9a5a', intensity: 0.85, thickness: 0.35 },
+  Mars: { color: '#e0a08c', dusk: '#c47762', intensity: 0.32, thickness: 0.1 },
+  Jupiter: { color: '#e9d6b4', dusk: '#d9a878', intensity: 0.3, thickness: 0.4 },
+  Saturn: { color: '#efdcb4', dusk: '#d8b07a', intensity: 0.28, thickness: 0.4 },
+  Uranus: { color: '#a7e5e6', dusk: '#7fc4d6', intensity: 0.4, thickness: 0.5 },
+  Neptune: { color: '#5a8ee0', dusk: '#3f6cc4', intensity: 0.45, thickness: 0.5 },
+}
 
 /* ============================================================
    DRAG TO SPIN
@@ -259,9 +294,28 @@ void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPosition = wp.x
 
 const ATMOSPHERE_FRAGMENT_SHADER = /* glsl */ `
 
-uniform vec3 uColor; uniform float uIntensity; varying vec3 vNormal; varying vec3 vWorldPosition;
+uniform vec3 uColor; uniform vec3 uDusk; uniform float uIntensity; uniform float uThickness;
+uniform vec3 uSunPosition; uniform float uLight;
+varying vec3 vNormal; varying vec3 vWorldPosition;
 
-void main() { vec3 vd = normalize(cameraPosition - vWorldPosition); float f = 1.0 - max(dot(normalize(vNormal), vd), 0.0); f = pow(f, 3.2); float edge = smoothstep(0.08, 0.92, f); vec3 c = uColor * edge * uIntensity; gl_FragColor = vec4(c, edge * uIntensity); }`
+void main() {
+  vec3 n = normalize(vNormal);
+  vec3 vd = normalize(cameraPosition - vWorldPosition);
+  vec3 toSun = normalize(uSunPosition - vWorldPosition);
+
+  /* a thin shell seen edge-on glows; uThickness widens it (Venus, Titan) */
+  float rim = 1.0 - max(dot(n, vd), 0.0);
+  float edge = smoothstep(0.05, 0.95, pow(rim, 3.2 - uThickness));
+
+  /* only where sunlight reaches, with a warm tint near the day/night line */
+  float ndl = dot(n, toSun);
+  float day = smoothstep(-0.28, 0.3, ndl);
+  float dusk = 1.0 - smoothstep(0.0, 0.42, abs(ndl + 0.04));
+  vec3 color = mix(uColor, uDusk, dusk * 0.8);
+
+  float a = edge * day * uIntensity * uLight;
+  gl_FragColor = vec4(color * a, a);
+}`
 
 
 
@@ -279,6 +333,7 @@ uniform float uTime; uniform int uType; uniform int uPlanet; uniform vec3 uBaseC
 
 /* shadows (all in world space) */
 uniform vec3 uMoonPos[4]; uniform float uMoonRadius[4]; uniform int uMoonCount;
+uniform float uLight; uniform vec3 uLightTint; /* sunlight strength and colour at this distance */
 uniform float uHasRings; uniform sampler2D uRingMap; uniform vec3 uRingNormal; uniform vec3 uPlanetCenter; uniform float uRingInner; uniform float uRingOuter;
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
@@ -458,7 +513,7 @@ void main() {
   }
 
   float rim = pow(1.0 - facing, 3.5);
-  vec3 color = surface * (0.035 + light * shadow * 0.965) * limb;
+  vec3 color = surface * (vec3(0.035) + light * shadow * 0.965 * uLight * uLightTint) * limb;
   color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
 
   gl_FragColor = vec4(max(color, vec3(0.003)), 1.0);
@@ -759,6 +814,9 @@ function Planet({
   const { gl } = useThree()
 
   const visualRadius = getPlanetVisualRadius(index)
+  // sunlight here: dimmer and cooler with distance from the Sun
+  const sunlight = useMemo(() => getPlanetSunlight(index), [index])
+
   // real spin axis (IAU pole), so tilt, seasons and ring angle are true
   const poleQuaternion = useMemo(() => getPlanetPoleQuaternion(index), [index])
   const planetType =
@@ -784,6 +842,9 @@ function Planet({
       uSunPosition: { value: SYSTEM_OFFSET },
       uMap: { value: null as THREE.Texture | null },
       uHasMap: { value: 0 },
+      // sunlight at this distance
+      uLight: { value: sunlight.strength },
+      uLightTint: { value: sunlight.tint },
       // shadows
       uMoonPos: { value: [0, 1, 2, 3].map(() => new THREE.Vector3()) },
       uMoonRadius: { value: [0, 0, 0, 0] },
@@ -795,27 +856,25 @@ function Planet({
       uRingInner: { value: 0 },
       uRingOuter: { value: 0 },
     }),
-    [planet, planetType, index],
+    [planet, planetType, index, sunlight],
   )
 
-  const atmosphereUniforms = useMemo(
-    () => ({
-      uColor: {
-        value: new THREE.Color(
-          planet.atmosphereColor ?? '#000000',
-        ),
-      },
-      uIntensity: {
-        value:
-          planet.type === 'earth'
-            ? 0.72
-            : planet.type === 'gas'
-              ? 0.30
-              : 0.38,
-      },
-    }),
-    [planet],
-  )
+  const atmosphereUniforms = useMemo(() => {
+    const look = ATMOSPHERE_LOOK[planet.name] ?? {
+      color: planet.atmosphereColor ?? '#000000',
+      dusk: planet.atmosphereColor ?? '#000000',
+      intensity: 0.35,
+      thickness: 0,
+    }
+    return {
+      uColor: { value: new THREE.Color(look.color) },
+      uDusk: { value: new THREE.Color(look.dusk) },
+      uIntensity: { value: look.intensity },
+      uThickness: { value: look.thickness },
+      uSunPosition: { value: SYSTEM_OFFSET },
+      uLight: { value: sunlight.strength },
+    }
+  }, [planet, sunlight])
 
   useEffect(() => {
     let disposed = false
@@ -956,36 +1015,38 @@ function Planet({
   const rotationSpeed =
     (24 / planet.rotationPeriodHours) * 0.12 // negative = retrograde (Venus, Uranus)
 
+  /* Orbit trail: a fading arc of the real orbit behind the planet,
+     recomputed each frame as the planet moves */
   const orbitLine = useMemo(() => {
-    const segments = 160
-    const positions = new Float32Array((segments + 1) * 3)
-    const point = new THREE.Vector3()
-
-    for (let i = 0; i <= segments; i += 1) {
-      const E = (i / segments) * Math.PI * 2
-
-      getPlanetOrbitEllipsePoint(index, E, simClock.startJd, point)
-
-      positions[i * 3] = point.x
-      positions[i * 3 + 1] = point.y
-      positions[i * 3 + 2] = point.z
+    const positions = new Float32Array(TRAIL_POINTS * 3)
+    const fade = new Float32Array(TRAIL_POINTS)
+    for (let i = 0; i < TRAIL_POINTS; i += 1) {
+      fade[i] = Math.pow(1 - i / (TRAIL_POINTS - 1), 1.7)
     }
-
     const geometry = new THREE.BufferGeometry()
-    geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(positions, 3),
-    )
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('aFade', new THREE.BufferAttribute(fade, 1))
 
-    const material = new THREE.LineBasicMaterial({
-      color: '#9aa6b4',
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: {
+          value: new THREE.Color(planet.atmosphereColor ?? planet.baseColor).lerp(
+            new THREE.Color('#ffffff'),
+            0.45,
+          ),
+        },
+        uOpacity: { value: 0.5 },
+      },
+      vertexShader: TRAIL_VERTEX,
+      fragmentShader: TRAIL_FRAGMENT,
       transparent: true,
-      opacity: 0.15,
       depthWrite: false,
     })
 
-    return new THREE.LineLoop(geometry, material)
-  }, [index])
+    const line = new THREE.Line(geometry, material)
+    line.frustumCulled = false
+    return line
+  }, [index, planet])
 
   useEffect(() => {
     return () => {
@@ -1026,12 +1087,22 @@ function Planet({
       (targetScale - focusScale.current) * (1 - Math.exp(-delta * 3))
     orbit.current.scale.setScalar(focusScale.current)
 
-    // Fade orbit lines while a planet is in focus so they don't streak across it
+    // trail: arc of the real orbit behind the planet, fading to nothing
+    const trailPositions = orbitLine.geometry.attributes.position as THREE.BufferAttribute
+    const headE = getPlanetEccentricAnomaly(index, simClock.jd)
+    for (let i = 0; i < TRAIL_POINTS; i += 1) {
+      const E = headE - (i / (TRAIL_POINTS - 1)) * TRAIL_SPAN
+      getPlanetOrbitEllipsePoint(index, E, simClock.jd, _trailPoint)
+      trailPositions.setXYZ(i, _trailPoint.x, _trailPoint.y, _trailPoint.z)
+    }
+    trailPositions.needsUpdate = true
+
+    // almost invisible while a planet is in focus, so trails never streak across it
     const inPlanetChapter = safeProgress >= 2.1 && safeProgress < 10
-    const lineMat = orbitLine.material as THREE.LineBasicMaterial
-    const targetOpacity = inPlanetChapter ? 0.02 : 0.15
-    lineMat.opacity +=
-      (targetOpacity - lineMat.opacity) * (1 - Math.exp(-delta * 4))
+    const trailOpacity = (orbitLine.material as THREE.ShaderMaterial).uniforms.uOpacity
+    const targetOpacity = inPlanetChapter ? 0.04 : 0.55
+    trailOpacity.value +=
+      (targetOpacity - trailOpacity.value) * (1 - Math.exp(-delta * 4))
 
     if (materialIsShader(body.current.material)) {
       body.current.material.uniforms.uTime.value = time
@@ -1125,7 +1196,7 @@ function Planet({
           </mesh>
 
           {planet.atmosphereColor && (
-            <mesh scale={visualRadius * 1.055}>
+            <mesh scale={visualRadius * (planet.name === 'Venus' ? 1.085 : 1.055)}>
               <sphereGeometry args={[1, 64, 64]} />
               <shaderMaterial
                 transparent
@@ -1152,6 +1223,7 @@ function Planet({
               planet={planet}
               radius={visualRadius}
               planetUniforms={uniforms}
+              sunlight={sunlight}
             />
           )}
 
@@ -1161,6 +1233,7 @@ function Planet({
               system={MOON_SYSTEMS[planet.name]}
               planetRadius={visualRadius}
               shadowUniforms={uniforms}
+              sunlight={sunlight}
             />
           )}
         </group>
@@ -1322,6 +1395,8 @@ type MoonSpec = {
   periodDays: number
   phase: number
   shape?: [number, number, number]
+  /* thick atmosphere colour (Titan) */
+  haze?: string
 }
 
 type MoonSystemSpec = {
@@ -1350,7 +1425,7 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
   Saturn: {
     baseSeconds: 70,
     moons: [
-      { name: 'Titan', color: '#d29d55', radius: 0.11, distance: 2.75, periodDays: 15.945, phase: 1.2 },
+      { name: 'Titan', color: '#d29d55', radius: 0.11, distance: 2.75, periodDays: 15.945, phase: 1.2, haze: '#e8a050' },
     ],
   },
 }
@@ -1367,13 +1442,37 @@ function MoonSystem({
   system,
   planetRadius,
   shadowUniforms,
+  sunlight,
 }: {
   system: MoonSystemSpec
   planetRadius: number
   shadowUniforms?: MoonShadowUniforms
+  sunlight?: { strength: number; tint: THREE.Color }
 }) {
+  const moonColors = useMemo(
+    () =>
+      system.moons.map((moon) => {
+        const color = new THREE.Color(moon.color)
+        if (sunlight) color.multiply(sunlight.tint).multiplyScalar(sunlight.strength)
+        return color
+      }),
+    [system, sunlight],
+  )
   const arms = useRef<(THREE.Group | null)[]>([])
   const bodies = useRef<(THREE.Mesh | null)[]>([])
+  // Titan's thick orange haze uses the same Sun-aware atmosphere shader
+  const hazeUniforms = useMemo(
+    () =>
+      system.moons.map((moon) => ({
+        uColor: { value: new THREE.Color(moon.haze ?? '#000000') },
+        uDusk: { value: new THREE.Color(moon.haze ?? '#000000').multiplyScalar(0.8) },
+        uIntensity: { value: 0.9 },
+        uThickness: { value: 1.2 },
+        uSunPosition: { value: SYSTEM_OFFSET },
+        uLight: { value: sunlight?.strength ?? 1 },
+      })),
+    [system, sunlight],
+  )
   const time = useRef(0)
   const referencePeriod = system.moons[0]?.periodDays ?? 1
 
@@ -1421,10 +1520,24 @@ function MoonSystem({
           >
             <sphereGeometry args={[1, 32, 24]} />
             <meshStandardMaterial
-              color={moon.color}
+              color={moonColors[i]}
               roughness={1}
               metalness={0}
             />
+            {moon.haze && (
+              <mesh scale={1.14}>
+                <sphereGeometry args={[1, 32, 24]} />
+                <shaderMaterial
+                  transparent
+                  depthWrite={false}
+                  blending={THREE.AdditiveBlending}
+                  toneMapped={false}
+                  uniforms={hazeUniforms[i]}
+                  vertexShader={ATMOSPHERE_VERTEX_SHADER}
+                  fragmentShader={ATMOSPHERE_FRAGMENT_SHADER}
+                />
+              </mesh>
+            )}
           </mesh>
         </group>
       ))}
@@ -1479,9 +1592,11 @@ const _ringScale = new THREE.Vector3()
 function SaturnRing({
   radius,
   planetUniforms,
+  sunlight,
 }: {
   radius: number
   planetUniforms?: RingShadowUniforms
+  sunlight?: { strength: number; tint: THREE.Color }
 }) {
   const ringMesh = useRef<THREE.Mesh>(null)
   const inner = radius * SATURN_RING_INNER
@@ -1507,7 +1622,11 @@ function SaturnRing({
       new THREE.ShaderMaterial({
         uniforms: {
           uMap: { value: null as THREE.Texture | null },
-          uTint: { value: new THREE.Color('#efe3c8') },
+          uTint: {
+            value: new THREE.Color('#efe3c8')
+              .multiply(sunlight?.tint ?? new THREE.Color(1, 1, 1))
+              .multiplyScalar(sunlight?.strength ?? 1),
+          },
           uSunPosition: { value: SYSTEM_OFFSET },
           uPlanetCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: radius },
@@ -1518,7 +1637,7 @@ function SaturnRing({
         side: THREE.DoubleSide,
         depthWrite: false,
       }),
-    [radius],
+    [radius, sunlight],
   )
 
   useEffect(
@@ -1690,15 +1809,17 @@ function PlanetRings({
   planet,
   radius,
   planetUniforms,
+  sunlight,
 }: {
   planet: (typeof PLANETS)[number]
   radius: number
   planetUniforms?: RingShadowUniforms
+  sunlight?: { strength: number; tint: THREE.Color }
 }) {
   const isSaturn = planet.name === 'Saturn'
   const isUranus = planet.name === 'Uranus'
 
-  if (isSaturn) return <SaturnRing radius={radius} planetUniforms={planetUniforms} />
+  if (isSaturn) return <SaturnRing radius={radius} planetUniforms={planetUniforms} sunlight={sunlight} />
   const isNeptune = planet.name === 'Neptune'
 
   // Uranus and Neptune have thin, faint rings: a broad band read as a dark hole
