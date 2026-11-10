@@ -932,6 +932,133 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
   return null
 }
 
+/* ============================================================
+   MILKY WAY SKY
+   A real panorama of our galaxy (Solar System Scope, CC BY 4.0) on a
+   sphere that travels with the camera, so it sits at infinity. The map
+   is in galactic coordinates; the shader turns each viewing direction
+   from ecliptic (our scene) into galactic latitude/longitude, so the
+   Milky Way crosses the sky at its true ~60 degree angle to the planets.
+   It fades in the finale, where the camera has left the galaxy.
+============================================================ */
+
+const SKY_TEXTURE = '/textures/milky-way-sky.webp'
+// kept low: the sky is atmosphere, never competing with the planets
+const SKY_BRIGHTNESS = 2.4
+
+const SKY_VERTEX = /* glsl */ `
+varying vec3 vDirection;
+void main() {
+  vDirection = normalize(position);
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * viewMatrix * world;
+  gl_Position.z = gl_Position.w; // always at the far plane
+}`
+
+const SKY_FRAGMENT = /* glsl */ `
+uniform sampler2D uMap;
+uniform float uIntensity;
+varying vec3 vDirection;
+const float PI = 3.141592653589793;
+const float EPS = 0.40909280; // obliquity of the ecliptic (J2000), radians
+const mat3 EQ_TO_GAL = mat3(
+  -0.0548755604, 0.4941094279, -0.8676661490,
+  -0.8734370902, -0.4448296300, -0.1980763734,
+  -0.4838350155, 0.7469822445, 0.4559837762
+); // column-major: the J2000 equatorial -> galactic rotation
+
+void main() {
+  // scene -> ecliptic (inverse of X=x, Y=z, Z=-y)
+  vec3 d = normalize(vDirection);
+  vec3 ecl = vec3(d.x, -d.z, d.y);
+  // ecliptic -> equatorial
+  vec3 eq = vec3(
+    ecl.x,
+    ecl.y * cos(EPS) - ecl.z * sin(EPS),
+    ecl.y * sin(EPS) + ecl.z * cos(EPS)
+  );
+  vec3 gal = EQ_TO_GAL * eq;
+  float l = atan(gal.y, gal.x);            // galactic longitude, -PI..PI
+  float b = asin(clamp(gal.z, -1.0, 1.0)); // galactic latitude
+  // this panorama: longitude increases to the left, latitude is flipped
+  float u = 0.5 - l / (2.0 * PI);
+  // seamless wrap: use whichever of two offset versions of u is continuous
+  // here, so the GPU never sees the jump and draws no line down the sky
+  float uA = fract(u);
+  float uB = fract(u + 0.5) - 0.5;
+  float uWrap = fwidth(uA) <= fwidth(uB) + 0.0001 ? uA : uB;
+  vec2 uv = vec2(uWrap, 0.5 - b / PI);
+  // the photo is sRGB; the pipeline brightens shader output as if it were
+  // linear, so decode first (otherwise the dark sky is lifted and its
+  // compression blocks show)
+  vec3 sky = pow(texture2D(uMap, uv).rgb, vec3(2.2));
+  gl_FragColor = vec4(sky * uIntensity, 1.0);
+}`
+
+function MilkyWaySky({
+  progressRef,
+}: {
+  progressRef: MutableRefObject<number>
+}) {
+  const sphere = useRef<THREE.Mesh>(null)
+  const camera = useThree((state) => state.camera)
+  const gl = useThree((state) => state.gl)
+
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uMap: { value: null as THREE.Texture | null },
+          uIntensity: { value: 0 },
+        },
+        vertexShader: SKY_VERTEX,
+        fragmentShader: SKY_FRAGMENT,
+        side: THREE.BackSide,
+        depthWrite: false,
+        depthTest: false,
+      }),
+    [],
+  )
+
+  useEffect(() => {
+    let disposed = false
+    let loaded: THREE.Texture | null = null
+    new THREE.TextureLoader().load(SKY_TEXTURE, (texture) => {
+      if (disposed) {
+        texture.dispose()
+        return
+      }
+      texture.colorSpace = THREE.NoColorSpace // shader writes raw colour
+      // the seam where longitude wraps must sample both edges cleanly
+      texture.wrapS = THREE.RepeatWrapping
+      texture.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy())
+      loaded = texture
+      material.uniforms.uMap.value = texture
+    })
+    return () => {
+      disposed = true
+      loaded?.dispose()
+      material.dispose()
+    }
+  }, [gl, material])
+
+  useFrame((_, delta) => {
+    if (!sphere.current) return
+    sphere.current.position.copy(camera.position)
+    // full inside the Solar System; fade out once we have left the galaxy
+    const chapter = Math.floor(progressRef.current ?? 0)
+    const target = material.uniforms.uMap.value ? (chapter === 11 ? 0.15 : SKY_BRIGHTNESS) : 0
+    const u = material.uniforms.uIntensity
+    u.value += (target - u.value) * (1 - Math.exp(-delta * 2))
+  })
+
+  return (
+    <mesh ref={sphere} material={material} renderOrder={-10} frustumCulled={false}>
+      <sphereGeometry args={[900, 64, 32]} />
+    </mesh>
+  )
+}
+
 function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
   return (
@@ -940,6 +1067,8 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
       {/* first, so the date is advanced before planets and camera read it */}
       <Clock progressRef={progressRef} />
+
+      <MilkyWaySky progressRef={progressRef} />
 
       <color attach="background" args={['#010207']} />
 

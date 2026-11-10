@@ -8,3 +8,8 @@ Earth city lights (public/textures/earth-night-lights.webp)
 Derived from Solar System Scope's 2k_earth_nightmap.jpg - same source and
 licence as above (CC BY 4.0). Downloaded 2026-11-10; the blue base layer
 was removed to keep only the city lights, then saved as WebP.
+
+Milky Way sky (public/textures/milky-way-sky.webp)
+From Solar System Scope's 8k_stars_milky_way.jpg - same source and licence
+as above (CC BY 4.0). Downloaded 2026-11-10; resized to 4096x2048 and saved
+as WebP.

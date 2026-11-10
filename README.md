@@ -9,6 +9,8 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - **Cinematic camera journey.** Thirteen sections (intro, the Sun, eight planets, beyond the planets, the Milky Way, return), with the camera flying between them as you scroll.
 - **Text that waits for the camera.** Each chapter's text appears only once the camera has arrived, and stays pinned while you read.
 - **Real positions and motion.** Planets sit where they actually are on the visitor's date, on correctly oriented and tilted orbits (JPL orbital elements, Kepler's laws). In the wide views time runs at a few days per second so you can watch the orbits; Venus and Uranus spin backwards, as they really do.
+- **A real sky.** The Milky Way panorama surrounds the scene, turned to its true ~60° angle to the planets' plane.
+- **Real light and shadow.** Planets spin about their real IAU poles (true tilts and seasons). Saturn's rings and the planet shadow each other, moons cast shadows on their planets, and the Sun has granulation, limb darkening and a soft corona.
 - **Real planet surfaces.** Photographic texture maps for every planet, Saturn's rings with real gaps, Earth with clouds and its Moon. Each planet has a hand-written shader fallback.
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
 - **Milky Way finale.** The Solar System shrinks away and a "You are here" marker appears on a spiral arm.
@@ -79,7 +81,7 @@ To add or remove a chapter, edit the `JOURNEY` array in `Journey.tsx` and add a 
 
 ## Credits
 
-- **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune) and **Earth's city lights**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
+- **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune) and **Earth's city lights** and the **Milky Way sky**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
 - **Earth and Moon textures** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
 
 ## Status

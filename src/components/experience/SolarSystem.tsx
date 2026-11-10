@@ -1021,7 +1021,7 @@ function Planet({
       ? 0.35
       : !focusing || chapter - 2 === index
         ? 1
-        : 0.1
+        : 0.04 // a point of light, like a planet seen from another planet
     focusScale.current +=
       (targetScale - focusScale.current) * (1 - Math.exp(-delta * 3))
     orbit.current.scale.setScalar(focusScale.current)
