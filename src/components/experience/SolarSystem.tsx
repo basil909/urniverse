@@ -20,6 +20,8 @@ import { simClock } from './simClock'
 import { lens } from './lens'
 import Belts from './Belts'
 import Comet from './Comet'
+import Cutaway from './Cutaway'
+import { cutaway } from './cutawayState'
 import {
   SHARP_EARTH_MAPS,
   SHARP_PLANET_MAPS,
@@ -1213,6 +1215,7 @@ function Planet({
     { colorSpace: THREE.SRGBColorSpace },
   )
   const baseMap = useRef<THREE.Texture | null>(null)
+  const atmosphereMesh = useRef<THREE.Mesh>(null)
 
   const visualRadius = getPlanetVisualRadius(index)
   // sunlight here: dimmer and cooler with distance from the Sun
@@ -1668,7 +1671,10 @@ function Planet({
           </mesh>
 
           {planet.atmosphereColor && (
-            <mesh scale={visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055)}>
+            <mesh
+              ref={atmosphereMesh}
+              scale={visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055)}
+            >
               <sphereGeometry args={[1, 64, 64]} />
               <shaderMaterial
                 transparent
@@ -1708,6 +1714,19 @@ function Planet({
         {RIM_RAYS[index] && (
           <RimRays index={index} radius={visualRadius} progressRef={progressRef} />
         )}
+
+        {/* the planet cut open, from the detail panel's "See inside" */}
+        <Cutaway
+          index={index}
+          radius={visualRadius}
+          progressRef={progressRef}
+          hide={[body, atmosphereMesh]}
+          getMap={() =>
+            planet.name === 'Earth'
+              ? { texture: sharpDay ?? earthMap, srgb: true }
+              : { texture: uniforms.uMap.value, srgb: false }
+          }
+        />
 
         {planet.type === 'earth' && <Moon sharp={sharp} />}
 
@@ -2356,7 +2375,7 @@ function Hotspots({
       _hotspotToCamera.copy(camera.position).sub(_hotspotWorld).normalize()
       const facing = _hotspotNormal.dot(_hotspotToCamera)
 
-      const opacity = focused
+      const opacity = focused && cutaway.planet !== index
         ? THREE.MathUtils.smoothstep(facing, 0.12, 0.4)
         : 0
       element.style.opacity = opacity.toFixed(3)

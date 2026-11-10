@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useRef } from 'react'
 
 import { DETAIL_SOURCE, type WorldDetail } from '../../data/worlds'
+import type { Layer } from '../../data/interiors'
 
 /* A quiet, scrollable deep-dive for the current world. It sits over the
    text column, scrolls on its own (data-lenis-prevent keeps the page
@@ -16,11 +17,18 @@ export default function DetailPanel({
   name,
   detail,
   onClose,
+  inside,
+  onToggleInside,
+  layers,
 }: {
   open: boolean
   name: string
   detail: WorldDetail | null
   onClose: () => void
+  /* the planet shown cut open (only planets have this) */
+  inside?: boolean
+  onToggleInside?: () => void
+  layers?: Layer[]
 }) {
   const closeButton = useRef<HTMLButtonElement>(null)
 
@@ -73,6 +81,30 @@ export default function DetailPanel({
               ×
             </button>
           </div>
+
+          {onToggleInside && (
+            <button
+              type="button"
+              className="detail-inside"
+              onClick={onToggleInside}
+              aria-pressed={inside}
+            >
+              {inside ? 'Close the cutaway' : `See inside ${name}`}
+            </button>
+          )}
+
+          {inside && layers && (
+            <ol className="detail-layers" aria-label={`Layers of ${name}, from the centre out`}>
+              {layers.map((layer, i) => (
+                <li key={layer.name}>
+                  <span className="detail-layer-swatch" style={{ background: layer.color }}>
+                    {i + 1}
+                  </span>
+                  {layer.name}
+                </li>
+              ))}
+            </ol>
+          )}
 
           <dl className="detail-glance">
             {detail.glance.map((item) => (

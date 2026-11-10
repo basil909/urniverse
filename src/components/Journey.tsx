@@ -14,6 +14,8 @@ import UniverseCanvas from './experience/UniverseCanvas'
 import Loader from './ui/Loader'
 import DetailPanel from './ui/DetailPanel'
 import { WORLD_DETAILS } from '../data/worlds'
+import { INTERIORS, PLANET_INDEX } from '../data/interiors'
+import { cutaway } from './experience/cutawayState'
 
 
 
@@ -603,6 +605,7 @@ export default function Journey() {
   const [today, setToday] = useState('')
   // deep-dive panel for the current world
   const [detailOpen, setDetailOpen] = useState(false)
+  const [inside, setInside] = useState(false)
   const detailOpenRef = useRef(false)
   detailOpenRef.current = detailOpen
 
@@ -877,6 +880,11 @@ export default function Journey() {
     setDetailOpen(false)
   }, [section, textOn])
 
+  // the cutaway belongs to the open panel: closing it closes the cutaway
+  useEffect(() => {
+    if (!detailOpen) setInside(false)
+  }, [detailOpen])
+
   const active =
     section >= 1 && section <= JOURNEY.length
       ? section - 1
@@ -884,6 +892,11 @@ export default function Journey() {
 
   const activeChapter =
     active >= 0 ? JOURNEY[active] : null
+
+  useEffect(() => {
+    const planet = activeChapter ? PLANET_INDEX[activeChapter.id] : undefined
+    cutaway.planet = inside && planet !== undefined ? planet : -1
+  }, [inside, activeChapter])
 
   // planets only (not the Sun): these can be dragged to spin
   const canSpin = textOn && active >= 1 && active <= 8
@@ -914,6 +927,17 @@ export default function Journey() {
         name={planetName}
         detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
         onClose={() => setDetailOpen(false)}
+        inside={inside}
+        layers={
+          activeChapter && PLANET_INDEX[activeChapter.id] !== undefined
+            ? INTERIORS[PLANET_INDEX[activeChapter.id]]
+            : undefined
+        }
+        onToggleInside={
+          activeChapter && PLANET_INDEX[activeChapter.id] !== undefined
+            ? () => setInside((value) => !value)
+            : undefined
+        }
       />
 
       <div className="universe-vignette" />
