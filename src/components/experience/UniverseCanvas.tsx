@@ -194,7 +194,7 @@ function heroDistanceFor(planetIndex: number) {
   return rockyFill !== undefined
     ? visualRadius / rockyFill
     : Math.max(config.minHeroDistance, visualRadius * config.radiusMultiplier) *
-        (planetIndex === 5 ? 1.9 : 1.2)
+        (planetIndex === 5 ? 1.9 : planetIndex === 4 ? 1.08 : 1.2)
 }
 
 function calculatePlanetPose(
@@ -226,11 +226,13 @@ function calculatePlanetPose(
 
   // Three-quarter view: mostly from the side, partly sunward, so the camera
   // never sits on the Sun line (at Mercury it ended up inside the Sun's glow)
+  // Jupiter: almost in the plane of its moons, so they line up across the
+  // disc and pass in front of it (with their shadows), as in a telescope
   _viewDir
     .copy(_toSun)
     .multiplyScalar(0.62)
     .addScaledVector(_side, 0.78)
-    .addScaledVector(_worldUp, 0.16)
+    .addScaledVector(_worldUp, planetIndex === 4 ? 0.035 : 0.16)
     .normalize()
 
   // drift towards the night side, looking back at the Sun

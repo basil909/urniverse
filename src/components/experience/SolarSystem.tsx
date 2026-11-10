@@ -577,6 +577,41 @@ vec3 neptune(vec3 p) {
    small eddies so band edges ripple, and on Jupiter the Great Red Spot
    turning anticlockwise. Two samples at staggered phases are cross-faded
    (the flow-map technique), so the clouds move forever without smearing. */
+/* ---------- ice giants: details over the (nearly featureless) maps ---------- */
+vec3 neptuneWeather(vec3 base, vec2 uv) {
+  float lat = (uv.y - 0.5) * 3.14159;
+  /* a Great Dark Spot drifting west, with bright companion clouds */
+  vec2 d = uv - vec2(fract(0.62 - uTime * 0.0035), 0.39);
+  d.x = (fract(d.x + 0.5) - 0.5) * 1.86;
+  float spot = 1.0 - smoothstep(0.6, 1.0, length(d / vec2(0.07, 0.032)));
+  base = mix(base, base * vec3(0.35, 0.42, 0.7), spot * 0.75);
+  float companion = 1.0 - smoothstep(0.4, 1.0, length((d - vec2(0.03, -0.045)) / vec2(0.05, 0.012)));
+  /* high methane cirrus: thin white streaks in two mid-latitude bands */
+  float belt = exp(-pow((abs(lat) - 0.5) / 0.12, 2.0)) + 0.6 * exp(-pow((lat + 1.05) / 0.08, 2.0));
+  /* short, soft wisps rather than long lines: stretched noise, broken up */
+  float streak = smoothstep(0.58, 0.78, fbm(vec3(uv.x * 22.0 - uTime * 0.012, lat * 26.0, 1.7)));
+  streak *= smoothstep(0.45, 0.7, noise(vec3(uv.x * 9.0 + 3.1, lat * 4.0, uTime * 0.01)));
+  float white = max(companion * 0.9, streak * belt * 0.6);
+  return mix(base, vec3(0.92, 0.96, 1.0), white);
+}
+
+vec3 uranusWeather(vec3 base, vec2 uv) {
+  float lat = (uv.y - 0.5) * 3.14159;
+  /* faint banding and a bright cap over the sunward (north) pole */
+  base *= 0.94 + 0.06 * sin(lat * 14.0 + 0.6);
+  base = mix(base, vec3(0.86, 0.97, 0.97), smoothstep(0.85, 1.35, lat) * 0.45);
+  /* a few small bright storms drifting with the winds */
+  float storms = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    vec2 c = vec2(fract(0.2 + fi * 0.31 + uTime * (0.003 + fi * 0.001)), 0.62 + fi * 0.07);
+    vec2 d = uv - c;
+    d.x = (fract(d.x + 0.5) - 0.5) * 1.86;
+    storms += 1.0 - smoothstep(0.3, 1.0, length(d / vec2(0.05, 0.017)));
+  }
+  return mix(base, vec3(0.95, 1.0, 1.0), clamp(storms, 0.0, 1.0) * 0.7);
+}
+
 vec2 cloudFlow(vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
   bool jupiter = uPlanet == 4;
@@ -632,6 +667,8 @@ void main() {
     surface = (uPlanet == 4 || uPlanet == 5)
       ? flowingClouds(vUv)
       : texture2D(uMap, vUv).rgb;
+    if (uPlanet == 7) surface = neptuneWeather(surface, vUv);
+    else if (uPlanet == 6) surface = uranusWeather(surface, vUv);
   }
 
   vec3 toSun = normalize(uSunPosition - vWorldPosition);
@@ -1876,16 +1913,22 @@ const SATURN_RING_TEXTURE = '/textures/planets/2k_saturn_ring_alpha.png'
 /* ring extent in planet radii (matches the ring texture) */
 const SATURN_RING_INNER = 1.24
 const SATURN_RING_OUTER = 2.35
+/* the faint D ring reaches in towards the cloud tops */
+const SATURN_D_RING_INNER = 1.11
 
 /* Rings lit by the Sun, with Saturn's own shadow cut across them:
    from each point on the ring, does the sunbeam hit the planet? */
 const RING_VERTEX = /* glsl */ `
 varying vec2 vUv;
 varying vec3 vWorld;
+varying vec3 vRingNormal;
+varying vec2 vLocal;
 void main() {
   vUv = uv;
+  vLocal = position.xy;
   vec4 world = modelMatrix * vec4(position, 1.0);
   vWorld = world.xyz;
+  vRingNormal = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0));
   gl_Position = projectionMatrix * viewMatrix * world;
 }`
 
@@ -1895,10 +1938,28 @@ uniform vec3 uTint;
 uniform vec3 uSunPosition;
 uniform vec3 uPlanetCenter;
 uniform float uPlanetRadius;
+uniform float uTime;
+uniform float uLocalRadius;
 varying vec2 vUv;
 varying vec3 vWorld;
+varying vec3 vRingNormal;
+varying vec2 vLocal;
+
+float ringHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
 void main() {
-  vec4 ring = texture2D(uMap, vUv);
+  /* distance from Saturn's centre in planet radii; the texture covers the
+     main rings (C to A), the D ring inside it is a faint, banded veil */
+  float rr = length(vLocal) / uLocalRadius;
+  float u = (rr - ${SATURN_RING_INNER.toFixed(2)}) / (${SATURN_RING_OUTER.toFixed(2)} - ${SATURN_RING_INNER.toFixed(2)});
+  vec4 ring;
+  if (u < 0.0) {
+    float bands = 0.6 + 0.4 * sin(rr * 260.0) * sin(rr * 61.0);
+    float fade = smoothstep(${SATURN_D_RING_INNER.toFixed(2)}, ${SATURN_D_RING_INNER.toFixed(2)} + 0.04, rr);
+    ring = vec4(vec3(0.62, 0.56, 0.48), 0.05 * bands * fade);
+  } else {
+    ring = texture2D(uMap, vec2(u, 0.5));
+  }
   vec3 toSun = normalize(uSunPosition - vWorld);
   vec3 toPlanet = uPlanetCenter - vWorld;
   float along = dot(toPlanet, toSun);
@@ -1912,7 +1973,23 @@ void main() {
   vec3 toCamera = normalize(cameraPosition - vWorld);
   float forward = pow(max(dot(-toCamera, toSun), 0.0), 3.0);
   float glow = 1.0 + forward * 1.4;
-  gl_FragColor = vec4(ring.rgb * uTint * lit * glow, ring.a);
+
+  /* seen from the unlit face, sunlight only comes through where the rings
+     are thin: the dense B ring turns dark, the C ring and Cassini
+     Division glow. From the lit face, the usual reflected light. */
+  float sunSide = dot(vRingNormal, toSun);
+  float viewSide = dot(vRingNormal, toCamera);
+  float unlitFace = step(sunSide * viewSide, 0.0);
+  float through = (1.0 - ring.a) * 1.7 + 0.08;
+  vec3 color = ring.rgb * uTint * lit * glow * mix(1.0, through, unlitFace);
+
+  /* glitter: now and then a single ice grain catches the Sun */
+  vec2 cell = floor(vLocal * 900.0);
+  float flick = floor(uTime * 3.0 + ringHash(cell) * 50.0);
+  float glint = step(0.9965, ringHash(cell + flick * 0.37)) * (1.0 - unlitFace) * lit;
+  color += vec3(1.0, 0.95, 0.85) * glint * ring.a * 1.4;
+
+  gl_FragColor = vec4(color, ring.a);
 }`
 
 type RingShadowUniforms = { uRingMap: { value: THREE.Texture | null } }
@@ -1935,7 +2012,7 @@ function SaturnRing({
   })
   const baseRing = useRef<THREE.Texture | null>(null)
   const ringMesh = useRef<THREE.Mesh>(null)
-  const inner = radius * SATURN_RING_INNER
+  const inner = radius * SATURN_D_RING_INNER
   const outer = radius * SATURN_RING_OUTER
 
   const geometry = useMemo(() => {
@@ -1966,6 +2043,8 @@ function SaturnRing({
           uSunPosition: { value: SYSTEM_OFFSET },
           uPlanetCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: radius },
+          uLocalRadius: { value: radius },
+          uTime: { value: 0 },
         },
         vertexShader: RING_VERTEX,
         fragmentShader: RING_FRAGMENT,
@@ -2018,7 +2097,8 @@ function SaturnRing({
     if (planetUniforms) planetUniforms.uRingMap.value = map
   }, [sharpRing, material, planetUniforms])
 
-  useFrame(() => {
+  useFrame((_, delta) => {
+    material.uniforms.uTime.value += delta
     const mesh = ringMesh.current
     if (!mesh) return
     // the ring sits at Saturn's centre; scale follows the focus shrink
