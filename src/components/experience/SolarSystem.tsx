@@ -25,7 +25,29 @@ const EARTH_LOCAL_TEXTURES = {
   clouds: '/textures/earth-clouds-alpha.webp',
   normal: '/textures/earth-normal.webp',
   specular: '/textures/earth-specular.webp',
+  // city lights extracted from Solar System Scope's 2k_earth_nightmap (CC BY 4.0)
+  night: '/textures/earth-night-lights.webp',
 } as const
+
+/* Night side: city lights are an emissive map, masked so they only glow
+   where the Sun is down. The mask fades across the terminator (dusk). */
+const earthNight = {
+  uSunDirView: { value: new THREE.Vector3(1, 0, 0) },
+}
+const EARTH_CITY_LIGHTS = new THREE.Color('#ffc27a')
+const _earthWorld = new THREE.Vector3()
+
+function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
+  shader.uniforms.uSunDirView = earthNight.uSunDirView
+  shader.fragmentShader =
+    'uniform vec3 uSunDirView;\n' +
+    shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+      float sunFacing = dot(normalize(normal), normalize(uSunDirView));
+      totalEmissiveRadiance *= 1.0 - smoothstep(-0.2, 0.12, sunFacing);`,
+    )
+}
 
 const MOON_LOCAL_TEXTURES = {
   color: '/textures/moon-lroc.webp',
@@ -815,6 +837,9 @@ function Planet({
     useState<THREE.Texture | null>(null)
   const [earthSpecular, setEarthSpecular] =
     useState<THREE.Texture | null>(null)
+  const [earthLights, setEarthLights] =
+    useState<THREE.Texture | null>(null)
+  const camera = useThree((state) => state.camera)
 
   useEffect(() => {
     if (planet.name !== 'Earth') {
@@ -822,6 +847,7 @@ function Planet({
       setEarthClouds(null)
       setEarthNormal(null)
       setEarthSpecular(null)
+      setEarthLights(null)
       return
     }
 
@@ -864,6 +890,7 @@ function Planet({
       false,
       setEarthSpecular,
     )
+    loadLocal(EARTH_LOCAL_TEXTURES.night, true, setEarthLights)
 
     return () => {
       cancelled = true
@@ -872,6 +899,7 @@ function Planet({
       setEarthClouds(null)
       setEarthNormal(null)
       setEarthSpecular(null)
+      setEarthLights(null)
     }
   }, [gl, planet.name])
 
@@ -967,6 +995,15 @@ function Planet({
     const isFocused = focusedPlanetIndex(safeProgress) === index
     const held = isFocused && !!spinState?.hold
 
+    // keep the Sun direction (in view space) current for Earth's night mask
+    if (planet.name === 'Earth') {
+      body.current.getWorldPosition(_earthWorld)
+      earthNight.uSunDirView.value
+        .copy(SYSTEM_OFFSET)
+        .sub(_earthWorld)
+        .transformDirection(camera.matrixWorldInverse)
+    }
+
     if (!held) {
       body.current.rotation.y += delta * rotationSpeed
     } else if (spinState) {
@@ -1005,6 +1042,9 @@ function Planet({
 
             {planet.name === 'Earth' && earthMap ? (
               <meshPhongMaterial
+                // rebuild when a map arrives: three.js only picks up a newly
+                // added texture (normal, specular, night lights) on recompile
+                key={`earth-${!!earthNormal}-${!!earthSpecular}-${!!earthLights}`}
                 map={earthMap}
                 normalMap={earthNormal ?? undefined}
                 normalScale={[0.34, 0.34]}
@@ -1012,6 +1052,10 @@ function Planet({
                 specular={EARTH_SPECULAR}
                 shininess={16}
                 color="#ffffff"
+                emissive={EARTH_CITY_LIGHTS}
+                emissiveMap={earthLights ?? undefined}
+                emissiveIntensity={earthLights ? 1.15 : 0}
+                onBeforeCompile={maskLightsToNightSide}
               />
             ) : (
               <shaderMaterial

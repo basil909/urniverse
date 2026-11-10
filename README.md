@@ -77,7 +77,7 @@ To add or remove a chapter, edit the `JOURNEY` array in `Journey.tsx` and add a 
 
 ## Credits
 
-- **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune): [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
+- **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune) and **Earth's city lights**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
 - **Earth and Moon textures** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
 
 ## Status

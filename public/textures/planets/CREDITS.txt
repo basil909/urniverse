@@ -3,3 +3,8 @@ Source: Solar System Scope - https://www.solarsystemscope.com/textures/
 License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 https://creativecommons.org/licenses/by/4.0/
 Downloaded 2026-11-10. Planet maps converted from JPEG to WebP (quality 82); otherwise unmodified.
+
+Earth city lights (public/textures/earth-night-lights.webp)
+Derived from Solar System Scope's 2k_earth_nightmap.jpg - same source and
+licence as above (CC BY 4.0). Downloaded 2026-11-10; the blue base layer
+was removed to keep only the city lights, then saved as WebP.
