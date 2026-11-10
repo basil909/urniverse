@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { DM_Mono, Inter, Instrument_Serif } from 'next/font/google'
+import { Inter, Instrument_Serif } from 'next/font/google'
 import './globals.css'
 
 /* Self-hosted at build time: no render-blocking request to Google Fonts */
@@ -7,13 +7,6 @@ const inter = Inter({
   subsets: ['latin'],
   weight: ['300', '400', '500', '600'],
   variable: '--font-inter',
-  display: 'swap',
-})
-
-const dmMono = DM_Mono({
-  subsets: ['latin'],
-  weight: ['300', '400', '500'],
-  variable: '--font-dm-mono',
   display: 'swap',
 })
 
@@ -39,7 +32,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${dmMono.variable} ${instrumentSerif.variable}`}
+      className={`${inter.variable} ${instrumentSerif.variable}`}
     >
       <body suppressHydrationWarning>
         {children}

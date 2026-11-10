@@ -11,9 +11,7 @@ import Lenis from 'lenis'
 
 import UniverseCanvas from './experience/UniverseCanvas'
 
-import FactCard from './ui/FactCard'
 import Loader from './ui/Loader'
-import type { UniverseFact } from './ui/FactCard'
 
 
 
@@ -448,21 +446,6 @@ const JOURNEY: Chapter[] = [
 
 ============================================================ */
 
-/* Distance from the Sun and one-way light travel time (mission-control readouts) */
-const TELEMETRY: Record<string, { au: string; light: string }> = {
-  sun: { au: '0.00', light: '—' },
-  mercury: { au: '0.39', light: '3 min 13 s' },
-  venus: { au: '0.72', light: '6 min 00 s' },
-  earth: { au: '1.00', light: '8 min 19 s' },
-  mars: { au: '1.52', light: '12 min 40 s' },
-  jupiter: { au: '5.20', light: '43 min 14 s' },
-  saturn: { au: '9.54', light: '1 h 19 min' },
-  uranus: { au: '19.19', light: '2 h 40 min' },
-  neptune: { au: '30.07', light: '4 h 10 min' },
-  beyond: { au: '30+', light: '4 h +' },
-  galaxy: { au: '1.6 bn', light: '26,000 yr' },
-}
-
 /* Scale model: shrink the Sun to a 2 m door and everything else with it.
    Sun diameter 1,392,700 km; 1 AU = 149,597,871 km. */
 const SUN_DIAMETER_KM = 1_392_700
@@ -492,7 +475,10 @@ const formatDistance = (metres: number) =>
     ? `${Math.round(metres)} m`
     : `${(metres / 1000).toFixed(1).replace(/\.0$/, '')} km`
 
-const MODEL_EDGE_M = toModelMetres(SCALE_MODEL.neptune.au * AU_KM)
+const titleCase = (label: string) =>
+  label
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 
 function scaleSentence(id: string, name: string) {
   const model = SCALE_MODEL[id]
@@ -742,29 +728,9 @@ export default function Journey() {
   const activeChapter =
     active >= 0 ? JOURNEY[active] : null
 
-  const factText = activeChapter?.facts[activeFact]
-  const currentFact: UniverseFact | null =
-    activeChapter && factText
-      ? {
-          id: `${activeChapter.id}-${activeFact}`,
-          title: activeChapter.title,
-          eyebrow: `Fact ${chapterNo(activeFact + 1)} / ${chapterNo(activeChapter.facts.length)}`,
-          fact: factText,
-          detail: '',
-          visual: activeChapter.id,
-          stat: activeChapter.stats[
-            activeFact % Math.max(1, activeChapter.stats.length)
-          ]?.value,
-        }
-      : null
-
-  const telemetry = activeChapter ? TELEMETRY[activeChapter.id] : null
-  const showReticle = textOn && active >= 0 && active <= 8
   // planets only (not the Sun): these can be dragged to spin
   const canSpin = textOn && active >= 1 && active <= 8
-  const planetName = activeChapter
-    ? activeChapter.label.charAt(0) + activeChapter.label.slice(1).toLowerCase()
-    : ''
+  const planetName = activeChapter ? titleCase(activeChapter.label) : ''
   const scale = activeChapter ? scaleSentence(activeChapter.id, planetName) : null
   const stageKind =
     section === 0 ? 'intro' : section === TOTAL_SECTIONS - 1 ? 'return' : 'chapter'
@@ -789,34 +755,12 @@ export default function Journey() {
       <div className="universe-vignette" />
       <div className="universe-aura" />
 
-      {/* FOCUS RETICLE: locks onto the planet in the centre of the screen */}
-      <div
-        className={`reticle ${showReticle ? 'reticle-on' : ''}`}
-        aria-hidden="true"
-      >
-        <span className="reticle-corner tl" />
-        <span className="reticle-corner tr" />
-        <span className="reticle-corner bl" />
-        <span className="reticle-corner br" />
-        <span className="reticle-ring" />
-        <span className="reticle-ring reticle-ring-2" />
-        <span className="reticle-scan" key={`scan-${active}`} />
-        <span className="reticle-tick t" />
-        <span className="reticle-tick b" />
-        <span className="reticle-tick l" />
-        <span className="reticle-tick r" />
-        <span className="reticle-tag reticle-tag-tl">
-          TARGET LOCK
-          <b>{activeChapter?.label ?? ''}</b>
-        </span>
-        <span className={`reticle-hint ${canSpin ? 'is-on' : ''}`}>
-          <i aria-hidden="true">⟷</i> Drag to spin
-        </span>
-        <span className="reticle-tag reticle-tag-br">
-          {activeChapter?.stats[0]?.value ?? ''}
-          <b>{activeChapter?.stats[0]?.label ?? ''}</b>
-        </span>
-      </div>
+      {/* Shows briefly on each planet, then fades away on its own */}
+      {canSpin && (
+        <div className="spin-hint" key={`hint-${active}`} aria-hidden="true">
+          Drag to rotate
+        </div>
+      )}
 
       {/* TOP HUD */}
       <header className="hud-top">
@@ -826,27 +770,9 @@ export default function Journey() {
           aria-label="Back to start"
         >
           <span className="brand-mark" />
-          <span className="brand-name">UNIVERSE</span>
+          <span className="brand-name">You Are Here</span>
         </button>
 
-        <div
-          className={`readouts ${telemetry && textOn ? 'readouts-on' : ''}`}
-          aria-hidden="true"
-        >
-          <div className="readout">
-            <span className="readout-label">DISTANCE FROM SUN</span>
-            <span className="readout-value" key={`au-${active}`}>
-              {telemetry?.au ?? '—'}
-              <i>AU</i>
-            </span>
-          </div>
-          <div className="readout">
-            <span className="readout-label">LIGHT TRAVEL TIME</span>
-            <span className="readout-value" key={`lt-${active}`}>
-              {telemetry?.light ?? '—'}
-            </span>
-          </div>
-        </div>
       </header>
 
       {/* LEFT CHAPTER RAIL */}
@@ -866,13 +792,10 @@ export default function Journey() {
             aria-current={active === index ? 'true' : undefined}
           >
             <span className="rail-dot" />
-            <span className="rail-no">{chapterNo(index + 1)}</span>
-            <span className="rail-label">{chapter.label}</span>
+            <span className="rail-label">{titleCase(chapter.label)}</span>
           </button>
         ))}
       </nav>
-
-      <FactCard fact={currentFact} visible={showFacts} />
 
       {/* BOTTOM HUD */}
       <footer className="hud-bottom" aria-hidden="true">
@@ -881,16 +804,6 @@ export default function Journey() {
             className="hud-bar-fill"
             style={{ transform: 'scaleX(var(--timeline, 0))' }}
           />
-        </div>
-        <div className="hud-meta">
-          <span>
-            {activeChapter
-              ? `${chapterNo(active + 1)} / ${chapterNo(JOURNEY.length)}`
-              : section === 0
-                ? 'STANDBY'
-                : 'RETURN'}
-          </span>
-          <span>{percent}%</span>
         </div>
       </footer>
 
@@ -967,8 +880,7 @@ export default function Journey() {
               transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
             >
               <div className="eyebrow" aria-hidden="true">
-                <span className="eyebrow-dot" />
-                INTERACTIVE JOURNEY
+                An interactive journey
               </div>
               <div className="hero-title" aria-hidden="true">
                 <span>The Solar</span>
@@ -997,12 +909,9 @@ export default function Journey() {
               transition={{ duration: 0.7, ease: EASE_OUT_EXPO }}
             >
               <div className="story-inner">
-                <div className="numeral" aria-hidden="true">
-                  {chapterNo(active + 1)}
-                </div>
-
                 <div className="chapter" aria-hidden="true">
-                  <span>{activeChapter.eyebrow}</span>
+                  <span className="chapter-index">{chapterNo(active + 1)}</span>
+                  {planetName}
                 </div>
 
                 <div className="story-title" aria-hidden="true">
@@ -1050,35 +959,16 @@ export default function Journey() {
                 </div>
 
                 {scale && (
-                  <motion.div
-                    className="scale-model"
+                  <motion.p
+                    className="scale-line"
                     aria-hidden="true"
-                    initial={{ opacity: 0, y: 12 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.6, delay: 0.5, ease: EASE_OUT_EXPO }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.8, delay: 0.45 }}
                   >
-                    <div className="scale-head">Scale model</div>
-                    <p className="scale-text">
-                      If the Sun were a door <b>2 m</b> tall, {scale.name} would
-                      be <b>{scale.size}</b> across, about {scale.like},{' '}
-                      <b>{scale.distance}</b> away.
-                    </p>
-                    <div className="scale-track">
-                      <span className="scale-sun" />
-                      {Object.entries(SCALE_MODEL).map(([id, model]) => (
-                        <span
-                          key={id}
-                          className={`scale-dot ${id === activeChapter.id ? 'is-current' : ''}`}
-                          style={{
-                            left: `${(toModelMetres(model.au * AU_KM) / MODEL_EDGE_M) * 100}%`,
-                          }}
-                        />
-                      ))}
-                      <span className="scale-end">
-                        {formatDistance(MODEL_EDGE_M)}
-                      </span>
-                    </div>
-                  </motion.div>
+                    If the Sun were a door 2 m tall, {scale.name} would be{' '}
+                    {scale.size} across ({scale.like}) and {scale.distance} away.
+                  </motion.p>
                 )}
 
                 <button
@@ -1086,7 +976,7 @@ export default function Journey() {
                   onClick={() => goToSection(section + 1)}
                 >
                   {active < JOURNEY.length - 1
-                    ? `Next · ${JOURNEY[active + 1].label}`
+                    ? `Next: ${titleCase(JOURNEY[active + 1].label)}`
                     : 'Continue'}
                   <span>→</span>
                 </button>
@@ -1104,7 +994,8 @@ export default function Journey() {
               transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
             >
               <div className="chapter" aria-hidden="true">
-                <span>{TOTAL_SECTIONS - 1} · RETURN</span>
+                <span className="chapter-index">{TOTAL_SECTIONS - 1}</span>
+                Return
               </div>
               <div className="return-title" aria-hidden="true">
                 Now look <em>back.</em>
