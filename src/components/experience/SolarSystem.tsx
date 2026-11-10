@@ -609,6 +609,38 @@ vec3 neptuneWeather(vec3 base, vec2 uv) {
   return mix(base, vec3(0.92, 0.96, 1.0), white);
 }
 
+/* Mars: a regional dust storm drifting slowly across the surface,
+   ochre and soft-edged, veiling the dark markings beneath it */
+vec3 marsDust(vec3 base, vec2 uv, vec3 p) {
+  vec2 d = uv - vec2(fract(0.36 + uTime * 0.0012), 0.43);
+  d.x = (fract(d.x + 0.5) - 0.5) * 1.86;
+  float region = 1.0 - smoothstep(0.05, 0.16, length(d * vec2(1.0, 1.6)));
+  float billows = smoothstep(0.42, 0.7, fbm(p * 7.0 + vec3(uTime * 0.012, 0.0, uTime * 0.008)));
+  float dust = region * (0.45 + 0.55 * billows);
+  return mix(base, vec3(0.86, 0.62, 0.42), dust * 0.7);
+}
+
+/* Saturn: the hexagon, a six-sided jet stream round the north pole
+   (near 78 N), with a darker vortex at the pole itself */
+vec3 saturnPole(vec3 base, vec2 uv) {
+  float lat = (uv.y - 0.5) * 3.14159;
+  float fromPole = 1.5708 - lat;
+  if (fromPole > 0.4) return base;
+  float lon = uv.x * 6.28318;
+  vec2 q = fromPole * vec2(cos(lon), sin(lon));
+  float a = atan(q.y, q.x);
+  float sector = mod(a, 1.0472) - 0.5236;
+  float apothem = 0.21 * 0.866;
+  float edge = length(q) * cos(sector);
+  float inside = 1.0 - smoothstep(apothem - 0.006, apothem + 0.006, edge);
+  float band = 1.0 - smoothstep(0.0, 0.012, abs(edge - apothem));
+  vec3 polar = mix(base, vec3(0.58, 0.64, 0.66), 0.45); /* bluish polar haze */
+  vec3 c = mix(base, polar, inside);
+  c = mix(c, c * 0.72, band);
+  c = mix(c, c * 0.55, 1.0 - smoothstep(0.0, 0.035, fromPole));
+  return c;
+}
+
 vec3 uranusWeather(vec3 base, vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
   /* faint banding and a bright cap over the sunward (north) pole */
@@ -699,6 +731,8 @@ void main() {
     }
     if (uPlanet == 7) surface = neptuneWeather(surface, vUv);
     else if (uPlanet == 6) surface = uranusWeather(surface, vUv);
+    else if (uPlanet == 3) surface = marsDust(surface, vUv, p);
+    else if (uPlanet == 5) surface = saturnPole(surface, vUv);
   }
 
   vec3 toSun = normalize(uSunPosition - vWorldPosition);
@@ -759,8 +793,15 @@ void main() {
     }
   }
 
+  /* Saturn reads warmer and richer (butterscotch, not grey) */
+  if (uPlanet == 5) surface *= vec3(1.1, 1.0, 0.82);
+
   float rim = pow(1.0 - facing, 3.5);
   vec3 color = surface * (vec3(0.035) + light * shadow * 0.965 * uLight * uLightTint) * limb;
+  /* Mars: thin dust suspended in the air softens the limb to a warm haze */
+  if (uPlanet == 3) {
+    color = mix(color, vec3(0.92, 0.66, 0.48) * light * uLight, pow(1.0 - facing, 2.4) * 0.42);
+  }
   color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
 
   gl_FragColor = vec4(max(color, vec3(0.003)), 1.0);

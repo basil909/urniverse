@@ -13,6 +13,7 @@ import UniverseCanvas from './experience/UniverseCanvas'
 
 import Loader from './ui/Loader'
 import DetailPanel from './ui/DetailPanel'
+import CountUp from './ui/CountUp'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
@@ -928,6 +929,13 @@ export default function Journey() {
         detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
         onClose={() => setDetailOpen(false)}
         inside={inside}
+        worldIndex={
+          activeChapter?.id === 'sun'
+            ? -1
+            : activeChapter
+              ? PLANET_INDEX[activeChapter.id]
+              : undefined
+        }
         layers={
           activeChapter && PLANET_INDEX[activeChapter.id] !== undefined
             ? INTERIORS[PLANET_INDEX[activeChapter.id]]
@@ -1113,24 +1121,35 @@ export default function Journey() {
                 </div>
 
                 <div className="story-title" aria-hidden="true">
-                  {activeChapter.title.split(' ').map((word, wordIndex) => (
-                    <Fragment key={`${word}-${wordIndex}`}>
-                      <span className="word-mask" aria-hidden="true">
-                        <motion.span
-                          className="word"
-                          initial={{ y: '110%', rotate: 3 }}
-                          animate={{ y: '0%', rotate: 0 }}
-                          transition={{
-                            duration: 0.95,
-                            delay: 0.1 + wordIndex * 0.06,
-                            ease: EASE_OUT_EXPO,
-                          }}
-                        >
-                          {word}
-                        </motion.span>
-                      </span>{' '}
-                    </Fragment>
-                  ))}
+                  {(() => {
+                    // letters ease in one after another, lifting and
+                    // sharpening from a slight blur; words never break
+                    let letter = 0
+                    return activeChapter.title.split(' ').map((word, wordIndex) => (
+                      <Fragment key={`${word}-${wordIndex}`}>
+                        <span className="word">
+                          {Array.from(word).map((character, i) => {
+                            const order = letter++
+                            return (
+                              <motion.span
+                                key={i}
+                                className="letter"
+                                initial={{ opacity: 0, y: '0.35em', filter: 'blur(6px)' }}
+                                animate={{ opacity: 1, y: '0em', filter: 'blur(0px)' }}
+                                transition={{
+                                  duration: 0.8,
+                                  delay: 0.08 + order * 0.022,
+                                  ease: EASE_OUT_EXPO,
+                                }}
+                              >
+                                {character}
+                              </motion.span>
+                            )
+                          })}
+                        </span>{' '}
+                      </Fragment>
+                    ))
+                  })()}
                 </div>
 
                 <p className="story-description" aria-hidden="true">
@@ -1150,7 +1169,9 @@ export default function Journey() {
                         ease: EASE_OUT_EXPO,
                       }}
                     >
-                      <strong>{stat.value}</strong>
+                      <strong>
+                        <CountUp value={stat.value} delay={0.3 + statIndex * 0.08} />
+                      </strong>
                       <span>{stat.label}</span>
                     </motion.div>
                   ))}

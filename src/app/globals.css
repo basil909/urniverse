@@ -1222,3 +1222,87 @@ html.is-spinning * {
   color: rgba(0, 0, 0, 0.75);
 }
 
+/* bright star names, in the opening view only */
+.star-name {
+  transform: translate(10px, -50%);
+  white-space: nowrap;
+  font: 400 10px / 1 var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(214, 226, 255, 0.9);
+  transition: opacity 0.4s;
+}
+
+/* the panel's drawings: size to scale, and the orbit from above */
+.world-graphics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 0 0 1.75rem;
+  padding: 1rem 0 0;
+  border-top: 1px solid var(--hairline);
+}
+.world-figure {
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
+  align-content: start;
+}
+.world-figure svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.world-figure text {
+  font: 500 7px / 1 var(--sans);
+  letter-spacing: 0.06em;
+  fill: var(--text-3);
+}
+.world-figure figcaption {
+  font: 400 var(--size-label) / 1.35 var(--sans);
+  color: var(--text-3);
+}
+.world-figure-self {
+  fill: color-mix(in srgb, var(--planet-accent) 22%, transparent);
+  stroke: var(--planet-accent);
+  stroke-width: 0.8;
+}
+.world-figure-other {
+  fill: rgba(140, 180, 255, 0.12);
+  stroke: rgba(170, 200, 255, 0.7);
+  stroke-width: 0.8;
+}
+.world-orbit {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.14);
+  stroke-width: 0.6;
+}
+.world-orbit.is-self {
+  stroke: var(--planet-accent);
+  stroke-width: 0.9;
+}
+.world-sun { fill: #ffd27a; }
+.world-earth { fill: #8fb4ff; }
+.world-here {
+  fill: var(--planet-accent);
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 0.6;
+}
+.world-figure .world-here-label { fill: var(--text-1); }
+@media (max-width: 520px) {
+  .world-graphics { grid-template-columns: 1fr; }
+}
+
+/* title letters: each animates on its own, words stay unbroken */
+.story-title .word {
+  display: inline-block;
+  white-space: nowrap;
+}
+.story-title .letter {
+  display: inline-block;
+  will-change: transform, opacity, filter;
+}
+/* counting figures keep a steady width as their digits change */
+.inline-stat strong {
+  font-variant-numeric: tabular-nums;
+}

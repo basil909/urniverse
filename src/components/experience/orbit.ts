@@ -288,6 +288,34 @@ export function getPlanetOrbitPosition(
 }
 
 /**
+ * For flat diagrams: the planet's heliocentric position in the ecliptic
+ * plane (AU, x towards the vernal equinox, y 90 degrees ahead), and its
+ * orbit as a list of points.
+ */
+export function getPlanetEclipticAU(index: number, jd: number): [number, number] {
+  const orbit = orbitAt(index, jd)
+  if (!orbit) return [0, 0]
+  const E = solveKepler(orbit.meanAnomaly, orbit.e)
+  return eclipticPoint(orbit, E)
+}
+
+export function getPlanetOrbitPathAU(index: number, jd: number, samples = 96): [number, number][] {
+  const orbit = orbitAt(index, jd)
+  if (!orbit) return []
+  const points: [number, number][] = []
+  for (let i = 0; i <= samples; i += 1) {
+    points.push(eclipticPoint(orbit, (i / samples) * Math.PI * 2))
+  }
+  return points
+}
+
+function eclipticPoint(orbit: OrbitAtEpoch, E: number): [number, number] {
+  const xp = orbit.a * (Math.cos(E) - orbit.e)
+  const yp = orbit.a * Math.sqrt(1 - orbit.e * orbit.e) * Math.sin(E)
+  return [orbit.px[0] * xp + orbit.qx[0] * yp, orbit.px[1] * xp + orbit.qx[1] * yp]
+}
+
+/**
  * A point on the planet's (real, oriented, inclined) orbit, for drawing
  * the orbit line. `eccentricAnomaly` runs 0..2PI around the ellipse.
  */

@@ -5,6 +5,7 @@ import { useEffect, useRef } from 'react'
 
 import { DETAIL_SOURCE, type WorldDetail } from '../../data/worlds'
 import type { Layer } from '../../data/interiors'
+import WorldGraphics from './WorldGraphics'
 
 /* A quiet, scrollable deep-dive for the current world. It sits over the
    text column, scrolls on its own (data-lenis-prevent keeps the page
@@ -20,6 +21,7 @@ export default function DetailPanel({
   inside,
   onToggleInside,
   layers,
+  worldIndex,
 }: {
   open: boolean
   name: string
@@ -29,6 +31,8 @@ export default function DetailPanel({
   inside?: boolean
   onToggleInside?: () => void
   layers?: Layer[]
+  /* orbit index for the drawings (-1: the Sun); none for other chapters */
+  worldIndex?: number
 }) {
   const closeButton = useRef<HTMLButtonElement>(null)
 
@@ -105,6 +109,8 @@ export default function DetailPanel({
               ))}
             </ol>
           )}
+
+          {worldIndex !== undefined && <WorldGraphics index={worldIndex} name={name} />}
 
           <dl className="detail-glance">
             {detail.glance.map((item) => (

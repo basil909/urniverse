@@ -23,6 +23,7 @@ import Galaxy, {
   GALAXY_TILT,
 } from './Galaxy'
 import Starfield from './Starfield'
+import NightSky from './NightSky'
 import { lens } from './lens'
 import {
   SYSTEM_OFFSET,
@@ -1275,6 +1276,8 @@ function Scene({
       <BacklitDriver progressRef={progressRef} />
 
       <MilkyWaySky progressRef={progressRef} />
+
+      <NightSky progressRef={progressRef} />
 
       <color attach="background" args={['#010207']} />
 
