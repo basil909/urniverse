@@ -24,3 +24,21 @@ matched to the earlier maps; city lights extracted as for the 2K map above.
 
 Earth and Moon 2K maps (public/textures/earth-day.webp, earth-clouds.webp, moon.webp)
 Downscaled from the same 4K maps above, so the sharp swap only adds detail.
+
+Relief (elevation) maps - public domain, downloaded 2026-11-10
+- public/textures/relief/mars-height.webp: Mars MGS MOLA DEM global mosaic
+  (USGS Astrogeology, mars_mgs_mola_dem_mosaic_global_1024.jpg), resampled to
+  1024x512.
+- public/textures/relief/mercury-height.webp: Mercury MESSENGER global DEM
+  (USGS Astrogeology, mercury_messenger_dem_global_665m_1024.jpg), shifted
+  180 degrees in longitude to match the colour map.
+- public/textures/moon-height.webp: LRO LOLA elevation from NASA's Scientific
+  Visualization Studio CGI Moon Kit (ldem_4_uint.tif), converted to 8-bit.
+  Credit: NASA's Scientific Visualization Studio.
+All saved as lossless WebP.
+
+Galilean moon surfaces - public domain, USGS Astrogeology, downloaded 2026-11-10
+- public/textures/moons/io.webp: Io Galileo SSI / Voyager colour merged global mosaic.
+- public/textures/moons/europa.webp, ganymede.webp, callisto.webp: Voyager /
+  Galileo SSI global mosaics (greyscale), no-data gaps filled and tinted to
+  each moon's colour.

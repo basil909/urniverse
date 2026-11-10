@@ -17,6 +17,7 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
 - **A Pale Blue Dot finale.** From beyond Neptune the camera looks back through a long lens at Earth, a single speck beside the Sun's glare, as Voyager 1 saw it in 1990. Then a long pull-back: the lens opens, the Solar System collapses to a point, and a "You are here" marker appears on a spiral arm of the Milky Way.
 - **Quiet, editorial interface.** Two typefaces, a slim chapter rail and a hairline progress bar; the planet is always the hero.
+- **Relief and living detail.** Mercury and Mars are shaded from real elevation maps, so craters and volcanoes catch the light; Jupiter's and Saturn's cloud bands flow and the Great Red Spot turns; the Sun has prominences; Jupiter's large moons show their real surfaces; the asteroid belt (with Jupiter's Trojans) and the Kuiper belt orbit at their true rates.
 - **Hands-on planets.** Drag to rotate the planet in focus; small markers on real features (Olympus Mons, the Great Red Spot, the Himalayas and more) reveal a short note on hover.
 - **Works on phones.** On portrait screens the planet moves to the top half and the text to the bottom.
 - **Accessible.** All chapter text is available to screen readers, there is keyboard navigation, and the OS "reduce motion" setting turns off smooth scrolling and camera drift.
@@ -87,7 +88,8 @@ To add or remove a chapter, edit the `JOURNEY` array in `Journey.tsx` and add a 
 ## Credits
 
 - **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune, the 4K set in `hd/`), **Earth's day map, clouds and city lights**, the **Moon** and the **Milky Way sky**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
-- **Earth's normal and specular maps and the Moon's height map** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
+- **Relief and moon surfaces** (public domain): Mars and Mercury elevation from USGS Astrogeology (MGS MOLA, MESSENGER); the Moon's elevation from the LRO LOLA data in NASA's Scientific Visualization Studio CGI Moon Kit; Io, Europa, Ganymede and Callisto from USGS Galileo / Voyager mosaics. Details in `public/textures/planets/CREDITS.txt`.
+- **Earth's normal and specular maps** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
 
 ## Status
 

@@ -210,6 +210,16 @@ const _hotspotCenter = new THREE.Vector3()
 const _hotspotNormal = new THREE.Vector3()
 const _hotspotToCamera = new THREE.Vector3()
 
+/* Elevation maps for relief shading, by orbit index. Public domain:
+   Mercury from MESSENGER (USGS), Mars from MGS MOLA (USGS). Strength
+   exaggerates the slopes (real relief is under 1% of the radius). */
+const RELIEF: ({ url: string; strength: number } | undefined)[] = [
+  { url: '/textures/relief/mercury-height.webp', strength: 3.2 },
+  undefined,
+  undefined,
+  { url: '/textures/relief/mars-height.webp', strength: 4.0 },
+]
+
 /* Planet surface maps by orbit index (Earth uses EARTH_LOCAL_TEXTURES) */
 const PLANET_TEXTURES: (string | undefined)[] = [
   '/textures/planets/2k_mercury.webp',
@@ -353,8 +363,22 @@ void main() {
 const PLANET_VERTEX_SHADER = /* glsl */ `
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
+varying vec3 vEast; varying vec3 vNorth;
 
-void main() { vUv = uv; vNormal = normalize(mat3(modelMatrix) * normal); vLocalPosition = position; vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPosition = wp.xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
+void main() {
+  vUv = uv;
+  vNormal = normalize(mat3(modelMatrix) * normal);
+  vLocalPosition = position;
+  /* map directions on the sphere: east = increasing u, north = increasing v */
+  vec3 lp = normalize(position);
+  vec3 east = vec3(lp.z, 0.0, -lp.x);
+  east = length(east) > 1e-4 ? normalize(east) : vec3(1.0, 0.0, 0.0);
+  vEast = mat3(modelMatrix) * east;
+  vNorth = mat3(modelMatrix) * cross(lp, east);
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPosition = wp.xyz;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
 
 
 
@@ -366,8 +390,10 @@ uniform float uTime; uniform int uType; uniform int uPlanet; uniform vec3 uBaseC
 uniform vec3 uMoonPos[4]; uniform float uMoonRadius[4]; uniform int uMoonCount;
 uniform float uLight; uniform vec3 uLightTint; /* sunlight strength and colour at this distance */
 uniform float uHasRings; uniform sampler2D uRingMap; uniform vec3 uRingNormal; uniform vec3 uPlanetCenter; uniform float uRingInner; uniform float uRingOuter;
+uniform sampler2D uHeight; uniform float uHasHeight; uniform float uRelief; uniform vec2 uHeightTexel; /* surface relief */
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
+varying vec3 vEast; varying vec3 vNorth;
 
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 
@@ -549,10 +575,27 @@ void main() {
   vec3 vd = normalize(cameraPosition - vWorldPosition);
   float ndl = dot(normal, toSun);
 
+  /* relief from the elevation map: tilt the normal by the height slope,
+     so mountains and crater walls catch the light near the terminator */
+  vec3 lit = normal;
+  if (uHasHeight > 0.5) {
+    float hE = texture2D(uHeight, vUv + vec2(uHeightTexel.x, 0.0)).r;
+    float hW = texture2D(uHeight, vUv - vec2(uHeightTexel.x, 0.0)).r;
+    float hN = texture2D(uHeight, vUv + vec2(0.0, uHeightTexel.y)).r;
+    float hS = texture2D(uHeight, vUv - vec2(0.0, uHeightTexel.y)).r;
+    /* texels narrow towards the poles: the same height step is steeper */
+    float across = max(cos((vUv.y - 0.5) * 3.14159), 0.2);
+    vec2 slope = vec2((hE - hW) / across, hN - hS) * uRelief;
+    lit = normalize(normal - slope.x * normalize(vEast) - slope.y * normalize(vNorth));
+  }
+  float ndlLit = dot(lit, toSun);
+
   /* soft terminator, a touch of wrap lighting for thick atmospheres */
   float wrap = (uType == 2 || uType == 3 || uPlanet == 1) ? 0.18 : 0.04;
-  float light = clamp((ndl + wrap) / (1.0 + wrap), 0.0, 1.0);
+  float light = clamp((ndlLit + wrap) / (1.0 + wrap), 0.0, 1.0);
   light = smoothstep(0.0, 1.0, light);
+  /* relief never lights a slope past the real day/night line */
+  if (uHasHeight > 0.5) light *= smoothstep(-0.12, 0.06, ndl);
 
   /* limb darkening on gas / ice giants */
   float facing = max(dot(normal, vd), 0.0);
@@ -964,6 +1007,11 @@ function Planet({
       uPlanetCenter: { value: new THREE.Vector3() },
       uRingInner: { value: 0 },
       uRingOuter: { value: 0 },
+      // surface relief (Mercury, Mars)
+      uHeight: { value: null as THREE.Texture | null },
+      uHasHeight: { value: 0 },
+      uRelief: { value: RELIEF[index]?.strength ?? 0 },
+      uHeightTexel: { value: new THREE.Vector2(1 / 1024, 1 / 512) },
     }),
     [planet, planetType, index, sunlight],
   )
@@ -1068,6 +1116,34 @@ function Planet({
       uniforms.uHasMap.value = 0
     }
   }, [gl, index, uniforms])
+
+  // elevation map for relief shading
+  useEffect(() => {
+    const relief = RELIEF[index]
+    if (!relief) return
+    let disposed = false
+    let owned: THREE.Texture | null = null
+    new THREE.TextureLoader().load(relief.url, (texture) => {
+      if (disposed) {
+        texture.dispose()
+        return
+      }
+      texture.colorSpace = THREE.NoColorSpace
+      texture.wrapS = THREE.RepeatWrapping
+      texture.wrapT = THREE.ClampToEdgeWrapping
+      const image = texture.image as { width: number; height: number }
+      uniforms.uHeightTexel.value.set(1 / image.width, 1 / image.height)
+      uniforms.uHeight.value = texture
+      uniforms.uHasHeight.value = 1
+      owned = texture
+    })
+    return () => {
+      disposed = true
+      uniforms.uHasHeight.value = 0
+      uniforms.uHeight.value = null
+      owned?.dispose()
+    }
+  }, [index, uniforms])
 
   // swap the sharp map in, and the 2K map back when it is released
   useEffect(() => {
@@ -1543,6 +1619,8 @@ type MoonSpec = {
   shape?: [number, number, number]
   /* thick atmosphere colour (Titan) */
   haze?: string
+  /* surface map (Galileo / Voyager mosaics, USGS, public domain) */
+  map?: string
 }
 
 type MoonSystemSpec = {
@@ -1562,10 +1640,10 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
   Jupiter: {
     baseSeconds: 30,
     moons: [
-      { name: 'Io', color: '#d8bb63', radius: 0.065, distance: 1.85, periodDays: 1.769, phase: 0.3 },
-      { name: 'Europa', color: '#cdbfa3', radius: 0.056, distance: 2.3, periodDays: 3.551, phase: 2.2 },
-      { name: 'Ganymede', color: '#9c8f80', radius: 0.094, distance: 2.95, periodDays: 7.155, phase: 4.1 },
-      { name: 'Callisto', color: '#6e6359', radius: 0.086, distance: 3.7, periodDays: 16.689, phase: 5.5 },
+      { name: 'Io', map: '/textures/moons/io.webp', color: '#d8bb63', radius: 0.065, distance: 1.85, periodDays: 1.769, phase: 0.3 },
+      { name: 'Europa', map: '/textures/moons/europa.webp', color: '#cdbfa3', radius: 0.056, distance: 2.3, periodDays: 3.551, phase: 2.2 },
+      { name: 'Ganymede', map: '/textures/moons/ganymede.webp', color: '#9c8f80', radius: 0.094, distance: 2.95, periodDays: 7.155, phase: 4.1 },
+      { name: 'Callisto', map: '/textures/moons/callisto.webp', color: '#6e6359', radius: 0.086, distance: 3.7, periodDays: 16.689, phase: 5.5 },
     ],
   },
   Saturn: {
@@ -1598,12 +1676,28 @@ function MoonSystem({
   const moonColors = useMemo(
     () =>
       system.moons.map((moon) => {
-        const color = new THREE.Color(moon.color)
+        // with a surface map, the map carries the colour and light tints it
+        const color = new THREE.Color(moon.map ? '#ffffff' : moon.color)
         if (sunlight) color.multiply(sunlight.tint).multiplyScalar(sunlight.strength)
         return color
       }),
     [system, sunlight],
   )
+  // loaded after render (starting a load during render would update the
+  // loading screen's progress mid-render)
+  const [moonMaps, setMoonMaps] = useState<(THREE.Texture | null)[]>([])
+  useEffect(() => {
+    const loader = new THREE.TextureLoader()
+    const maps = system.moons.map((moon) => {
+      if (!moon.map) return null
+      const texture = loader.load(moon.map)
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.wrapS = THREE.RepeatWrapping
+      return texture
+    })
+    setMoonMaps(maps)
+    return () => maps.forEach((texture) => texture?.dispose())
+  }, [system])
   const arms = useRef<(THREE.Group | null)[]>([])
   const bodies = useRef<(THREE.Mesh | null)[]>([])
   // Titan's thick orange haze uses the same Sun-aware atmosphere shader
@@ -1665,9 +1759,12 @@ function MoonSystem({
               (axis) => axis * moon.radius * planetRadius,
             ) as [number, number, number]}
           >
-            <sphereGeometry args={[1, 32, 24]} />
+            <sphereGeometry args={[1, 48, 32]} />
             <meshStandardMaterial
+              // rebuilt once the map arrives (a new map needs a recompile)
+              key={moonMaps[i] ? 'mapped' : 'plain'}
               color={moonColors[i]}
+              map={moonMaps[i] ?? undefined}
               roughness={1}
               metalness={0}
             />
