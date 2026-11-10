@@ -119,6 +119,20 @@ const _viewDir = new THREE.Vector3()
 /* Share of the view each rocky planet fills: Mercury, Venus, Earth, Mars */
 const ROCKY_FILL: (number | undefined)[] = [0.045, 0.06, 0.063, 0.05]
 
+/* Flight feel: written by the camera each frame, read by the streak field.
+   `intensity` (0..1) is speed relative to the distance to what we look at,
+   so a short hop between inner planets feels as quick as a long haul. */
+const flight = {
+  velocity: new THREE.Vector3(),
+  intensity: 0,
+}
+const _prevCameraPosition = new THREE.Vector3()
+const _rawVelocity = new THREE.Vector3()
+const _cameraRight = new THREE.Vector3()
+
+const FOV_BREATH = 5 // extra degrees of field of view at full speed
+const MAX_BANK = 0.055 // radians (~3 degrees) of roll into turns
+
 const BLEND = 0.18
 
 const isPlanetChapter = (chapter: number) =>
@@ -257,6 +271,7 @@ function CinematicCamera({
     camera.updateProjectionMatrix()
   }, [camera, size.width, size.height])
   const initialized = useRef(false)
+  const bank = useRef(0)
   const smoothPosition = useRef(new THREE.Vector3())
   const parallaxWeight = useRef(1)
   // "Reduce motion": camera follows scroll directly, no drift or mouse parallax
@@ -360,6 +375,28 @@ function CinematicCamera({
     }
     camera.position.copy(smoothPosition.current)
 
+    // ---- flight speed (from the smoothed path, before mouse parallax)
+    const step = Math.max(delta, 1 / 240)
+    _rawVelocity
+      .copy(smoothPosition.current)
+      .sub(_prevCameraPosition)
+      .divideScalar(step)
+    _prevCameraPosition.copy(smoothPosition.current)
+    // ignore teleports (first frame, tab switches, resizes)
+    if (_rawVelocity.lengthSq() > 1e6) _rawVelocity.set(0, 0, 0)
+    flight.velocity.lerp(_rawVelocity, 1 - Math.exp(-delta * 6))
+
+    const lookDistance = Math.max(
+      1,
+      smoothPosition.current.distanceTo(_scratchTarget),
+    )
+    const relativeSpeed = flight.velocity.length() / lookDistance
+    const targetIntensity = reducedMotion
+      ? 0
+      : THREE.MathUtils.smoothstep(relativeSpeed, 0.2, 1.4)
+    flight.intensity +=
+      (targetIntensity - flight.intensity) * (1 - Math.exp(-delta * 5))
+
     parallaxWeight.current +=
       ((planet || reducedMotion ? 0 : 1) - parallaxWeight.current) *
       (1 - Math.exp(-delta * 4))
@@ -369,7 +406,8 @@ function CinematicCamera({
     camera.position.y +=
       pointer.y * 0.10 * parallaxWeight.current
 
-    const fovDiff = targetFov - camera.fov
+    // breathe: open the field of view a little with speed, settle on arrival
+    const fovDiff = targetFov + flight.intensity * FOV_BREATH - camera.fov
 
     if (Math.abs(fovDiff) > 0.01) {
       camera.fov +=
@@ -378,9 +416,141 @@ function CinematicCamera({
     }
 
     camera.lookAt(_scratchTarget)
+
+    // bank: roll gently into sideways motion, level out when it stops
+    _cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
+    const lateral = flight.velocity.dot(_cameraRight) / lookDistance
+    const targetBank = reducedMotion
+      ? 0
+      : THREE.MathUtils.clamp(-lateral * 0.05, -MAX_BANK, MAX_BANK)
+    bank.current += (targetBank - bank.current) * (1 - Math.exp(-delta * 3))
+    if (Math.abs(bank.current) > 0.0005) camera.rotateZ(bank.current)
   })
 
   return null
+}
+
+/* ============================================================
+   STAR STREAKS
+   Faint lines that wrap around the camera. At rest they are invisible;
+   in flight each one trails behind along the direction of travel, so
+   speed is felt without any interface.
+============================================================ */
+
+const STREAK_COUNT = 650
+const STREAK_BOX = 60
+
+const STREAK_VERTEX = /* glsl */ `
+uniform vec3 uCamera;
+uniform vec3 uTrail;
+uniform float uBox;
+attribute float aTail;
+varying float vFade;
+
+void main() {
+  // wrap every streak into a box that travels with the camera
+  vec3 rel = mod(position - uCamera + uBox * 0.5, uBox) - uBox * 0.5;
+  vec3 world = uCamera + rel - uTrail * aTail;
+
+  float distance = length(rel);
+  float nearFade = smoothstep(1.2, 4.5, distance);
+  float farFade = 1.0 - smoothstep(uBox * 0.28, uBox * 0.5, distance);
+  vFade = nearFade * farFade * (1.0 - aTail * 0.85);
+
+  gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+}`
+
+const STREAK_FRAGMENT = /* glsl */ `
+uniform float uIntensity;
+varying float vFade;
+
+void main() {
+  gl_FragColor = vec4(vec3(0.72, 0.8, 1.0) * vFade * uIntensity * 0.42, 1.0);
+}`
+
+const _trail = new THREE.Vector3()
+
+function StarStreaks() {
+  const camera = useThree((state) => state.camera)
+  const lines = useRef<THREE.LineSegments>(null)
+
+  const geometry = useMemo(() => {
+    const positions = new Float32Array(STREAK_COUNT * 2 * 3)
+    const tails = new Float32Array(STREAK_COUNT * 2)
+    let seed = 1337
+    const random = () => {
+      seed = (seed * 16807) % 2147483647
+      return seed / 2147483647
+    }
+    for (let i = 0; i < STREAK_COUNT; i += 1) {
+      const x = (random() - 0.5) * STREAK_BOX
+      const y = (random() - 0.5) * STREAK_BOX
+      const z = (random() - 0.5) * STREAK_BOX
+      for (let end = 0; end < 2; end += 1) {
+        const v = i * 2 + end
+        positions[v * 3] = x
+        positions[v * 3 + 1] = y
+        positions[v * 3 + 2] = z
+        tails[v] = end
+      }
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    g.setAttribute('aTail', new THREE.BufferAttribute(tails, 1))
+    return g
+  }, [])
+
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uCamera: { value: new THREE.Vector3() },
+          uTrail: { value: new THREE.Vector3() },
+          uBox: { value: STREAK_BOX },
+          uIntensity: { value: 0 },
+        },
+        vertexShader: STREAK_VERTEX,
+        fragmentShader: STREAK_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    [],
+  )
+
+  useEffect(
+    () => () => {
+      geometry.dispose()
+      material.dispose()
+    },
+    [geometry, material],
+  )
+
+  useFrame(() => {
+    if (!lines.current) return
+    const intensity = flight.intensity
+    lines.current.visible = intensity > 0.01
+    if (!lines.current.visible) return
+
+    // trail = how far each streak reaches back along the motion
+    const speed = flight.velocity.length()
+    const length = Math.min(speed * 0.06, 4) * intensity
+    _trail.copy(flight.velocity)
+    if (speed > 1e-4) _trail.multiplyScalar(length / speed)
+
+    material.uniforms.uCamera.value.copy(camera.position)
+    material.uniforms.uTrail.value.copy(_trail)
+    material.uniforms.uIntensity.value = intensity
+  })
+
+  return (
+    <lineSegments
+      ref={lines}
+      geometry={geometry}
+      material={material}
+      frustumCulled={false}
+    />
+  )
 }
 
 /* ============================================================
@@ -735,6 +905,8 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
 
       <CinematicCamera progressRef={progressRef} />
+
+      <StarStreaks />
 
 
 
