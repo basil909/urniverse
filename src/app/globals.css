@@ -915,3 +915,34 @@ html.is-spinning * {
   .loader-orbit { animation: none; }
   .spin-hint { animation: none; opacity: 1; }
 }
+
+/* ============================================================
+   PALE BLUE DOT (chapter 10)
+   ============================================================ */
+
+.pale-blue-dot {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  pointer-events: none;
+}
+
+.pale-blue-dot-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(214, 228, 255, 0.55);
+}
+
+.pale-blue-dot-label {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  font-size: var(--size-label);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  white-space: nowrap;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95);
+}

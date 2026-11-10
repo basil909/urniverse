@@ -384,38 +384,22 @@ const JOURNEY: Chapter[] = [
   {
 
     id: 'beyond',
-
-    label: 'BEYOND',
-
-    eyebrow: '10 · BEYOND THE PLANETS',
-
-    title: 'The Solar System keeps going.',
-
-    description: 'Neptune is not the edge of the Solar System. Beyond the planets lie the Kuiper Belt, the distant scattered disk and, far beyond, the enormous Oort Cloud. The journey from one star to the next has only just begun.',
-
+    label: 'PALE BLUE DOT',
+    eyebrow: '10 · A PALE BLUE DOT',
+    title: "That's here. That's home.",
+    description: 'In 1990, from beyond Neptune, Voyager 1 turned its camera back towards home. Earth was a single speck caught in a beam of sunlight. Carl Sagan called it a pale blue dot: everyone you have ever known, and everyone who ever was, lived out their lives there.',
     facts: [
-
-      'The Kuiper Belt contains many icy bodies beyond Neptune.',
-
-      'Pluto is a dwarf planet in the Kuiper Belt.',
-
-      'The Oort Cloud is a hypothesized distant reservoir of icy bodies.',
-
-      'Beyond the Solar System, the Milky Way contains vast numbers of other stars and planetary systems.',
-
+      'Voyager 1 took the photo on 14 February 1990, about 6 billion km from the Sun.',
+      'In the image, Earth fills just 0.12 of a pixel.',
+      'The bands of light across the photo are sunlight scattered inside the camera.',
+      'In 2012 Voyager 1 became the first spacecraft to reach interstellar space.',
     ],
-
     stats: [
-
-      { value: '8', label: 'PLANETS' },
-
-      { value: '30+ AU', label: 'TO NEPTUNE' },
-
-      { value: '∞', label: 'WHAT COMES NEXT' },
-
+      { value: '6 bn km', label: 'FROM THE SUN' },
+      { value: '0.12', label: 'OF A PIXEL' },
+      { value: '1990', label: 'VOYAGER 1' },
     ],
-
-    accent: '#aab8d6',
+    accent: '#9cc4ff',
   },
   {
     id: 'galaxy',
@@ -686,7 +670,11 @@ export default function Journey() {
 
       snapping = true
       lenis.scrollTo(to * unit(), {
-        duration: Math.min(2.6, 0.95 + 0.55 * distance),
+        // the pull-back from the Pale Blue Dot to the galaxy takes its time
+        duration:
+          (target === 11 && lastRest === 10) || (target === 10 && lastRest === 11)
+            ? 3.4
+            : Math.min(2.6, 0.95 + 0.55 * distance),
         easing: easeInOutSine,
         lock: true,
         force: true,

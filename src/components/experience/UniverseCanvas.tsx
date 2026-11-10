@@ -263,6 +263,36 @@ function calculatePlanetPose(
     .addScaledVector(_side, config.compositionOffset * 0.10)
 }
 
+/* Pale Blue Dot: from far out, look back home with a long, narrow lens.
+   The camera sits beyond the Sun from Earth and above the planets' plane,
+   so Earth shows its sunlit face as a tiny blue speck just past the
+   Sun's glare (like the speck in Voyager 1's photo, caught in sunlight). */
+const PALE_BLUE_DOT_DISTANCE = 95
+const PALE_BLUE_DOT_ELEVATION = (50 * Math.PI) / 180
+const PALE_BLUE_DOT_FOV = 16
+const _pbdEarth = new THREE.Vector3()
+const _pbdDir = new THREE.Vector3()
+
+function paleBlueDotPose(outPos: THREE.Vector3, outTarget: THREE.Vector3) {
+  getPlanetPosition(2, simClock.jd, _pbdEarth)
+  // direction from Earth through the Sun and out the far side
+  _pbdDir.copy(SYSTEM_OFFSET).sub(_pbdEarth)
+  _pbdDir.y = 0
+  _pbdDir.normalize()
+  _pbdDir
+    .multiplyScalar(Math.cos(PALE_BLUE_DOT_ELEVATION))
+    .addScaledVector(_worldUp, Math.sin(PALE_BLUE_DOT_ELEVATION))
+    .normalize()
+  outPos.copy(SYSTEM_OFFSET).addScaledVector(_pbdDir, PALE_BLUE_DOT_DISTANCE)
+  outTarget.copy(_pbdEarth)
+}
+
+function fovFor(chapter: number) {
+  if (isPlanetChapter(chapter)) return PLANET_CONFIG[chapter - 2].fov
+  if (chapter === 10) return PALE_BLUE_DOT_FOV // long lens: Earth as a single speck
+  return 41
+}
+
 function getRestPose(
   chapter: number,
   progress: number,
@@ -278,6 +308,11 @@ function getRestPose(
       outArrival,
       outTarget,
     )
+    return
+  }
+
+  if (chapter === 10) {
+    paleBlueDotPose(outPos, outTarget)
     return
   }
 
@@ -371,7 +406,12 @@ function CinematicCamera({
       )
     }
 
-    const baseFov = planet ? PLANET_CONFIG[chapter - 2].fov : 41
+    // lens changes travel with the flight (e.g. the long lens on Earth
+    // opening up to the wide galaxy view during the pull-back)
+    const baseFov =
+      chapter > 0 && local < BLEND
+        ? THREE.MathUtils.lerp(fovFor(chapter - 1), fovFor(chapter), ease(local / BLEND))
+        : fovFor(chapter)
     // Portrait screens: widen the vertical FOV so planets fit the narrow width
     const portraitScale = Math.max(
       1,
@@ -996,7 +1036,8 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
   useFrame((_, delta) => {
     const chapter = Math.floor(progressRef.current ?? 0)
-    const wideView = chapter === 0 || chapter === 1 || chapter === 10 || chapter === 12
+    // the Pale Blue Dot (10) holds still, like a photograph
+    const wideView = chapter === 0 || chapter === 1 || chapter === 12
     const target = reducedMotion ? 0 : wideView ? WIDE_VIEW_RATE : CLOSE_UP_RATE
     simClock.rate += (target - simClock.rate) * (1 - Math.exp(-delta * 1.5))
     // clamp delta so a backgrounded tab does not jump the planets

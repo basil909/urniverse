@@ -621,10 +621,15 @@ export default function SolarSystem({
   useFrame((_, delta) => {
     if (!system.current) return
     const progress = progressRef.current ?? 0
+    // tied to the pull-back itself: the whole system collapses to a point
+    // as the camera flies out (and grows back if you scroll back)
     const local = progress - 11
-    const target = local >= 0.05 && local < 0.97 ? 0.0001 : 1
+    const inFinale = local >= 0 && local < 0.97
+    const target = inFinale
+      ? Math.max(0.0001, Math.pow(1 - THREE.MathUtils.clamp(local / 0.16, 0, 1), 3))
+      : 1
     systemScale.current +=
-      (target - systemScale.current) * (1 - Math.exp(-delta * 2.5))
+      (target - systemScale.current) * (1 - Math.exp(-delta * 6))
     const scale = Math.max(0.0001, systemScale.current)
     system.current.scale.setScalar(scale)
     system.current.visible = scale > 0.002
@@ -1080,12 +1085,15 @@ function Planet({
     // Focus: while one planet is the subject, the others shrink to distant
     // dots so oversized outer planets never loom behind a close-up
     const chapter = Math.floor(safeProgress)
-    const focusing = chapter >= 2 && chapter <= 9
+    // which planet is the subject: the close-up's planet, or Earth for the
+    // Pale Blue Dot (chapter 10); the others become points of light
+    const subject =
+      chapter >= 2 && chapter <= 9 ? chapter - 2 : chapter === 10 ? 2 : -1
     // In the Sun chapter the Sun is the subject: giants step back too
     const sunFocus = chapter === 1 && index >= 4
     const targetScale = sunFocus
       ? 0.35
-      : !focusing || chapter - 2 === index
+      : subject < 0 || subject === index
         ? 1
         : 0.04 // a point of light, like a planet seen from another planet
     focusScale.current +=
@@ -1244,6 +1252,10 @@ function Planet({
         </group>
 
         {planet.type === 'earth' && <Moon />}
+
+        {planet.type === 'earth' && (
+          <PaleBlueDotMarker progressRef={progressRef} />
+        )}
       </group>
     </group>
   )
@@ -1698,6 +1710,33 @@ function SaturnRing({
       geometry={geometry}
       material={material}
     />
+  )
+}
+
+/* Pale Blue Dot (chapter 10): a hairline ring round Earth's speck, shown
+   only once the camera has settled on the long view home */
+const PALE_BLUE_DOT_CHAPTER = 10
+
+function PaleBlueDotMarker({ progressRef }: { progressRef: RefObject<number> }) {
+  const element = useRef<HTMLDivElement>(null)
+  const opacity = useRef(0)
+
+  useFrame((_, delta) => {
+    if (!element.current) return
+    const progress = progressRef.current ?? 0
+    const local = progress - PALE_BLUE_DOT_CHAPTER
+    const target = local >= 0.2 && local < 0.93 ? 1 : 0
+    opacity.current += (target - opacity.current) * (1 - Math.exp(-delta * 3))
+    element.current.style.opacity = opacity.current.toFixed(3)
+  })
+
+  return (
+    <Html center zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
+      <div ref={element} className="pale-blue-dot" style={{ opacity: 0 }}>
+        <span className="pale-blue-dot-ring" />
+        <span className="pale-blue-dot-label">Earth</span>
+      </div>
+    </Html>
   )
 }
 

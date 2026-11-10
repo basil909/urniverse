@@ -6,14 +6,14 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 
 ## Features
 
-- **Cinematic camera journey.** Thirteen sections (intro, the Sun, eight planets, beyond the planets, the Milky Way, return), with the camera flying between them as you scroll.
+- **Cinematic camera journey.** Thirteen sections (intro, the Sun, eight planets, the Pale Blue Dot, the Milky Way, return), with the camera flying between them as you scroll.
 - **Text that waits for the camera.** Each chapter's text appears only once the camera has arrived, and stays pinned while you read.
 - **Real positions and motion.** Planets sit where they actually are on the visitor's date, on correctly oriented and tilted orbits (JPL orbital elements, Kepler's laws). In the wide views time runs at a few days per second so you can watch the orbits; Venus and Uranus spin backwards, as they really do.
 - **A real sky.** The Milky Way panorama surrounds the scene, turned to its true ~60° angle to the planets' plane.
 - **Real light and shadow.** Planets spin about their real IAU poles (true tilts and seasons). Saturn's rings and the planet shadow each other, moons cast shadows on their planets, and the Sun has granulation, limb darkening and a soft corona.
 - **Real planet surfaces.** Photographic texture maps for every planet, Saturn's rings with real gaps, Earth with clouds and its Moon. Each planet has a hand-written shader fallback.
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
-- **Milky Way finale.** The Solar System shrinks away and a "You are here" marker appears on a spiral arm.
+- **A Pale Blue Dot finale.** From beyond Neptune the camera looks back through a long lens at Earth, a single speck beside the Sun's glare, as Voyager 1 saw it in 1990. Then a long pull-back: the lens opens, the Solar System collapses to a point, and a "You are here" marker appears on a spiral arm of the Milky Way.
 - **Quiet, editorial interface.** Two typefaces, a slim chapter rail and a hairline progress bar; the planet is always the hero.
 - **Hands-on planets.** Drag to rotate the planet in focus; small markers on real features (Olympus Mons, the Great Red Spot, the Himalayas and more) reveal a short note on hover.
 - **Works on phones.** On portrait screens the planet moves to the top half and the text to the bottom.
