@@ -259,6 +259,12 @@ a:focus-visible {
 
 .begin-button:hover .begin-arrow { transform: translateY(2px); }
 
+.hero-note {
+  margin-top: 28px;
+  font-size: var(--size-label);
+  color: var(--text-3);
+}
+
 .scroll-cue {
   position: absolute;
   left: 50%;

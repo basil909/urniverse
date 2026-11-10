@@ -594,6 +594,8 @@ const factCardVariants = {
 export default function Journey() {
   const [section, setSection] = useState(0)
   const [textOn, setTextOn] = useState(true)
+  // filled in on the client so it is always the visitor's own date
+  const [today, setToday] = useState('')
 
   const rootRef = useRef<HTMLElement>(null)
   const lenisRef = useRef<Lenis | null>(null)
@@ -827,6 +829,16 @@ export default function Journey() {
   const scrollToStart = () => goToSection(1)
 
   useEffect(() => {
+    setToday(
+      new Date().toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }),
+    )
+  }, [])
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const forward = ['ArrowDown', 'ArrowRight', 'PageDown']
       const back = ['ArrowUp', 'ArrowLeft', 'PageUp']
@@ -1019,6 +1031,11 @@ export default function Journey() {
                 </span>
                 <span className="begin-text">Begin the journey</span>
               </button>
+              {today && (
+                <p className="hero-note">
+                  Planets shown where they are today, {today}
+                </p>
+              )}
             </motion.div>
           )}
 

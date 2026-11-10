@@ -13,6 +13,7 @@ import {
   PLANETS,
   SYSTEM_OFFSET,
 } from './orbit'
+import { simClock } from './simClock'
 
 /*
  * Place the corrected full-bleed equirectangular maps here:
@@ -715,9 +716,6 @@ function Planet({
   const { gl } = useThree()
 
   const visualRadius = getPlanetVisualRadius(index)
-  const inclination = THREE.MathUtils.degToRad(
-    planet.inclinationDeg,
-  )
   const axialTilt = THREE.MathUtils.degToRad(
     planet.axialTiltDeg,
   )
@@ -904,7 +902,7 @@ function Planet({
   }, [gl, planet.name])
 
   const rotationSpeed =
-    (24 / Math.abs(planet.rotationPeriodHours)) * 0.12
+    (24 / planet.rotationPeriodHours) * 0.12 // negative = retrograde (Venus, Uranus)
 
   const orbitLine = useMemo(() => {
     const segments = 160
@@ -914,7 +912,7 @@ function Planet({
     for (let i = 0; i <= segments; i += 1) {
       const E = (i / segments) * Math.PI * 2
 
-      getPlanetOrbitEllipsePoint(index, E, point)
+      getPlanetOrbitEllipsePoint(index, E, simClock.startJd, point)
 
       positions[i * 3] = point.x
       positions[i * 3 + 1] = point.y
@@ -957,11 +955,8 @@ function Planet({
         )
       : 0
 
-    getPlanetOrbitPosition(
-      index,
-      safeProgress,
-      _scratchOrbitPos,
-    )
+    // real position on the real orbit at the simulated date
+    getPlanetOrbitPosition(index, simClock.jd, _scratchOrbitPos)
     orbit.current.position.copy(_scratchOrbitPos)
 
     // Focus: while one planet is the subject, the others shrink to distant
@@ -1023,7 +1018,6 @@ function Planet({
   return (
     <group
       position={SYSTEM_OFFSET}
-      rotation={[inclination, 0, 0]}
     >
       <primitive object={orbitLine} />
 

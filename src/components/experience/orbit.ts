@@ -16,12 +16,9 @@ export type PlanetDefinition = {
   textureUrl?: string
   type: PlanetType
   rings?: boolean
-  phase: number
 }
 
 export const SYSTEM_OFFSET = new THREE.Vector3(3, 0, -8)
-
-export const EARTH_ORBIT_SPEED = 0.012
 
 export const EARTH_RADIUS_KM = 6371
 export const EARTH_RENDER_RADIUS = 0.23
@@ -54,7 +51,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
     textureUrl:
       'https://assets.science.nasa.gov/dynamicimage/assets/science/psd/photojournal/pia/pia12/pia12397/PIA12397.jpg?crop=faces%2Cfocalpoint&fit=clip&h=1534&w=2048',
     type: 'rocky',
-    phase: 0,
   },
   {
     name: 'Venus',
@@ -70,7 +66,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
       'https://assets.science.nasa.gov/dynamicimage/assets/science/cds/3d/resources/image/venus/preview.webp?w=2048',
     atmosphereColor: '#e4c28b',
     type: 'rocky',
-    phase: 0.78,
   },
   {
     name: 'Earth',
@@ -84,7 +79,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
     baseColor: '#356fa8',
     atmosphereColor: '#4da5ff',
     type: 'earth',
-    phase: 1.56,
   },
   {
     name: 'Mars',
@@ -100,7 +94,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
       'https://assets.science.nasa.gov/dynamicimage/assets/science/cds/3d/resources/image/mars/preview.webp?w=2048',
     atmosphereColor: '#c47762',
     type: 'rocky',
-    phase: 2.34,
   },
   {
     name: 'Jupiter',
@@ -116,7 +109,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
       'https://assets.science.nasa.gov/dynamicimage/assets/science/cds/3d/resources/image/jupiter/preview.webp?w=2048',
     atmosphereColor: '#e1cba8',
     type: 'gas',
-    phase: 5.75,
   },
   {
     name: 'Saturn',
@@ -133,7 +125,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
     atmosphereColor: '#ead7ae',
     type: 'gas',
     rings: true,
-    phase: 0.35,
   },
   {
     name: 'Uranus',
@@ -150,7 +141,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
     atmosphereColor: '#a7e5e6',
     type: 'ice',
     rings: true,
-    phase: 4.68,
   },
   {
     name: 'Neptune',
@@ -167,7 +157,6 @@ export const PLANETS: readonly PlanetDefinition[] = [
     atmosphereColor: '#4e80d4',
     type: 'ice',
     rings: true,
-    phase: 5.46,
   },
 ]
 
@@ -191,88 +180,136 @@ export function solveKepler(meanAnomaly: number, eccentricity: number) {
   return E
 }
 
-const X_AXIS = new THREE.Vector3(1, 0, 0)
-const SCRATCH_ORBIT = new THREE.Vector3()
+/* ============================================================
+   REAL ORBITS
+   JPL "Keplerian Elements for Approximate Positions of the Major
+   Planets" (E. M. Standish), Table 1: J2000 elements and their rates
+   per Julian century, valid 1800-2050. Accurate to well under a degree
+   in direction, far finer than anything visible on screen.
 
-export function getPlanetOrbitPosition(
-  index: number,
-  progress: number,
-  out: THREE.Vector3,
-) {
-  const planet = PLANETS[index]
+   Positions are heliocentric ecliptic coordinates in AU. For display,
+   the direction is kept exactly and only the distance from the Sun is
+   compressed (orbitalDisplayDistance), so the outer planets fit.
+   Scene axes: ecliptic x -> X, ecliptic north (z) -> Y, ecliptic y -> -Z.
+============================================================ */
 
-  if (!planet) {
-    out.set(0, 0, 0)
-    return out
-  }
+// a (AU), a/cy, e, e/cy, I (deg), I/cy, L (deg), L/cy, long. perihelion, /cy, long. node, /cy
+type OrbitalElements = readonly [
+  number, number, number, number, number, number,
+  number, number, number, number, number, number,
+]
 
-  const semiMajorAxis = orbitalDisplayDistance(planet.distanceAU)
-  const meanAnomaly =
-    planet.phase +
-    progress * EARTH_ORBIT_SPEED * (365.256 / planet.orbitalPeriodDays)
+const ELEMENTS: readonly OrbitalElements[] = [
+  [0.38709927, 0.00000037, 0.20563593, 0.00001906, 7.00497902, -0.00594749, 252.2503235, 149472.67411175, 77.45779628, 0.16047689, 48.33076593, -0.12534081], // Mercury
+  [0.72333566, 0.0000039, 0.00677672, -0.00004107, 3.39467605, -0.0007889, 181.9790995, 58517.81538729, 131.60246718, 0.00268329, 76.67984255, -0.27769418], // Venus
+  [1.00000261, 0.00000562, 0.01671123, -0.00004392, -0.00001531, -0.01294668, 100.46457166, 35999.37244981, 102.93768193, 0.32327364, 0, 0], // Earth-Moon barycentre
+  [1.52371034, 0.00001847, 0.0933941, 0.00007882, 1.84969142, -0.00813131, -4.55343205, 19140.30268499, -23.94362959, 0.44441088, 49.55953891, -0.29257343], // Mars
+  [5.202887, -0.00011607, 0.04838624, -0.00013253, 1.30439695, -0.00183714, 34.39644051, 3034.74612775, 14.72847983, 0.21252668, 100.47390909, 0.20469106], // Jupiter
+  [9.53667594, -0.0012506, 0.05386179, -0.00050991, 2.48599187, 0.00193609, 49.95424423, 1222.49362201, 92.59887831, -0.41897216, 113.66242448, -0.28867794], // Saturn
+  [19.18916464, -0.00196176, 0.04725744, -0.00004397, 0.77263783, -0.00242939, 313.23810451, 428.48202785, 170.9542763, 0.40805281, 74.01692503, 0.04240589], // Uranus
+  [30.06992276, 0.00026291, 0.00859048, 0.00005105, 1.77004347, 0.00035372, -55.12002969, 218.45945325, 44.96476227, -0.32241464, 131.78422574, -0.00508664], // Neptune
+]
 
-  const E = solveKepler(meanAnomaly, planet.eccentricity)
-  const semiMinorAxis =
-    semiMajorAxis * Math.sqrt(1 - planet.eccentricity * planet.eccentricity)
+export const J2000 = 2451545.0
 
-  out.set(
-    semiMajorAxis * (Math.cos(E) - planet.eccentricity),
-    0,
-    semiMinorAxis * Math.sin(E),
-  )
-
-  return out
+/** Julian Date for a JavaScript Date */
+export function julianDate(date: Date) {
+  return date.getTime() / 86400000 + 2440587.5
 }
 
+const DEG = Math.PI / 180
 
+type OrbitAtEpoch = {
+  a: number
+  e: number
+  meanAnomaly: number
+  // rotation from the orbital plane to ecliptic coordinates
+  px: [number, number, number]
+  qx: [number, number, number]
+}
+
+function orbitAt(index: number, jd: number): OrbitAtEpoch | null {
+  const el = ELEMENTS[index]
+  if (!el) return null
+  const T = (jd - J2000) / 36525
+  const a = el[0] + el[1] * T
+  const e = el[2] + el[3] * T
+  const I = (el[4] + el[5] * T) * DEG
+  const L = el[6] + el[7] * T
+  const peri = el[8] + el[9] * T
+  const node = el[10] + el[11] * T
+
+  let M = (L - peri) % 360
+  if (M > 180) M -= 360
+  if (M < -180) M += 360
+
+  const w = (peri - node) * DEG
+  const O = node * DEG
+  const cw = Math.cos(w)
+  const sw = Math.sin(w)
+  const cO = Math.cos(O)
+  const sO = Math.sin(O)
+  const cI = Math.cos(I)
+  const sI = Math.sin(I)
+
+  return {
+    a,
+    e,
+    meanAnomaly: M * DEG,
+    px: [cw * cO - sw * sO * cI, cw * sO + sw * cO * cI, sw * sI],
+    qx: [-sw * cO - cw * sO * cI, -sw * sO + cw * cO * cI, cw * sI],
+  }
+}
+
+/* Orbit point for an eccentric anomaly, in AU ecliptic, then to display */
+function toDisplay(orbit: OrbitAtEpoch, E: number, out: THREE.Vector3) {
+  const xp = orbit.a * (Math.cos(E) - orbit.e)
+  const yp = orbit.a * Math.sqrt(1 - orbit.e * orbit.e) * Math.sin(E)
+  const x = orbit.px[0] * xp + orbit.qx[0] * yp
+  const y = orbit.px[1] * xp + orbit.qx[1] * yp
+  const z = orbit.px[2] * xp + orbit.qx[2] * yp
+  const r = Math.sqrt(x * x + y * y + z * z) || 1
+  const scale = orbitalDisplayDistance(r) / r
+  return out.set(x * scale, z * scale, -y * scale)
+}
+
+/**
+ * Planet position relative to the Sun, in scene units, at a Julian Date.
+ */
+export function getPlanetOrbitPosition(
+  index: number,
+  jd: number,
+  out: THREE.Vector3,
+) {
+  const orbit = orbitAt(index, jd)
+  if (!orbit) return out.set(0, 0, 0)
+  const E = solveKepler(orbit.meanAnomaly, orbit.e)
+  return toDisplay(orbit, E, out)
+}
+
+/**
+ * A point on the planet's (real, oriented, inclined) orbit, for drawing
+ * the orbit line. `eccentricAnomaly` runs 0..2PI around the ellipse.
+ */
 export function getPlanetOrbitEllipsePoint(
   index: number,
   eccentricAnomaly: number,
+  jd: number,
   out: THREE.Vector3,
 ) {
-  const planet = PLANETS[index]
-
-  if (!planet) {
-    out.set(0, 0, 0)
-    return out
-  }
-
-  const a = orbitalDisplayDistance(planet.distanceAU)
-  const b =
-    a * Math.sqrt(1 - planet.eccentricity * planet.eccentricity)
-
-  out.set(
-    a * (Math.cos(eccentricAnomaly) - planet.eccentricity),
-    0,
-    b * Math.sin(eccentricAnomaly),
-  )
-
-  return out
+  const orbit = orbitAt(index, jd)
+  if (!orbit) return out.set(0, 0, 0)
+  return toDisplay(orbit, eccentricAnomaly, out)
 }
 
 /**
  * World-space planet position used by the camera.
- * Inclination and the shared Solar System offset are applied here.
  */
 export function getPlanetPosition(
   index: number,
-  progress: number,
+  jd: number,
   out: THREE.Vector3,
 ) {
-  getPlanetOrbitPosition(index, progress, SCRATCH_ORBIT)
-
-  const planet = PLANETS[index]
-
-  if (!planet) {
-    out.copy(SYSTEM_OFFSET)
-    return out
-  }
-
-  SCRATCH_ORBIT.applyAxisAngle(
-    X_AXIS,
-    THREE.MathUtils.degToRad(planet.inclinationDeg),
-  )
-
-  out.copy(SCRATCH_ORBIT).add(SYSTEM_OFFSET)
-  return out
+  getPlanetOrbitPosition(index, jd, out)
+  return out.add(SYSTEM_OFFSET)
 }

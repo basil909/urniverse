@@ -8,6 +8,7 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 
 - **Cinematic camera journey.** Thirteen sections (intro, the Sun, eight planets, beyond the planets, the Milky Way, return), with the camera flying between them as you scroll.
 - **Text that waits for the camera.** Each chapter's text appears only once the camera has arrived, and stays pinned while you read.
+- **Real positions and motion.** Planets sit where they actually are on the visitor's date, on correctly oriented and tilted orbits (JPL orbital elements, Kepler's laws). In the wide views time runs at a few days per second so you can watch the orbits; Venus and Uranus spin backwards, as they really do.
 - **Real planet surfaces.** Photographic texture maps for every planet, Saturn's rings with real gaps, Earth with clouds and its Moon. Each planet has a hand-written shader fallback.
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
 - **Milky Way finale.** The Solar System shrinks away and a "You are here" marker appears on a spiral arm.
@@ -61,7 +62,8 @@ src/
       ├─ SolarSystem.tsx     Sun, planets, rings, Moon, shaders, drag-to-rotate, markers
       ├─ Galaxy.tsx          Procedural Milky Way and the "You are here" marker
       ├─ Starfield.tsx       Background stars
-      └─ orbit.ts            Planet data and orbital maths
+      ├─ orbit.ts            Planet data, JPL orbital elements, Kepler positions
+      └─ simClock.ts         Shared simulation date (starts today)
 public/textures/          Earth, Moon and planet texture maps (WebP)
 ```
 

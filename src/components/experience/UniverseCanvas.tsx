@@ -14,6 +14,7 @@ import { memo, Suspense, useEffect, useMemo, useRef, useState, type MutableRefOb
 import * as THREE from 'three'
 
 import SolarSystem from './SolarSystem'
+import { CLOSE_UP_RATE, simClock, WIDE_VIEW_RATE } from './simClock'
 import Galaxy, {
   GALAXY_POSITION,
   GALAXY_RADIUS,
@@ -151,7 +152,7 @@ function calculatePlanetPose(
 ) {
   const config = PLANET_CONFIG[planetIndex]
 
-  getPlanetPosition(planetIndex, progressPhase, _planetCenter)
+  getPlanetPosition(planetIndex, simClock.jd, _planetCenter)
 
   _toSun.copy(SYSTEM_OFFSET).sub(_planetCenter)
 
@@ -909,11 +910,36 @@ function WarmUp() {
   return null
 }
 
+/* Advances the shared simulation date. Wide views run at a few days per
+   second so the orbits are visible; close-ups almost stop the clock. */
+function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
+  const reducedMotion = useMemo(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    [],
+  )
+
+  useFrame((_, delta) => {
+    const chapter = Math.floor(progressRef.current ?? 0)
+    const wideView = chapter === 0 || chapter === 1 || chapter === 10 || chapter === 12
+    const target = reducedMotion ? 0 : wideView ? WIDE_VIEW_RATE : CLOSE_UP_RATE
+    simClock.rate += (target - simClock.rate) * (1 - Math.exp(-delta * 1.5))
+    // clamp delta so a backgrounded tab does not jump the planets
+    simClock.jd += simClock.rate * Math.min(delta, 0.1)
+  })
+
+  return null
+}
+
 function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
   return (
 
     <>
+
+      {/* first, so the date is advanced before planets and camera read it */}
+      <Clock progressRef={progressRef} />
 
       <color attach="background" args={['#010207']} />
 
