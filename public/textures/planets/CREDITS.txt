@@ -13,3 +13,14 @@ Milky Way sky (public/textures/milky-way-sky.webp)
 From Solar System Scope's 8k_stars_milky_way.jpg - same source and licence
 as above (CC BY 4.0). Downloaded 2026-11-10; resized to 4096x2048 and saved
 as WebP.
+
+Sharper maps (public/textures/hd/, 4096x2048, loaded only for the planet in focus)
+From Solar System Scope's 8k_mercury, 4k_venus_atmosphere, 8k_mars, 8k_jupiter,
+8k_saturn, 8k_saturn_ring_alpha, 8k_earth_daymap, 8k_earth_clouds,
+8k_earth_nightmap and 8k_moon - same source and licence as above (CC BY 4.0).
+Downloaded 2026-11-10; resized to 4096 px wide and saved as WebP (the ring map
+as PNG). Changes: Earth's oceans darkened to a deep blue; cloud and Moon tones
+matched to the earlier maps; city lights extracted as for the 2K map above.
+
+Earth and Moon 2K maps (public/textures/earth-day.webp, earth-clouds.webp, moon.webp)
+Downscaled from the same 4K maps above, so the sharp swap only adds detail.

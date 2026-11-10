@@ -11,14 +11,16 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - **Real positions and motion.** Planets sit where they actually are on the visitor's date, on correctly oriented and tilted orbits (JPL orbital elements, Kepler's laws). In the wide views time runs at a few days per second so you can watch the orbits; Venus and Uranus spin backwards, as they really do.
 - **A real sky.** The Milky Way panorama surrounds the scene, turned to its true ~60° angle to the planets' plane.
 - **Real light and shadow.** Planets spin about their real IAU poles (true tilts and seasons). Saturn's rings and the planet shadow each other, moons cast shadows on their planets, and the Sun has granulation, limb darkening and a soft corona.
-- **Real planet surfaces.** Photographic texture maps for every planet, Saturn's rings with real gaps, Earth with clouds and its Moon. Each planet has a hand-written shader fallback.
+- **Real planet surfaces.** Photographic texture maps for every planet, Saturn's rings with real gaps, Earth with clouds, city lights and its Moon. Each planet has a hand-written shader fallback.
+- **Sharp close-ups.** Once the camera arrives at a planet, 4K maps of it are decoded off the main thread and swapped in, one upload at a time; they are released when you move on, so only one planet's sharp maps are ever in memory. Phones keep the lighter 2K maps.
+- **Deep dives.** "More about" opens a panel for the Sun and each planet: key figures, what it is made of, what makes it unusual, and a timeline of the missions that explored it.
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
 - **A Pale Blue Dot finale.** From beyond Neptune the camera looks back through a long lens at Earth, a single speck beside the Sun's glare, as Voyager 1 saw it in 1990. Then a long pull-back: the lens opens, the Solar System collapses to a point, and a "You are here" marker appears on a spiral arm of the Milky Way.
 - **Quiet, editorial interface.** Two typefaces, a slim chapter rail and a hairline progress bar; the planet is always the hero.
 - **Hands-on planets.** Drag to rotate the planet in focus; small markers on real features (Olympus Mons, the Great Red Spot, the Himalayas and more) reveal a short note on hover.
 - **Works on phones.** On portrait screens the planet moves to the top half and the text to the bottom.
 - **Accessible.** All chapter text is available to screen readers, there is keyboard navigation, and the OS "reduce motion" setting turns off smooth scrolling and camera drift.
-- **Fast first load.** WebP textures (about 1.7 MB in total), self-hosted fonts and a loading screen that tracks real progress.
+- **Fast first load.** The first load needs only the 2K WebP textures (about 2 MB), self-hosted fonts and a loading screen that tracks real progress.
 
 ## Tech stack
 
@@ -58,15 +60,18 @@ src/
 └─ components/
    ├─ Journey.tsx         Chapter content, scroll model, pinned text stage, HUD
    ├─ ui/
-   │  └─ Loader.tsx       Loading screen (tracks three.js texture loading)
+   │  ├─ Loader.tsx       Loading screen (tracks three.js texture loading)
+   │  └─ DetailPanel.tsx  The "More about" deep-dive panel
    └─ experience/
       ├─ UniverseCanvas.tsx  Canvas, camera choreography, post-processing
       ├─ SolarSystem.tsx     Sun, planets, rings, Moon, shaders, drag-to-rotate, markers
       ├─ Galaxy.tsx          Procedural Milky Way and the "You are here" marker
       ├─ Starfield.tsx       Background stars
+      ├─ sharpMaps.ts        4K maps for the planet in focus (load, upload, release)
       ├─ orbit.ts            Planet data, JPL orbital elements, Kepler positions
       └─ simClock.ts         Shared simulation date (starts today)
-public/textures/          Earth, Moon and planet texture maps (WebP)
+src/data/worlds.ts        Facts, science and missions for the deep-dive panel
+public/textures/          Earth, Moon and planet texture maps (WebP; hd/ holds the 4K set)
 ```
 
 ### How the scroll works
@@ -81,8 +86,8 @@ To add or remove a chapter, edit the `JOURNEY` array in `Journey.tsx` and add a 
 
 ## Credits
 
-- **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune) and **Earth's city lights** and the **Milky Way sky**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
-- **Earth and Moon textures** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
+- **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune, the 4K set in `hd/`), **Earth's day map, clouds and city lights**, the **Moon** and the **Milky Way sky**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
+- **Earth's normal and specular maps and the Moon's height map** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
 
 ## Status
 

@@ -17,16 +17,20 @@ import {
   SYSTEM_OFFSET,
 } from './orbit'
 import { simClock } from './simClock'
+import {
+  SHARP_EARTH_MAPS,
+  SHARP_PLANET_MAPS,
+  SHARP_SATURN_RING,
+  useSharpFocus,
+  useSharpTexture,
+} from './sharpMaps'
 
-/*
- * Place the corrected full-bleed equirectangular maps here:
- * - earth-blue-marble.png -> fixed 2:1 surface map
- * - earth-clouds.png      -> grayscale cloud map
- */
+/* Earth's 2K maps (sharper 4K versions load in focus: see sharpMaps.ts).
+   Day and clouds: Solar System Scope (CC BY 4.0), oceans darkened. */
 const EARTH_LOCAL_TEXTURES = {
-  color: '/textures/earth-blue-marble.webp',
-  // grayscale density map extracted from the alpha channel of earth-clouds.png
-  clouds: '/textures/earth-clouds-alpha.webp',
+  color: '/textures/earth-day.webp',
+  // grayscale cloud density (white = cloud)
+  clouds: '/textures/earth-clouds.webp',
   normal: '/textures/earth-normal.webp',
   specular: '/textures/earth-specular.webp',
   // city lights extracted from Solar System Scope's 2k_earth_nightmap (CC BY 4.0)
@@ -54,7 +58,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
 }
 
 const MOON_LOCAL_TEXTURES = {
-  color: '/textures/moon-lroc.webp',
+  color: '/textures/moon.webp',
   height: '/textures/moon-height.webp',
 } as const
 
@@ -822,6 +826,27 @@ function Planet({
   const timeRef = useRef(0)
   const focusScale = useRef(1)
   const { gl } = useThree()
+  // sharper maps once the camera has arrived (desktop only)
+  const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
+  const sharpMap = useSharpTexture(SHARP_PLANET_MAPS[index], sharp, {
+    colorSpace: THREE.NoColorSpace,
+  })
+  const sharpDay = useSharpTexture(
+    index === 2 ? SHARP_EARTH_MAPS.day : undefined,
+    sharp,
+    { colorSpace: THREE.SRGBColorSpace, anisotropy: 16 },
+  )
+  const sharpClouds = useSharpTexture(
+    index === 2 ? SHARP_EARTH_MAPS.clouds : undefined,
+    sharp,
+    { colorSpace: THREE.NoColorSpace },
+  )
+  const sharpNight = useSharpTexture(
+    index === 2 ? SHARP_EARTH_MAPS.night : undefined,
+    sharp,
+    { colorSpace: THREE.SRGBColorSpace },
+  )
+  const baseMap = useRef<THREE.Texture | null>(null)
 
   const visualRadius = getPlanetVisualRadius(index)
   // sunlight here: dimmer and cooler with distance from the Sun
@@ -923,7 +948,11 @@ function Planet({
         )
         loaded.needsUpdate = true
 
-        uniforms.uMap.value = loaded
+        baseMap.current = loaded
+        // a sharp map may already be in place: it stays until released
+        if (!uniforms.uHasMap.value || uniforms.uMap.value === null) {
+          uniforms.uMap.value = loaded
+        }
         uniforms.uHasMap.value = 1
         loadedTexture = loaded
       },
@@ -943,10 +972,19 @@ function Planet({
         loadedTexture.dispose()
       }
 
+      baseMap.current = null
       uniforms.uMap.value = null
       uniforms.uHasMap.value = 0
     }
   }, [gl, index, uniforms])
+
+  // swap the sharp map in, and the 2K map back when it is released
+  useEffect(() => {
+    const map = sharpMap ?? baseMap.current
+    if (!map) return
+    uniforms.uMap.value = map
+    uniforms.uHasMap.value = 1
+  }, [sharpMap, uniforms])
 
   const [earthMap, setEarthMap] =
     useState<THREE.Texture | null>(null)
@@ -1186,7 +1224,7 @@ function Planet({
                 // rebuild when a map arrives: three.js only picks up a newly
                 // added texture (normal, specular, night lights) on recompile
                 key={`earth-${!!earthNormal}-${!!earthSpecular}-${!!earthLights}`}
-                map={earthMap}
+                map={sharpDay ?? earthMap}
                 normalMap={earthNormal ?? undefined}
                 normalScale={[0.34, 0.34]}
                 specularMap={earthSpecular ?? undefined}
@@ -1194,7 +1232,7 @@ function Planet({
                 shininess={16}
                 color="#ffffff"
                 emissive={EARTH_CITY_LIGHTS}
-                emissiveMap={earthLights ?? undefined}
+                emissiveMap={sharpNight ?? earthLights ?? undefined}
                 emissiveIntensity={earthLights ? 1.15 : 0}
                 onBeforeCompile={maskLightsToNightSide}
               />
@@ -1227,7 +1265,7 @@ function Planet({
           {planet.type === 'earth' && (
             <EarthCloudLayer
               radius={visualRadius}
-              texture={earthClouds}
+              texture={sharpClouds ?? earthClouds}
             />
           )}
 
@@ -1237,6 +1275,7 @@ function Planet({
               radius={visualRadius}
               planetUniforms={uniforms}
               sunlight={sunlight}
+              sharp={sharp}
             />
           )}
 
@@ -1251,7 +1290,7 @@ function Planet({
           )}
         </group>
 
-        {planet.type === 'earth' && <Moon />}
+        {planet.type === 'earth' && <Moon sharp={sharp} />}
 
         {planet.type === 'earth' && (
           <PaleBlueDotMarker progressRef={progressRef} />
@@ -1307,8 +1346,12 @@ function EarthCloudLayer({
   )
 }
 
-function Moon() {
+function Moon({ sharp }: { sharp: boolean }) {
   const { gl } = useThree()
+  const sharpMap = useSharpTexture(SHARP_EARTH_MAPS.moon, sharp, {
+    colorSpace: THREE.SRGBColorSpace,
+    anisotropy: 16,
+  })
   const orbit = useRef<THREE.Group>(null)
   const body = useRef<THREE.Mesh>(null)
   const timeRef = useRef(0)
@@ -1383,7 +1426,7 @@ function Moon() {
         >
           <sphereGeometry args={[1, 96, 96]} />
           <meshPhongMaterial
-            map={map}
+            map={sharpMap ?? map}
             bumpMap={height ?? undefined}
             bumpScale={0.045}
             color="#ffffff"
@@ -1615,11 +1658,17 @@ function SaturnRing({
   radius,
   planetUniforms,
   sunlight,
+  sharp = false,
 }: {
   radius: number
   planetUniforms?: RingShadowUniforms
   sunlight?: { strength: number; tint: THREE.Color }
+  sharp?: boolean
 }) {
+  const sharpRing = useSharpTexture(SHARP_SATURN_RING, sharp, {
+    colorSpace: THREE.NoColorSpace,
+  })
+  const baseRing = useRef<THREE.Texture | null>(null)
   const ringMesh = useRef<THREE.Mesh>(null)
   const inner = radius * SATURN_RING_INNER
   const outer = radius * SATURN_RING_OUTER
@@ -1682,6 +1731,8 @@ function SaturnRing({
       // raw values: the shader writes colour straight to the screen
       texture.colorSpace = THREE.NoColorSpace
       loadedTexture = texture
+      baseRing.current = texture
+      if (material.uniforms.uMap.value) return // the sharp map is showing
       material.uniforms.uMap.value = texture
       // Saturn's own shader reads the same map to draw the rings' shadow
       if (planetUniforms) planetUniforms.uRingMap.value = texture
@@ -1689,9 +1740,18 @@ function SaturnRing({
 
     return () => {
       disposed = true
+      baseRing.current = null
       loadedTexture?.dispose()
     }
   }, [material, planetUniforms])
+
+  // the sharp ring map while Saturn is in focus, the 2K one otherwise
+  useEffect(() => {
+    const map = sharpRing ?? baseRing.current
+    if (!map) return
+    material.uniforms.uMap.value = map
+    if (planetUniforms) planetUniforms.uRingMap.value = map
+  }, [sharpRing, material, planetUniforms])
 
   useFrame(() => {
     const mesh = ringMesh.current
@@ -1859,16 +1919,26 @@ function PlanetRings({
   radius,
   planetUniforms,
   sunlight,
+  sharp = false,
 }: {
   planet: (typeof PLANETS)[number]
   radius: number
   planetUniforms?: RingShadowUniforms
   sunlight?: { strength: number; tint: THREE.Color }
+  sharp?: boolean
 }) {
   const isSaturn = planet.name === 'Saturn'
   const isUranus = planet.name === 'Uranus'
 
-  if (isSaturn) return <SaturnRing radius={radius} planetUniforms={planetUniforms} sunlight={sunlight} />
+  if (isSaturn)
+    return (
+      <SaturnRing
+        radius={radius}
+        planetUniforms={planetUniforms}
+        sunlight={sunlight}
+        sharp={sharp}
+      />
+    )
   const isNeptune = planet.name === 'Neptune'
 
   // Uranus and Neptune have thin, faint rings: a broad band read as a dark hole
