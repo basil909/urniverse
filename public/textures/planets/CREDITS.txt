@@ -1,5 +1,5 @@
-Planet textures (2k_*.jpg, 2k_saturn_ring_alpha.png)
+Planet textures (2k_*.webp, 2k_saturn_ring_alpha.png)
 Source: Solar System Scope - https://www.solarsystemscope.com/textures/
 License: Creative Commons Attribution 4.0 International (CC BY 4.0)
 https://creativecommons.org/licenses/by/4.0/
-Downloaded 2026-11-10, unmodified.
+Downloaded 2026-11-10. Planet maps converted from JPEG to WebP (quality 82); otherwise unmodified.

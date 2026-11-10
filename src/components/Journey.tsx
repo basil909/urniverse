@@ -12,6 +12,7 @@ import Lenis from 'lenis'
 import UniverseCanvas from './experience/UniverseCanvas'
 
 import FactCard from './ui/FactCard'
+import Loader from './ui/Loader'
 import type { UniverseFact } from './ui/FactCard'
 
 
@@ -780,6 +781,8 @@ export default function Journey() {
       <div className="universe-canvas">
         <UniverseCanvas progressRef={progressRef} />
       </div>
+
+      <Loader />
 
       <div className="universe-vignette" />
       <div className="universe-aura" />

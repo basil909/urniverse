@@ -19,16 +19,16 @@ import {
  * - earth-clouds.png      -> grayscale cloud map
  */
 const EARTH_LOCAL_TEXTURES = {
-  color: '/textures/earth-blue-marble.png',
+  color: '/textures/earth-blue-marble.webp',
   // grayscale density map extracted from the alpha channel of earth-clouds.png
-  clouds: '/textures/earth-clouds-alpha.jpg',
-  normal: '/textures/earth-normal.jpg',
-  specular: '/textures/earth-specular.jpg',
+  clouds: '/textures/earth-clouds-alpha.webp',
+  normal: '/textures/earth-normal.webp',
+  specular: '/textures/earth-specular.webp',
 } as const
 
 const MOON_LOCAL_TEXTURES = {
-  color: '/textures/moon-lroc.jpg',
-  height: '/textures/moon-height.jpg',
+  color: '/textures/moon-lroc.webp',
+  height: '/textures/moon-height.webp',
 } as const
 
 const MOON_RENDER_RADIUS = 0.072
@@ -44,14 +44,14 @@ const _scratchOrbitPos = new THREE.Vector3()
 
 /* Planet surface maps by orbit index (Earth uses EARTH_LOCAL_TEXTURES) */
 const PLANET_TEXTURES: (string | undefined)[] = [
-  '/textures/planets/2k_mercury.jpg',
-  '/textures/planets/2k_venus_atmosphere.jpg',
+  '/textures/planets/2k_mercury.webp',
+  '/textures/planets/2k_venus_atmosphere.webp',
   undefined,
-  '/textures/planets/2k_mars.jpg',
-  '/textures/planets/2k_jupiter.jpg',
-  '/textures/planets/2k_saturn.jpg',
-  '/textures/planets/2k_uranus.jpg',
-  '/textures/planets/2k_neptune.jpg',
+  '/textures/planets/2k_mars.webp',
+  '/textures/planets/2k_jupiter.webp',
+  '/textures/planets/2k_saturn.webp',
+  '/textures/planets/2k_uranus.webp',
+  '/textures/planets/2k_neptune.webp',
 ]
 
 function seededRandom(seed: number) {
