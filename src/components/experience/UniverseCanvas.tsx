@@ -5,6 +5,7 @@ import {
   Bloom,
   EffectComposer,
   Noise,
+  SMAA,
   ToneMapping,
   Vignette,
 } from '@react-three/postprocessing'
@@ -117,7 +118,7 @@ const _worldUp = new THREE.Vector3(0, 1, 0)
 const _viewDir = new THREE.Vector3()
 
 /* Share of the view each rocky planet fills: Mercury, Venus, Earth, Mars */
-const ROCKY_FILL: (number | undefined)[] = [0.045, 0.06, 0.063, 0.05]
+const ROCKY_FILL: (number | undefined)[] = [0.062, 0.08, 0.082, 0.07]
 
 /* Flight feel: written by the camera each frame, read by the streak field.
    `intensity` (0..1) is speed relative to the distance to what we look at,
@@ -1243,11 +1244,15 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
 
 
-      {/* no MSAA: 1.5x pixel density already smooths edges */}
+      {/* no MSAA (costly with these buffers): SMAA below smooths planet
+          and ring edges for a fraction of the price */}
       <EffectComposer multisampling={0}>
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
         <Bloom intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />
+
+        {/* edge smoothing, before the grain so the grain stays crisp */}
+        <SMAA />
 
 
         {/* the only film grain on the page (the CSS grain layer was removed) */}

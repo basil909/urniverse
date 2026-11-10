@@ -106,6 +106,13 @@ const ATMOSPHERE_LOOK: Record<string, { color: string; dusk: string; intensity: 
   Neptune: { color: '#5a8ee0', dusk: '#3f6cc4', intensity: 0.45, thickness: 0.5 },
 }
 
+/* atmosphere shell size in planet radii: thick hazes stand off the
+   surface, Mars's thin air hugs it */
+const ATMOSPHERE_SHELL: Record<string, number> = {
+  Venus: 1.085,
+  Mars: 1.02,
+}
+
 /* ============================================================
    DRAG TO SPIN
    One shared state: the window pointer handler writes it, the
@@ -299,7 +306,7 @@ void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPosition = wp.x
 const ATMOSPHERE_FRAGMENT_SHADER = /* glsl */ `
 
 uniform vec3 uColor; uniform vec3 uDusk; uniform float uIntensity; uniform float uThickness;
-uniform vec3 uSunPosition; uniform float uLight;
+uniform vec3 uSunPosition; uniform float uLight; uniform float uShell;
 varying vec3 vNormal; varying vec3 vWorldPosition;
 
 void main() {
@@ -307,13 +314,23 @@ void main() {
   vec3 vd = normalize(cameraPosition - vWorldPosition);
   vec3 toSun = normalize(uSunPosition - vWorldPosition);
 
-  /* a thin shell seen edge-on glows; uThickness widens it (Venus, Titan) */
-  float rim = 1.0 - max(dot(n, vd), 0.0);
-  float edge = smoothstep(0.05, 0.95, pow(rim, 3.2 - uThickness));
+  /* How close does this line of sight pass to the planet's centre, in
+     planet radii? The glow is densest where it grazes the surface and
+     thins with height, so it hugs the limb instead of drawing a ring at
+     the shell's outer edge. Over the disk it only brightens near the limb. */
+  float nv = clamp(dot(n, vd), 0.0, 1.0);
+  float pass = uShell * sqrt(1.0 - nv * nv);
+  float scale = (uShell - 1.0) * mix(0.22, 0.55, clamp(uThickness / 1.2, 0.0, 1.0));
+  float above = pass - 1.0;
+  float edge = above > 0.0
+    ? exp(-above / scale) * (1.0 - smoothstep(mix(uShell, 1.0, 0.25), uShell, pass))
+    : pow(clamp(pass, 0.0, 1.0), mix(14.0, 5.0, clamp(uThickness / 1.2, 0.0, 1.0)));
 
   /* only where sunlight reaches, with a warm tint near the day/night line */
   float ndl = dot(n, toSun);
-  float day = smoothstep(-0.28, 0.3, ndl);
+  /* twilight reaches past the terminator only in thick atmospheres:
+     a thin one (Mars) would float as a dark outline on the night limb */
+  float day = smoothstep(mix(-0.05, -0.22, clamp(uThickness / 1.1, 0.0, 1.0)), 0.3, ndl);
   float dusk = 1.0 - smoothstep(0.0, 0.42, abs(ndl + 0.04));
   vec3 color = mix(uColor, uDusk, dusk * 0.8);
 
@@ -461,6 +478,47 @@ vec3 neptune(vec3 p) {
   return col;
 }
 
+/* ---------- living cloud tops (Jupiter, Saturn) ----------
+   The real map, carried along a flow field: alternating east-west jets,
+   small eddies so band edges ripple, and on Jupiter the Great Red Spot
+   turning anticlockwise. Two samples at staggered phases are cross-faded
+   (the flow-map technique), so the clouds move forever without smearing. */
+vec2 cloudFlow(vec2 uv) {
+  float lat = (uv.y - 0.5) * 3.14159;
+  bool jupiter = uPlanet == 4;
+  float jets = jupiter
+    ? sin(lat * 13.0) * 0.7 + sin(lat * 29.0 + 1.3) * 0.3
+    : sin(lat * 8.0 + 0.4) * 0.8 + sin(lat * 19.0) * 0.2;
+  vec2 v = vec2(jets * (0.55 + 0.45 * cos(lat)), 0.0);
+  vec3 q = vec3(uv * vec2(20.0, 40.0), uTime * 0.04);
+  v += vec2(noise(q + 7.0) - 0.5, (noise(q) - 0.5) * 0.6) * 0.6;
+  v *= jupiter ? 0.0009 : 0.0005; /* texture widths per second */
+
+  if (jupiter) {
+    /* the Great Red Spot (21 S, 46 W on this map), as an ellipse in
+       equal-angle units: one u is twice the angle of one v */
+    vec2 d = uv - vec2(0.368, 0.388);
+    d.x = fract(d.x + 0.5) - 0.5;
+    vec2 axes = vec2(0.068, 0.036);
+    vec2 e = vec2(d.x * 1.86, d.y) / axes;
+    float spin = (1.0 - smoothstep(0.75, 1.45, length(e))) * 0.045; /* radians per second */
+    vec2 turn = vec2(-e.y * axes.x / 1.86, e.x * axes.y) * spin;
+    float inSpot = 1.0 - smoothstep(1.0, 1.6, length(e));
+    v = mix(v, turn, inSpot);
+  }
+  return v;
+}
+
+vec3 flowingClouds(vec2 uv) {
+  vec2 v = cloudFlow(uv);
+  float period = 7.0;
+  float t0 = fract(uTime / period);
+  float t1 = fract(uTime / period + 0.5);
+  vec3 a = texture2D(uMap, uv - v * (t0 - 0.5) * period).rgb;
+  vec3 b = texture2D(uMap, uv - v * (t1 - 0.5) * period).rgb;
+  return mix(a, b, abs(1.0 - 2.0 * t0));
+}
+
 void main() {
 
   vec3 normal = normalize(vNormal);
@@ -477,7 +535,9 @@ void main() {
 
   /* real surface map when loaded; procedural surface above is the fallback */
   if (uHasMap > 0.5) {
-    surface = texture2D(uMap, vUv).rgb;
+    surface = (uPlanet == 4 || uPlanet == 5)
+      ? flowingClouds(vUv)
+      : texture2D(uMap, vUv).rgb;
   }
 
   vec3 toSun = normalize(uSunPosition - vWorldPosition);
@@ -894,6 +954,22 @@ function Planet({
     [planet, planetType, index, sunlight],
   )
 
+  /* Built here rather than as <shaderMaterial uniforms={...}>: React Three
+     Fiber copies a uniforms prop into objects of its own, so everything
+     written to `uniforms` later (the surface map, time, moon and ring
+     shadows) would never reach the shader. */
+  const planetMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: PLANET_VERTEX_SHADER,
+        fragmentShader: PLANET_FRAGMENT_SHADER,
+        toneMapped: false,
+      }),
+    [uniforms],
+  )
+  useEffect(() => () => planetMaterial.dispose(), [planetMaterial])
+
   const atmosphereUniforms = useMemo(() => {
     const look = ATMOSPHERE_LOOK[planet.name] ?? {
       color: planet.atmosphereColor ?? '#000000',
@@ -908,6 +984,7 @@ function Planet({
       uThickness: { value: look.thickness },
       uSunPosition: { value: SYSTEM_OFFSET },
       uLight: { value: sunlight.strength },
+      uShell: { value: ATMOSPHERE_SHELL[planet.name] ?? 1.055 },
     }
   }, [planet, sunlight])
 
@@ -1237,17 +1314,12 @@ function Planet({
                 onBeforeCompile={maskLightsToNightSide}
               />
             ) : (
-              <shaderMaterial
-                uniforms={uniforms}
-                vertexShader={PLANET_VERTEX_SHADER}
-                fragmentShader={PLANET_FRAGMENT_SHADER}
-                toneMapped={false}
-              />
+              <primitive object={planetMaterial} attach="material" />
             )}
           </mesh>
 
           {planet.atmosphereColor && (
-            <mesh scale={visualRadius * (planet.name === 'Venus' ? 1.085 : 1.055)}>
+            <mesh scale={visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055)}>
               <sphereGeometry args={[1, 64, 64]} />
               <shaderMaterial
                 transparent
@@ -1528,6 +1600,7 @@ function MoonSystem({
         uDusk: { value: new THREE.Color(moon.haze ?? '#000000').multiplyScalar(0.8) },
         uIntensity: { value: 0.9 },
         uThickness: { value: 1.2 },
+        uShell: { value: 1.14 },
         uSunPosition: { value: SYSTEM_OFFSET },
         uLight: { value: sunlight?.strength ?? 1 },
       })),
