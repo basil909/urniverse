@@ -313,7 +313,12 @@ void main() {
   float dusk = 1.0 - smoothstep(0.0, 0.42, abs(ndl + 0.04));
   vec3 color = mix(uColor, uDusk, dusk * 0.8);
 
-  float a = edge * day * uIntensity * uLight;
+  /* forward scattering: looking towards the Sun through the limb, the
+     atmosphere lights up all round (the backlit "ring of light") */
+  float forward = pow(max(dot(-vd, toSun), 0.0), 5.0);
+  float backlit = forward * smoothstep(-0.75, 0.05, ndl) * 2.2;
+
+  float a = edge * (day + backlit) * uIntensity * uLight;
   gl_FragColor = vec4(color * a, a);
 }`
 
@@ -1582,7 +1587,12 @@ void main() {
     float miss = length(toPlanet - toSun * along);
     lit = mix(0.06, 1.0, smoothstep(uPlanetRadius * 0.97, uPlanetRadius * 1.04, miss));
   }
-  gl_FragColor = vec4(ring.rgb * uTint * lit, ring.a);
+  /* ring particles scatter light forwards: seen against the Sun, the rings
+     glow; seen from the sunward side they are plainly lit */
+  vec3 toCamera = normalize(cameraPosition - vWorld);
+  float forward = pow(max(dot(-toCamera, toSun), 0.0), 3.0);
+  float glow = 1.0 + forward * 1.4;
+  gl_FragColor = vec4(ring.rgb * uTint * lit * glow, ring.a);
 }`
 
 type RingShadowUniforms = { uRingMap: { value: THREE.Texture | null } }

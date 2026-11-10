@@ -133,6 +133,44 @@ const _cameraRight = new THREE.Vector3()
 const FOV_BREATH = 5 // extra degrees of field of view at full speed
 const MAX_BANK = 0.055 // radians (~3 degrees) of roll into turns
 
+/* Backlit hero shots: on these planets, after arriving front-lit, the
+   camera drifts slowly round to the night side, looking back towards the
+   Sun (just out of frame): a thin crescent, a glowing atmosphere, Earth's
+   city lights, Saturn's rings lit from behind. Planet indices. */
+const HERO_BACKLIT = new Set([1, 2, 5]) // Venus, Earth, Saturn
+/* half the horizontal field of view, kept current by the camera, so the
+   backlit angle can be chosen to keep the Sun's disc just out of frame */
+const view = { halfWidthAngle: 0.5 }
+const SUN_RADIUS = 1
+
+/* Most backlit camera angle (measured from the anti-Sun direction, as seen
+   from the planet) that still keeps the Sun just outside the frame. The
+   Sun's direction as seen from the camera is solved with the triangle
+   camera-planet-Sun (law of sines). */
+function backlitAngle(cameraDistance: number, sunDistance: number) {
+  for (let deg = 18; deg <= 80; deg += 2) {
+    const theta = (deg * Math.PI) / 180
+    const atPlanet = Math.PI - theta // angle camera-planet-Sun
+    const cameraToSun = Math.sqrt(
+      cameraDistance * cameraDistance +
+        sunDistance * sunDistance -
+        2 * cameraDistance * sunDistance * Math.cos(atPlanet),
+    )
+    const atCamera = Math.asin(
+      Math.min(1, (sunDistance * Math.sin(atPlanet)) / cameraToSun),
+    )
+    const sunRadiusAngle = Math.asin(Math.min(1, (SUN_RADIUS * 1.05) / cameraToSun))
+    if (atCamera - sunRadiusAngle >= view.halfWidthAngle) return theta
+  }
+  return (80 * Math.PI) / 180
+}
+const HERO_DELAY = 1.4 // seconds after arriving before the drift starts
+const HERO_DURATION = 9 // seconds for the full drift
+/* drift amount (0 front-lit .. 1 backlit) per chapter; frozen on leaving so
+   the next flight starts exactly where the camera is */
+const heroDrift: number[] = new Array(13).fill(0)
+const _backDir = new THREE.Vector3()
+
 const BLEND = 0.18
 
 const isPlanetChapter = (chapter: number) =>
@@ -141,6 +179,20 @@ const isPlanetChapter = (chapter: number) =>
 const ease = (value: number) => {
   const x = THREE.MathUtils.clamp(value, 0, 1)
   return x * x * x * (x * (x * 6 - 15) + 10)
+}
+
+/* Camera distance for a planet close-up.
+   Rocky planets: framed by how much of the view they fill (radius /
+   distance) so small worlds like Mercury and Mars are not lost; Earth
+   keeps ~0.063, smaller worlds stay smaller. Giants: by their radius. */
+function heroDistanceFor(planetIndex: number) {
+  const config = PLANET_CONFIG[planetIndex]
+  const visualRadius = getPlanetVisualRadius(planetIndex)
+  const rockyFill = ROCKY_FILL[planetIndex]
+  return rockyFill !== undefined
+    ? visualRadius / rockyFill
+    : Math.max(config.minHeroDistance, visualRadius * config.radiusMultiplier) *
+        (planetIndex === 5 ? 1.9 : 1.2)
 }
 
 function calculatePlanetPose(
@@ -179,19 +231,21 @@ function calculatePlanetPose(
     .addScaledVector(_worldUp, 0.16)
     .normalize()
 
-  const visualRadius = getPlanetVisualRadius(planetIndex)
-  // Tighter framing so the planet fills the centre of the screen
-  // Rocky planets: frame by how much of the view they fill (radius / distance)
-  // so small worlds like Mercury and Mars are not lost inside the reticle.
-  // Earth keeps its previous framing (~0.063); smaller worlds stay smaller.
-  const rockyFill = ROCKY_FILL[planetIndex]
-  const heroDistance =
-    rockyFill !== undefined
-      ? visualRadius / rockyFill
-      : Math.max(
-          config.minHeroDistance,
-          visualRadius * config.radiusMultiplier,
-        ) * (planetIndex === 5 ? 1.9 : 1.2)
+  // drift towards the night side, looking back at the Sun
+  const drift = HERO_BACKLIT.has(planetIndex) ? heroDrift[planetIndex + 2] : 0
+  if (drift > 0) {
+    const sunDistance = _planetCenter.distanceTo(SYSTEM_OFFSET)
+    const theta = backlitAngle(heroDistanceFor(planetIndex), sunDistance)
+    _backDir
+      .copy(_toSun)
+      .multiplyScalar(-Math.cos(theta))
+      .addScaledVector(_side, Math.sin(theta))
+      .addScaledVector(_worldUp, 0.1)
+      .normalize()
+    _viewDir.lerp(_backDir, drift).normalize()
+  }
+
+  const heroDistance = heroDistanceFor(planetIndex)
   const arrivalDistance = heroDistance * 2.35
 
   outTarget
@@ -272,6 +326,8 @@ function CinematicCamera({
   }, [camera, size.width, size.height])
   const initialized = useRef(false)
   const bank = useRef(0)
+  const heroChapter = useRef(-1)
+  const heroTime = useRef(0)
   const smoothPosition = useRef(new THREE.Vector3())
   const parallaxWeight = useRef(1)
   // "Reduce motion": camera follows scroll directly, no drift or mouse parallax
@@ -297,6 +353,24 @@ function CinematicCamera({
     )
 
     const planet = isPlanetChapter(chapter)
+
+    view.halfWidthAngle = Math.atan(
+      Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect,
+    )
+
+    // backlit hero drift: reset on entering a chapter, advance once arrived
+    if (chapter !== heroChapter.current) {
+      heroChapter.current = chapter
+      heroTime.current = 0
+      heroDrift[chapter] = 0
+    }
+    if (planet && local >= BLEND && !reducedMotion) {
+      heroTime.current += delta
+      heroDrift[chapter] = ease(
+        (heroTime.current - HERO_DELAY) / HERO_DURATION,
+      )
+    }
+
     const baseFov = planet ? PLANET_CONFIG[chapter - 2].fov : 41
     // Portrait screens: widen the vertical FOV so planets fit the narrow width
     const portraitScale = Math.max(
