@@ -1052,6 +1052,14 @@ function Planet({
               radius={visualRadius}
             />
           )}
+
+          {/* moons orbit in the planet's equatorial plane (Titan in Saturn's ring plane) */}
+          {MOON_SYSTEMS[planet.name] && (
+            <MoonSystem
+              system={MOON_SYSTEMS[planet.name]}
+              planetRadius={visualRadius}
+            />
+          )}
         </group>
 
         {planet.type === 'earth' && <Moon />}
@@ -1192,6 +1200,104 @@ function Moon() {
         </mesh>
       </group>
     </group>
+  )
+}
+
+/* ============================================================
+   MOONS
+   Sizes and distances are in planet radii. Within each system the size
+   ratios are real, enlarged 2.5x so they read on screen (Mars's moons,
+   only ~11 km and ~6 km across, are enlarged far more). Orbits are
+   compressed to stay in frame; periods keep their real ratios.
+============================================================ */
+
+type MoonSpec = {
+  name: string
+  color: string
+  radius: number
+  distance: number
+  periodDays: number
+  phase: number
+  shape?: [number, number, number]
+}
+
+type MoonSystemSpec = {
+  /* seconds for the first (innermost) moon to complete one orbit */
+  baseSeconds: number
+  moons: MoonSpec[]
+}
+
+const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
+  Mars: {
+    baseSeconds: 26,
+    moons: [
+      { name: 'Phobos', color: '#a39484', radius: 0.09, distance: 1.9, periodDays: 0.319, phase: 0.4, shape: [1, 0.74, 0.86] },
+      { name: 'Deimos', color: '#b3a594', radius: 0.06, distance: 2.8, periodDays: 1.263, phase: 2.7, shape: [1, 0.82, 0.9] },
+    ],
+  },
+  Jupiter: {
+    baseSeconds: 30,
+    moons: [
+      { name: 'Io', color: '#d8bb63', radius: 0.065, distance: 1.85, periodDays: 1.769, phase: 0.3 },
+      { name: 'Europa', color: '#cdbfa3', radius: 0.056, distance: 2.3, periodDays: 3.551, phase: 2.2 },
+      { name: 'Ganymede', color: '#9c8f80', radius: 0.094, distance: 2.95, periodDays: 7.155, phase: 4.1 },
+      { name: 'Callisto', color: '#6e6359', radius: 0.086, distance: 3.7, periodDays: 16.689, phase: 5.5 },
+    ],
+  },
+  Saturn: {
+    baseSeconds: 70,
+    moons: [
+      { name: 'Titan', color: '#d29d55', radius: 0.11, distance: 2.75, periodDays: 15.945, phase: 1.2 },
+    ],
+  },
+}
+
+function MoonSystem({
+  system,
+  planetRadius,
+}: {
+  system: MoonSystemSpec
+  planetRadius: number
+}) {
+  const arms = useRef<(THREE.Group | null)[]>([])
+  const time = useRef(0)
+  const referencePeriod = system.moons[0]?.periodDays ?? 1
+
+  useFrame((_, delta) => {
+    time.current += delta
+    system.moons.forEach((moon, i) => {
+      const arm = arms.current[i]
+      if (!arm) return
+      const seconds = system.baseSeconds * (moon.periodDays / referencePeriod)
+      arm.rotation.y = moon.phase + (time.current / seconds) * Math.PI * 2
+    })
+  })
+
+  return (
+    <>
+      {system.moons.map((moon, i) => (
+        <group
+          key={moon.name}
+          ref={(group) => {
+            arms.current[i] = group
+          }}
+        >
+          <mesh
+            position={[moon.distance * planetRadius, 0, 0]}
+            scale={(moon.shape ?? [1, 1, 1]).map(
+              (axis) => axis * moon.radius * planetRadius,
+            ) as [number, number, number]}
+          >
+            <sphereGeometry args={[1, 32, 24]} />
+            <meshStandardMaterial
+              color={moon.color}
+              roughness={1}
+              metalness={0}
+            />
+          </mesh>
+        </group>
+      ))}
+    </>
   )
 }
 
