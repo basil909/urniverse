@@ -572,11 +572,11 @@ const chapterTextVariants = {
 
 const factCardVariants = {
 
-  initial: { opacity: 0, y: 24, filter: 'blur(8px)' },
+  initial: { opacity: 0, y: 24 },
 
-  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
+  animate: { opacity: 1, y: 0 },
 
-  exit: { opacity: 0, y: -18, filter: 'blur(8px)' },
+  exit: { opacity: 0, y: -18 },
 
 }
 
@@ -592,9 +592,6 @@ const factCardVariants = {
 
 export default function Journey() {
   const [section, setSection] = useState(0)
-  const [percent, setPercent] = useState(0)
-  const [activeFact, setActiveFact] = useState(0)
-  const [showFacts, setShowFacts] = useState(false)
   const [textOn, setTextOn] = useState(true)
 
   const rootRef = useRef<HTMLElement>(null)
@@ -604,9 +601,6 @@ export default function Journey() {
 
   const frame = useRef<number | null>(null)
   const lastSection = useRef(0)
-  const lastPercent = useRef(0)
-  const lastFact = useRef(0)
-  const lastFactsVisibility = useRef(false)
   const lastTextOn = useRef(true)
 
   /* Inertial smooth scrolling: scrollY (and so the camera) glides */
@@ -790,11 +784,6 @@ export default function Journey() {
       const timeline = scrollProgress / MAX_PROGRESS
       rootRef.current?.style.setProperty('--timeline', String(timeline))
 
-      const pct = Math.round(timeline * 100)
-      if (pct !== lastPercent.current) {
-        lastPercent.current = pct
-        setPercent(pct)
-      }
 
       const sectionIndex = Math.min(
         TOTAL_SECTIONS - 1,
@@ -809,7 +798,6 @@ export default function Journey() {
 
       const isIntro = sectionIndex === 0
       const isReturn = sectionIndex === TOTAL_SECTIONS - 1
-      const isChapter = !isIntro && !isReturn
 
       const nextTextOn = isIntro
         ? local < 0.85
@@ -820,32 +808,6 @@ export default function Journey() {
       if (nextTextOn !== lastTextOn.current) {
         lastTextOn.current = nextTextOn
         setTextOn(nextTextOn)
-      }
-
-      const factsOn = isChapter && nextTextOn
-      if (factsOn !== lastFactsVisibility.current) {
-        lastFactsVisibility.current = factsOn
-        setShowFacts(factsOn)
-      }
-
-      if (!isChapter) return
-
-      const chapter = JOURNEY[sectionIndex - 1]
-      if (!chapter) return
-
-      const factCount = chapter.facts.length
-      const factLocal = Math.min(
-        0.999999,
-        Math.max(0, (local - TEXT_IN) / (TEXT_OUT - TEXT_IN)),
-      )
-      const factIndex = Math.min(
-        factCount - 1,
-        Math.floor(factLocal * factCount),
-      )
-
-      if (lastFact.current !== factIndex) {
-        lastFact.current = factIndex
-        setActiveFact(factIndex)
       }
     }
 
@@ -1059,9 +1021,9 @@ export default function Journey() {
             <motion.div
               key="intro"
               className="intro-content"
-              initial={{ opacity: 0, y: 30, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -24, filter: 'blur(8px)' }}
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -24 }}
               transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
             >
               <div className="eyebrow" aria-hidden="true">
@@ -1088,9 +1050,9 @@ export default function Journey() {
             <motion.div
               key={activeChapter.id}
               className="story-content"
-              initial={{ opacity: 0, y: 28, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: -20, filter: 'blur(8px)' }}
+              initial={{ opacity: 0, y: 28 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.7, ease: EASE_OUT_EXPO }}
             >
               <div className="story-inner">
@@ -1173,9 +1135,9 @@ export default function Journey() {
             <motion.div
               key="return"
               className="return-content"
-              initial={{ opacity: 0, y: 30, filter: 'blur(10px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={{ opacity: 0, y: 20, filter: 'blur(8px)' }}
+              initial={{ opacity: 0, y: 30 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
               transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
             >
               <div className="chapter" aria-hidden="true">

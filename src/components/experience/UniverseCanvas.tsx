@@ -3,7 +3,6 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   Bloom,
-  ChromaticAberration,
   EffectComposer,
   Noise,
   ToneMapping,
@@ -437,7 +436,7 @@ function CinematicCamera({
    speed is felt without any interface.
 ============================================================ */
 
-const STREAK_COUNT = 650
+const STREAK_COUNT = 260
 const STREAK_BOX = 60
 
 const STREAK_VERTEX = /* glsl */ `
@@ -453,7 +452,7 @@ void main() {
   vec3 world = uCamera + rel - uTrail * aTail;
 
   float distance = length(rel);
-  float nearFade = smoothstep(1.2, 4.5, distance);
+  float nearFade = smoothstep(3.0, 9.0, distance); // nothing streaks right past the lens
   float farFade = 1.0 - smoothstep(uBox * 0.28, uBox * 0.5, distance);
   vFade = nearFade * farFade * (1.0 - aTail * 0.85);
 
@@ -465,7 +464,8 @@ uniform float uIntensity;
 varying float vFade;
 
 void main() {
-  gl_FragColor = vec4(vec3(0.72, 0.8, 1.0) * vFade * uIntensity * 0.42, 1.0);
+  // squared: barely there at cruising speed, a whisper at peak
+  gl_FragColor = vec4(vec3(0.72, 0.8, 1.0) * vFade * uIntensity * uIntensity * 0.16, 1.0);
 }`
 
 const _trail = new THREE.Vector3()
@@ -529,12 +529,12 @@ function StarStreaks() {
   useFrame(() => {
     if (!lines.current) return
     const intensity = flight.intensity
-    lines.current.visible = intensity > 0.01
+    lines.current.visible = intensity > 0.05
     if (!lines.current.visible) return
 
     // trail = how far each streak reaches back along the motion
     const speed = flight.velocity.length()
-    const length = Math.min(speed * 0.06, 4) * intensity
+    const length = Math.min(speed * 0.035, 1.6) * intensity
     _trail.copy(flight.velocity)
     if (speed > 1e-4) _trail.multiplyScalar(length / speed)
 
@@ -733,7 +733,6 @@ function mulberry32(seed: number) {
   }
 }
 
-const CA_OFFSET = new THREE.Vector2(0.000035, 0.000035)
 const SPREAD_FAR: [number, number, number] = [150, 100, 190]
 const SPREAD_NEAR: [number, number, number] = [90, 70, 130]
 
@@ -910,11 +909,12 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
 
 
-      <EffectComposer multisampling={2}>
+      {/* no MSAA: 1.5x pixel density already smooths edges */}
+      <EffectComposer multisampling={0}>
 
-        <Bloom intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur />
+        {/* glow is soft, so half resolution looks identical and costs a quarter */}
+        <Bloom intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />
 
-        <ChromaticAberration offset={CA_OFFSET} />
 
         {/* the only film grain on the page (the CSS grain layer was removed) */}
         <Noise opacity={0.02} />

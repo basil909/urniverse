@@ -16,8 +16,8 @@ import * as THREE from 'three'
    - Star clusters & faint outer halo
 ============================================================ */
 
-const STAR_COUNT = 42000
-const DUST_COUNT = 6000
+const STAR_COUNT = 30000
+const DUST_COUNT = 4000
 const CLUSTER_COUNT = 80
 
 const ARM_COUNT = 4
@@ -900,7 +900,7 @@ export default function Galaxy({
           geometry={starGeometry}
           material={starMaterial}
           renderOrder={-5}
-          frustumCulled={false}
+          frustumCulled // skipped entirely when the galaxy is off-screen
         />
 
         {/* ==================================================
@@ -911,7 +911,7 @@ export default function Galaxy({
           <points
             geometry={dustGeometry}
             renderOrder={-4}
-            frustumCulled={false}
+            frustumCulled // skipped entirely when the galaxy is off-screen
           >
             <pointsMaterial
               fog={false}
@@ -939,7 +939,7 @@ export default function Galaxy({
               clusterGeometry
             }
             renderOrder={-3}
-            frustumCulled={false}
+            frustumCulled // skipped entirely when the galaxy is off-screen
           >
             <pointsMaterial
               fog={false}
