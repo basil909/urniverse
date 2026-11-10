@@ -499,7 +499,52 @@ const TAIL = 0.6 // extra scroll after the return section so it can settle
 const MAX_PROGRESS = TOTAL_SECTIONS - 1 + TAIL
 const TEXT_IN = 0.16 // camera has arrived
 const TEXT_OUT = 0.93 // start leaving before the next flight
-const SNAP = 0.24 // where the rail / keyboard / buttons land inside a chapter
+
+/* Scroll feel.
+   Raw scroll (one screen per section) is remapped before it drives the
+   story: the first FLIGHT_SPAN of each section carries the camera flight,
+   which in story-progress terms is CAMERA_BLEND (must match BLEND in
+   UniverseCanvas). That stretches each flight over 60% of a screen instead
+   of 18%, and the rest of the section is where the chapter sits. */
+const FLIGHT_SPAN = 0.6
+const CAMERA_BLEND = 0.18
+
+function toStoryProgress(scroll: number) {
+  const section = Math.floor(scroll)
+  const local = scroll - section
+  const storyLocal =
+    local < FLIGHT_SPAN
+      ? (local / FLIGHT_SPAN) * CAMERA_BLEND
+      : CAMERA_BLEND +
+        ((local - FLIGHT_SPAN) / (1 - FLIGHT_SPAN)) * (1 - CAMERA_BLEND)
+  return section + storyLocal
+}
+
+/* Where each section comes to rest (in raw scroll units): the middle of
+   the settled part of a chapter, the top for the intro, the end for return */
+const REST_LOCAL = 0.8
+
+function restPoint(index: number) {
+  if (index <= 0) return 0
+  if (index >= TOTAL_SECTIONS - 1) return MAX_PROGRESS
+  return index + REST_LOCAL
+}
+
+function nearestRest(scroll: number) {
+  let best = 0
+  let bestDistance = Number.POSITIVE_INFINITY
+  for (let i = 0; i < TOTAL_SECTIONS; i += 1) {
+    const distance = Math.abs(restPoint(i) - scroll)
+    if (distance < bestDistance) {
+      best = i
+      bestDistance = distance
+    }
+  }
+  return best
+}
+
+const easeInOutCubic = (t: number) =>
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
 
 const EASE_OUT_EXPO: [number, number, number, number] = [0.22, 1, 0.36, 1]
 
@@ -554,6 +599,7 @@ export default function Journey() {
 
   const rootRef = useRef<HTMLElement>(null)
   const lenisRef = useRef<Lenis | null>(null)
+  const snapToRef = useRef<((index: number) => void) | null>(null)
   const progressRef = useRef(0)
 
   const frame = useRef<number | null>(null)
@@ -582,8 +628,146 @@ export default function Journey() {
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
+
+    /* ---- Snap controller -------------------------------------------
+       Scroll freely; once input stops, glide to a resting point.
+       Direction decides where: a small flick moves one chapter, a big
+       fling can travel several. Each glide is timed and eased, and the
+       page ignores leftover trackpad momentum right after landing so
+       one gesture never skips two chapters. */
+    const unit = () =>
+      Math.max(
+        1,
+        (document.documentElement.scrollHeight - window.innerHeight) /
+          MAX_PROGRESS,
+      )
+
+    let snapping = false
+    let lastRest = nearestRest(window.scrollY / unit())
+    let direction = 0
+    let lastInput: 'wheel' | 'touch' = 'wheel'
+    let idleTimer = 0
+    let quietUntil = 0
+    let quietHardLimit = 0
+    let releaseTimer = 0
+
+    const releaseWhenQuiet = () => {
+      window.clearTimeout(releaseTimer)
+      const now = performance.now()
+      if (now >= quietUntil || now >= quietHardLimit) {
+        lenis.start()
+        return
+      }
+      releaseTimer = window.setTimeout(
+        releaseWhenQuiet,
+        Math.min(quietUntil, quietHardLimit) - now,
+      )
+    }
+
+    const snapTo = (index: number) => {
+      const target = Math.max(0, Math.min(TOTAL_SECTIONS - 1, index))
+      const from = lenis.scroll / unit()
+      const to = restPoint(target)
+      const distance = Math.abs(to - from)
+      window.clearTimeout(idleTimer)
+
+      if (distance < 0.003) {
+        lastRest = target
+        return
+      }
+
+      snapping = true
+      lenis.start()
+      lenis.scrollTo(to * unit(), {
+        duration: Math.min(2.8, 1.1 + 0.6 * distance),
+        easing: easeInOutCubic,
+        lock: true,
+        force: true,
+        onComplete: () => {
+          snapping = false
+          lastRest = target
+          // swallow trackpad momentum that arrives after landing
+          const now = performance.now()
+          quietUntil = now + 250
+          quietHardLimit = now + 1200
+          lenis.stop()
+          releaseWhenQuiet()
+        },
+      })
+    }
+    snapToRef.current = snapTo
+
+    const settle = () => {
+      if (snapping) return
+      const where = lenis.targetScroll / unit()
+      let target = nearestRest(where)
+      // moved, but not far enough to reach the next rest: still go there
+      if (
+        target === lastRest &&
+        direction !== 0 &&
+        Math.abs(where - restPoint(lastRest)) > 0.06
+      ) {
+        target = lastRest + direction
+      }
+      snapTo(target)
+    }
+
+    const scheduleSettle = (delay: number) => {
+      window.clearTimeout(idleTimer)
+      idleTimer = window.setTimeout(settle, delay)
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) < 1) return
+      const now = performance.now()
+      if (snapping) return
+      if (lenis.isStopped) {
+        // still in the post-landing quiet window: extend it, ignore input
+        quietUntil = Math.max(quietUntil, now + 160)
+        return
+      }
+      direction = Math.sign(event.deltaY)
+      lastInput = 'wheel'
+      scheduleSettle(140)
+    }
+
+    let touchStartY = 0
+    let touchActive = false
+    const onTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? 0
+      touchActive = true
+      lastInput = 'touch'
+      window.clearTimeout(idleTimer)
+    }
+    const onTouchEnd = (event: TouchEvent) => {
+      touchActive = false
+      const endY = event.changedTouches[0]?.clientY ?? touchStartY
+      const delta = touchStartY - endY
+      if (Math.abs(delta) > 8) direction = Math.sign(delta)
+      scheduleSettle(160)
+    }
+    // native touch momentum keeps scrolling after the finger lifts:
+    // wait until it has settled before snapping
+    const onScroll = () => {
+      if (lastInput === 'touch' && !snapping && !touchActive && direction !== 0) {
+        scheduleSettle(140)
+      }
+    }
+
+    window.addEventListener('wheel', onWheel, { passive: true })
+    window.addEventListener('touchstart', onTouchStart, { passive: true })
+    window.addEventListener('touchend', onTouchEnd, { passive: true })
+    lenis.on('scroll', onScroll)
+
     return () => {
+      window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchend', onTouchEnd)
+      lenis.off('scroll', onScroll)
+      window.clearTimeout(idleTimer)
+      window.clearTimeout(releaseTimer)
       cancelAnimationFrame(raf)
+      snapToRef.current = null
       lenisRef.current = null
       lenis.destroy()
     }
@@ -596,13 +780,14 @@ export default function Journey() {
       const scrollable =
         document.documentElement.scrollHeight - window.innerHeight
       const sectionHeight = Math.max(1, scrollable / MAX_PROGRESS)
-      const progress = Math.min(
+      const scrollProgress = Math.min(
         MAX_PROGRESS,
         Math.max(0, window.scrollY / sectionHeight),
       )
+      const progress = toStoryProgress(scrollProgress)
       progressRef.current = progress
 
-      const timeline = progress / MAX_PROGRESS
+      const timeline = scrollProgress / MAX_PROGRESS
       rootRef.current?.style.setProperty('--timeline', String(timeline))
 
       const pct = Math.round(timeline * 100)
@@ -690,15 +875,15 @@ export default function Journey() {
 
   const goToSection = (target: number) => {
     const clamped = Math.max(0, Math.min(TOTAL_SECTIONS - 1, target))
+    if (snapToRef.current) {
+      snapToRef.current(clamped)
+      return
+    }
+    // reduced motion: no Lenis, plain jump to the resting point
     const scrollable =
       document.documentElement.scrollHeight - window.innerHeight
-    const unit = scrollable / MAX_PROGRESS
-    const top = unit * (clamped === 0 ? 0 : clamped + SNAP)
-    if (lenisRef.current) {
-      lenisRef.current.scrollTo(top, { duration: 1.8 })
-    } else {
-      window.scrollTo({ top, behavior: 'smooth' })
-    }
+    const top = (scrollable / MAX_PROGRESS) * restPoint(clamped)
+    window.scrollTo({ top, behavior: 'auto' })
   }
 
   const scrollToStart = () => goToSection(1)
