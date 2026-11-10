@@ -38,24 +38,84 @@ const EARTH_LOCAL_TEXTURES = {
   night: '/textures/earth-night-lights.webp',
 } as const
 
-/* Night side: city lights are an emissive map, masked so they only glow
-   where the Sun is down. The mask fades across the terminator (dusk). */
+/* Earth's extras, added to its standard material:
+   - city lights glow only where the Sun is down (fading across dusk)
+   - clouds cast soft shadows on the ground, offset away from the Sun
+     (longer near the terminator, where the light is low)
+   - a sharp glint of sunlight on the oceans
+   - aurora: green curtains around both poles on the night side
+   Directions are in view space; north is Earth's spin axis. */
 const earthNight = {
   uSunDirView: { value: new THREE.Vector3(1, 0, 0) },
+  uNorthView: { value: new THREE.Vector3(0, 1, 0) },
+  uClouds: { value: null as THREE.Texture | null },
+  uHasClouds: { value: 0 },
+  uCloudShift: { value: 0 },
+  uTime: { value: 0 },
 }
 const EARTH_CITY_LIGHTS = new THREE.Color('#ffc27a')
 const _earthWorld = new THREE.Vector3()
+const _earthAxis = new THREE.Vector3()
+const _earthQuat = new THREE.Quaternion()
+
+/* cloud deck height in Earth radii (the cloud shell sits at 1.012) */
+const CLOUD_HEIGHT = 0.012
 
 function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
-  shader.uniforms.uSunDirView = earthNight.uSunDirView
+  Object.assign(shader.uniforms, earthNight)
   shader.fragmentShader =
-    'uniform vec3 uSunDirView;\n' +
-    shader.fragmentShader.replace(
-      '#include <emissivemap_fragment>',
-      `#include <emissivemap_fragment>
+    `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
+uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
+` +
+    shader.fragmentShader
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
       float sunFacing = dot(normalize(normal), normalize(uSunDirView));
-      totalEmissiveRadiance *= 1.0 - smoothstep(-0.2, 0.12, sunFacing);`,
-    )
+      totalEmissiveRadiance *= 1.0 - smoothstep(-0.2, 0.12, sunFacing);
+      #ifdef USE_MAP
+      {
+        /* aurora ovals near 67 degrees from the equator, rippling curtains */
+        float lat = (vMapUv.y - 0.5) * 180.0;
+        float oval = exp(-pow((abs(lat) - 67.0) / 3.5, 2.0));
+        float x = vMapUv.x * 6.28318;
+        float curtain = 0.55 + 0.45 * sin(x * 14.0 + uTime * 0.5 + 2.0 * sin(x * 5.0 - uTime * 0.2));
+        curtain *= 0.65 + 0.35 * sin(x * 37.0 - uTime * 0.9);
+        float dark = 1.0 - smoothstep(-0.3, 0.02, sunFacing);
+        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.5;
+      }
+      #endif`,
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+      #ifdef USE_MAP
+      {
+        vec3 N = normalize(geometryNormal);
+        vec3 sunV = normalize(uSunDirView);
+        float mu = dot(N, sunV);
+        float shade = 1.0;
+        if (uHasClouds > 0.5 && mu > -0.05) {
+          /* where is the cloud that stands between this point and the Sun? */
+          vec3 east = normalize(cross(normalize(uNorthView), N));
+          vec3 north = cross(N, east);
+          vec3 along = sunV - N * mu;
+          float reach = ${CLOUD_HEIGHT} / max(mu, 0.12);
+          float coslat = max(cos((vMapUv.y - 0.5) * 3.14159), 0.15);
+          vec2 shift = vec2(dot(along, east) / (6.28318 * coslat), dot(along, north) / 3.14159) * reach;
+          float cover = texture2D(uClouds, vMapUv + shift - vec2(uCloudShift, 0.0)).g;
+          shade = 1.0 - cover * 0.55;
+        }
+        reflectedLight.directDiffuse *= shade;
+        reflectedLight.directSpecular *= shade;
+        /* sun glint: a tight, bright highlight where the water mirrors the Sun */
+        vec3 V = normalize(vViewPosition);
+        vec3 H = normalize(sunV + V);
+        float spot = pow(max(dot(N, H), 0.0), 220.0) * 2.4 + pow(max(dot(N, H), 0.0), 28.0) * 0.12;
+        reflectedLight.directSpecular += vec3(1.0, 0.92, 0.78) * spot * specularStrength * shade * smoothstep(0.0, 0.12, mu);
+      }
+      #endif`,
+      )
 }
 
 const MOON_LOCAL_TEXTURES = {
@@ -281,10 +341,10 @@ void main() {
 
   /* granulation: two scales of slowly churning convection cells (fine
      granules inside a larger supergranule network) */
-  float cells = 1.0 - abs(noise(p * 74.0 + vec3(0.0, uTime * 0.03, uTime * 0.02)) * 2.0 - 1.0);
-  float fine = 1.0 - abs(noise(p * 150.0 - vec3(uTime * 0.025, 0.0, uTime * 0.02)) * 2.0 - 1.0);
+  float cells = 1.0 - abs(noise(p * 34.0 + vec3(0.0, uTime * 0.03, uTime * 0.02)) * 2.0 - 1.0);
+  float fine = 1.0 - abs(noise(p * 72.0 - vec3(uTime * 0.025, 0.0, uTime * 0.02)) * 2.0 - 1.0);
   cells = pow(cells, 2.6) * 0.7 + pow(fine, 3.0) * 0.3;
-  float network = 1.0 - abs(noise(p * 16.0 + vec3(uTime * 0.006)) * 2.0 - 1.0);
+  float network = 1.0 - abs(noise(p * 9.0 + vec3(uTime * 0.006)) * 2.0 - 1.0);
   cells *= 0.82 + 0.18 * smoothstep(0.3, 0.9, network);
   float churn = fbm(p * 2.4 + vec3(uTime * 0.006, 0.0, 0.0));
 
@@ -293,19 +353,22 @@ void main() {
   float spots = smoothstep(0.8, 0.87, fbm(p * 1.8 + vec3(3.1, 0.0, 1.4)));
 
   /* limb darkening: dimmer and redder towards the edge, as on the real Sun */
-  float limb = 1.0 - 0.6 * (1.0 - pow(mu, 0.75));
-  vec3 core = vec3(1.0, 0.94, 0.80);
-  vec3 middle = vec3(1.0, 0.70, 0.30);
-  vec3 edge = vec3(0.92, 0.33, 0.07);
-  vec3 base = mix(edge, middle, smoothstep(0.0, 0.55, mu));
-  base = mix(base, core, smoothstep(0.5, 1.0, mu));
+  float limb = 1.0 - 0.68 * (1.0 - pow(mu, 0.7));
+  /* golden centre, deepening to orange and red at the limb */
+  vec3 core = vec3(1.0, 0.84, 0.52);
+  vec3 middle = vec3(1.0, 0.6, 0.2);
+  vec3 edge = vec3(0.85, 0.27, 0.05);
+  vec3 base = mix(edge, middle, smoothstep(0.0, 0.6, mu));
+  base = mix(base, core, smoothstep(0.6, 1.0, mu));
 
-  float tone = 0.8 + 0.2 * cells + 0.12 * churn + 0.22 * faculae;
+  /* exposed so the cells read: dark lanes between bright granules */
+  float tone = 0.6 + 0.42 * cells + 0.1 * churn + 0.2 * faculae;
   vec3 color = base * tone * limb;
   color *= 1.0 - spots * 0.7;
 
-  // only the hottest centre is bright enough to bloom
-  gl_FragColor = vec4(color * 1.12, 1.0);
+  // only the hottest centre is bright enough to bloom; the rest stays
+  // below the bloom threshold so the surface is visible, not a white disc
+  gl_FragColor = vec4(color * 1.0, 1.0);
 }`
 
 
@@ -1349,6 +1412,11 @@ function Planet({
         .copy(SYSTEM_OFFSET)
         .sub(_earthWorld)
         .transformDirection(camera.matrixWorldInverse)
+      body.current.getWorldQuaternion(_earthQuat)
+      earthNight.uNorthView.value
+        .copy(_earthAxis.set(0, 1, 0).applyQuaternion(_earthQuat))
+        .transformDirection(camera.matrixWorldInverse)
+      earthNight.uTime.value = time
     }
 
     if (!held) {
@@ -1385,6 +1453,11 @@ function Planet({
               />
             )}
             <sphereGeometry args={[1, 96, 96]} />
+
+            {/* clouds ride on Earth and drift slowly over it */}
+            {planet.type === 'earth' && (
+              <EarthCloudLayer radius={1} texture={sharpClouds ?? earthClouds} />
+            )}
 
             {planet.name === 'Earth' && earthMap ? (
               <meshPhongMaterial
@@ -1424,12 +1497,6 @@ function Planet({
             </mesh>
           )}
 
-          {planet.type === 'earth' && (
-            <EarthCloudLayer
-              radius={visualRadius}
-              texture={sharpClouds ?? earthClouds}
-            />
-          )}
 
           {planet.rings && (
             <PlanetRings
@@ -1453,6 +1520,12 @@ function Planet({
         </group>
 
         {planet.type === 'earth' && <Moon sharp={sharp} />}
+
+        {/* earthshine: sunlight reflected off Earth faintly lights the Moon's
+            night side (reaches only as far as the Moon) */}
+        {planet.type === 'earth' && (
+          <pointLight color="#9db6e0" intensity={0.09} distance={2.4} decay={0} />
+        )}
 
         {planet.type === 'earth' && (
           <PaleBlueDotMarker progressRef={progressRef} />
@@ -1484,11 +1557,19 @@ function EarthCloudLayer({
   texture: THREE.Texture | null
 }) {
   const cloud = useRef<THREE.Mesh>(null)
+  const drift = useRef(0)
+
+  // the ground's shadow map reads the same clouds
+  useEffect(() => {
+    earthNight.uClouds.value = texture
+    earthNight.uHasClouds.value = texture ? 1 : 0
+  }, [texture])
 
   useFrame((_, delta) => {
-    if (cloud.current) {
-      cloud.current.rotation.y += delta * 0.010
-    }
+    // weather drifts east relative to the ground
+    drift.current = (drift.current + delta * 0.01) % (Math.PI * 2)
+    if (cloud.current) cloud.current.rotation.y = drift.current
+    earthNight.uCloudShift.value = drift.current / (Math.PI * 2)
   })
 
   if (!texture) return null

@@ -1222,7 +1222,7 @@ function Lens({
       const outside = Math.max(Math.abs(_sunNdc.x), Math.abs(_sunNdc.y)) - 1
       target =
         outside < 0
-          ? 0.3 // in view: the bloom already does most of the work
+          ? 0.1 // in view: the bloom already glows; don't wash out the disc
           : Math.max(0, 1 - outside / 1.3)
       // fainter the further out we are
       target *= THREE.MathUtils.clamp(14 / distance, 0.3, 1)
