@@ -1,0 +1,1147 @@
+'use client'
+
+
+
+import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react'
+
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
+import Lenis from 'lenis'
+
+
+
+import UniverseCanvas from './experience/UniverseCanvas'
+
+import FactCard from './ui/FactCard'
+import type { UniverseFact } from './ui/FactCard'
+
+
+
+type Chapter = {
+
+  id: string
+
+  label: string
+
+  title: string
+
+  eyebrow: string
+
+  description: string
+
+  facts: string[]
+
+  stats: { value: string; label: string }[]
+
+  accent: string
+
+}
+
+
+
+const JOURNEY: Chapter[] = [
+
+  {
+
+    id: 'sun',
+
+    label: 'SUN',
+
+    eyebrow: '01 · OUR STAR',
+
+    title: 'The star that holds us.',
+
+    description: 'Before we leave home, we meet the object that makes this journey possible. The Sun contains almost all of the Solar System’s mass. Its gravity keeps the planets in orbit, while nuclear fusion in its core supplies the energy that drives Earth’s climate and life.',
+
+    facts: [
+
+      'The Sun is a G-type main-sequence star, about 4.6 billion years old.',
+
+      'Its diameter is about 109 times Earth’s diameter.',
+
+      'Light from the Sun takes about 8 minutes 20 seconds to reach Earth.',
+
+      'The Sun contains about 99.86% of the Solar System’s mass.',
+
+    ],
+
+    stats: [
+
+      { value: '4.6B', label: 'YEARS OLD' },
+
+      { value: '1.39M', label: 'KM DIAMETER' },
+
+      { value: '8m 20s', label: 'LIGHT TO EARTH' },
+
+    ],
+
+    accent: '#ffb45a',
+
+  },
+
+  {
+
+    id: 'mercury',
+
+    label: 'MERCURY',
+
+    eyebrow: '02 · MERCURY',
+
+    title: 'A world of extremes.',
+
+    description: 'Mercury is the smallest planet and the closest to the Sun. With almost no substantial atmosphere to redistribute heat, its surface swings between extreme temperatures. Its ancient surface is covered with impact craters, preserving a record of the early Solar System.',
+
+    facts: [
+
+      'Mercury is the smallest of the eight planets.',
+
+      'A year on Mercury lasts only 87.97 Earth days.',
+
+      'Its orbital eccentricity is the highest of the eight planets.',
+
+      'Mercury has a large iron-rich core relative to its size.',
+
+    ],
+
+    stats: [
+
+      { value: '4,879', label: 'KM DIAMETER' },
+
+      { value: '88', label: 'EARTH DAYS / YEAR' },
+
+      { value: '0.39 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#b8afa2',
+
+  },
+
+  {
+
+    id: 'venus',
+
+    label: 'VENUS',
+
+    eyebrow: '03 · VENUS',
+
+    title: 'Earth’s hostile twin.',
+
+    description: 'Venus is similar to Earth in size and composition, yet its surface is profoundly different. A dense carbon-dioxide atmosphere traps heat in a runaway greenhouse effect, making Venus the hottest planet in the Solar System.',
+
+    facts: [
+
+      'Venus has the hottest planetary surface in the Solar System.',
+
+      'Its atmosphere is dominated by carbon dioxide and thick clouds of sulfuric acid.',
+
+      'Venus rotates extremely slowly and in the opposite direction to most planets.',
+
+      'A Venusian day, measured by rotation, lasts longer than its year.',
+
+    ],
+
+    stats: [
+
+      { value: '12,104', label: 'KM DIAMETER' },
+
+      { value: '225', label: 'EARTH DAYS / YEAR' },
+
+      { value: '~465°C', label: 'SURFACE TEMP.' },
+
+    ],
+
+    accent: '#e4b86a',
+
+  },
+
+  {
+
+    id: 'earth',
+
+    label: 'EARTH',
+
+    eyebrow: '04 · EARTH',
+
+    title: 'The only world we know is alive.',
+
+    description: 'Earth is the reference point for everything that follows. Liquid surface water, a protective atmosphere, active geology and a long-lived climate have created the only environment currently known to support life.',
+
+    facts: [
+
+      'Earth formed about 4.54 billion years ago.',
+
+      'About 71% of its surface is covered by oceans.',
+
+      'Earth has one large natural satellite: the Moon.',
+
+      'Its magnetic field helps shield the surface from charged particles from the Sun.',
+
+    ],
+
+    stats: [
+
+      { value: '12,742', label: 'KM DIAMETER' },
+
+      { value: '4.54B', label: 'YEARS OLD' },
+
+      { value: '1 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#69b7ff',
+
+  },
+
+  {
+
+    id: 'mars',
+
+    label: 'MARS',
+
+    eyebrow: '05 · MARS',
+
+    title: 'A frozen world with a vanished past.',
+
+    description: 'Mars is cold, dry and thinly blanketed by atmosphere today. But its landscape contains evidence that liquid water once flowed across its surface. That history makes Mars one of the most important places to investigate when asking whether life ever existed beyond Earth.',
+
+    facts: [
+
+      'Mars has polar ice caps containing water ice and frozen carbon dioxide.',
+
+      'Its enormous canyon system, Valles Marineris, stretches thousands of kilometres.',
+
+      'Mars has two small moons: Phobos and Deimos.',
+
+      'Olympus Mons is the largest known volcano in the Solar System.',
+
+    ],
+
+    stats: [
+
+      { value: '6,779', label: 'KM DIAMETER' },
+
+      { value: '687', label: 'EARTH DAYS / YEAR' },
+
+      { value: '1.52 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#d76a4c',
+
+  },
+
+  {
+
+    id: 'jupiter',
+
+    label: 'JUPITER',
+
+    eyebrow: '06 · JUPITER',
+
+    title: 'A planet that almost became a star.',
+
+    description: 'Jupiter is the giant of the Solar System. Its mass is more than twice that of all the other planets combined. Deep inside, pressure turns hydrogen into exotic states of matter, while its atmosphere is sculpted by enormous storms and fast-moving jet streams.',
+
+    facts: [
+
+      'Jupiter is the largest planet in the Solar System.',
+
+      'Its Great Red Spot is a long-lived storm larger than Earth.',
+
+      'Jupiter has a powerful magnetic field and an extensive radiation environment.',
+
+      'Its four largest moons — Io, Europa, Ganymede and Callisto — form the famous Galilean satellites.',
+
+    ],
+
+    stats: [
+
+      { value: '139,820', label: 'KM DIAMETER' },
+
+      { value: '11.86', label: 'EARTH YEARS / YEAR' },
+
+      { value: '5.20 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#d9b88e',
+
+  },
+
+  {
+
+    id: 'saturn',
+
+    label: 'SATURN',
+
+    eyebrow: '07 · SATURN',
+
+    title: 'The world of rings.',
+
+    description: 'Saturn is a gas giant surrounded by the most spectacular ring system in the Solar System. The rings are made primarily of water-ice particles ranging from tiny grains to much larger pieces. Beneath the clouds, Saturn is mostly hydrogen and helium.',
+
+    facts: [
+
+      'Saturn’s rings are divided into many bands and gaps by gravity and orbital resonances.',
+
+      'Saturn is the least dense planet — its average density is lower than water.',
+
+      'Titan, Saturn’s largest moon, has a dense nitrogen atmosphere and lakes of liquid hydrocarbons.',
+
+      'Enceladus ejects plumes of water-rich material from an underground ocean system.',
+
+    ],
+
+    stats: [
+
+      { value: '116,460', label: 'KM DIAMETER' },
+
+      { value: '29.45', label: 'EARTH YEARS / YEAR' },
+
+      { value: '9.54 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#d7c08b',
+
+  },
+
+  {
+
+    id: 'uranus',
+
+    label: 'URANUS',
+
+    eyebrow: '08 · URANUS',
+
+    title: 'The planet that rolls sideways.',
+
+    description: 'Uranus is an ice giant with an unusual orientation. Its rotation axis is tilted by about 98 degrees, so its seasonal cycle is unlike anything experienced on Earth. Methane in its upper atmosphere absorbs red light, giving the planet its blue-green appearance.',
+
+    facts: [
+
+      'Uranus rotates with an axial tilt of about 97.8 degrees.',
+
+      'It has a faint ring system and dozens of known moons.',
+
+      'Methane in the atmosphere contributes to its cyan colour.',
+
+      'A Uranian year lasts about 84 Earth years.',
+
+    ],
+
+    stats: [
+
+      { value: '50,724', label: 'KM DIAMETER' },
+
+      { value: '84', label: 'EARTH YEARS / YEAR' },
+
+      { value: '19.19 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#83dce5',
+
+  },
+
+  {
+
+    id: 'neptune',
+
+    label: 'NEPTUNE',
+
+    eyebrow: '09 · NEPTUNE',
+
+    title: 'The dark, distant giant.',
+
+    description: 'Neptune is the farthest of the eight planets from the Sun. Despite receiving very little sunlight, its atmosphere is extraordinarily active, with some of the fastest winds measured on any planet. Its deep blue appearance comes from atmospheric chemistry rather than simply being a reflection of Earth’s sky.',
+
+    facts: [
+
+      'Neptune completes one orbit in about 165 Earth years.',
+
+      'It has the fastest planetary winds measured in the Solar System.',
+
+      'Triton, Neptune’s largest moon, probably originated in the Kuiper Belt.',
+
+      'Neptune radiates more energy than it receives from the Sun.',
+
+    ],
+
+    stats: [
+
+      { value: '49,244', label: 'KM DIAMETER' },
+
+      { value: '164.8', label: 'EARTH YEARS / YEAR' },
+
+      { value: '30.07 AU', label: 'AVG. SUN DISTANCE' },
+
+    ],
+
+    accent: '#527ee8',
+
+  },
+
+  {
+
+    id: 'beyond',
+
+    label: 'BEYOND',
+
+    eyebrow: '10 · BEYOND THE PLANETS',
+
+    title: 'The Solar System keeps going.',
+
+    description: 'Neptune is not the edge of the Solar System. Beyond the planets lie the Kuiper Belt, the distant scattered disk and, far beyond, the enormous Oort Cloud. The journey from one star to the next has only just begun.',
+
+    facts: [
+
+      'The Kuiper Belt contains many icy bodies beyond Neptune.',
+
+      'Pluto is a dwarf planet in the Kuiper Belt.',
+
+      'The Oort Cloud is a hypothesized distant reservoir of icy bodies.',
+
+      'Beyond the Solar System, the Milky Way contains vast numbers of other stars and planetary systems.',
+
+    ],
+
+    stats: [
+
+      { value: '8', label: 'PLANETS' },
+
+      { value: '30+ AU', label: 'TO NEPTUNE' },
+
+      { value: '∞', label: 'WHAT COMES NEXT' },
+
+    ],
+
+    accent: '#aab8d6',
+  },
+  {
+    id: 'galaxy',
+    label: 'MILKY WAY',
+    eyebrow: '11 · THE MILKY WAY',
+    title: 'Zoom out. Way out.',
+    description: 'Everything you have just travelled through, the Sun and all eight planets, is a single point inside the Milky Way: a barred spiral galaxy of a few hundred billion stars. The Sun sits in a minor spiral arm, about 26,000 light-years from the galactic centre.',
+    facts: [
+      'The Milky Way is roughly 100,000 light-years across.',
+      'It contains an estimated 100 to 400 billion stars.',
+      'The Sun takes about 230 million years to orbit the galactic centre once.',
+      'A supermassive black hole, Sagittarius A*, sits at the centre.',
+    ],
+    stats: [
+      { value: '100,000', label: 'LIGHT-YEARS ACROSS' },
+      { value: '26,000', label: 'LY TO THE CENTRE' },
+      { value: '230M', label: 'YEARS PER ORBIT' },
+    ],
+    accent: '#c3b4ff',
+  },
+]
+
+
+
+/* ============================================================
+
+   ANIMATION VARIANTS (Extracted to prevent re-renders)
+
+============================================================ */
+
+/* Distance from the Sun and one-way light travel time (mission-control readouts) */
+const TELEMETRY: Record<string, { au: string; light: string }> = {
+  sun: { au: '0.00', light: '—' },
+  mercury: { au: '0.39', light: '3 min 13 s' },
+  venus: { au: '0.72', light: '6 min 00 s' },
+  earth: { au: '1.00', light: '8 min 19 s' },
+  mars: { au: '1.52', light: '12 min 40 s' },
+  jupiter: { au: '5.20', light: '43 min 14 s' },
+  saturn: { au: '9.54', light: '1 h 19 min' },
+  uranus: { au: '19.19', light: '2 h 40 min' },
+  neptune: { au: '30.07', light: '4 h 10 min' },
+  beyond: { au: '30+', light: '4 h +' },
+  galaxy: { au: '1.6 bn', light: '26,000 yr' },
+}
+
+/* Scale model: shrink the Sun to a 2 m door and everything else with it.
+   Sun diameter 1,392,700 km; 1 AU = 149,597,871 km. */
+const SUN_DIAMETER_KM = 1_392_700
+const AU_KM = 149_597_871
+const MODEL_SUN_M = 2
+
+const SCALE_MODEL: Record<string, { km: number; au: number; like: string }> = {
+  mercury: { km: 4_879, au: 0.387, like: 'a peppercorn' },
+  venus: { km: 12_104, au: 0.723, like: 'a grape' },
+  earth: { km: 12_742, au: 1.0, like: 'a marble' },
+  mars: { km: 6_779, au: 1.524, like: 'a pea' },
+  jupiter: { km: 139_820, au: 5.203, like: 'a football' },
+  saturn: { km: 116_460, au: 9.537, like: 'a melon' },
+  uranus: { km: 50_724, au: 19.19, like: 'a tennis ball' },
+  neptune: { km: 49_244, au: 30.07, like: 'a tennis ball' },
+}
+
+const toModelMetres = (km: number) => (km / SUN_DIAMETER_KM) * MODEL_SUN_M
+
+const formatSize = (metres: number) =>
+  metres < 0.01
+    ? `${(metres * 1000).toFixed(1).replace(/\.0$/, '')} mm`
+    : `${(metres * 100).toFixed(1).replace(/\.0$/, '')} cm`
+
+const formatDistance = (metres: number) =>
+  metres < 1000
+    ? `${Math.round(metres)} m`
+    : `${(metres / 1000).toFixed(1).replace(/\.0$/, '')} km`
+
+const MODEL_EDGE_M = toModelMetres(SCALE_MODEL.neptune.au * AU_KM)
+
+function scaleSentence(id: string, name: string) {
+  const model = SCALE_MODEL[id]
+  if (!model) return null
+  return {
+    size: formatSize(toModelMetres(model.km)),
+    distance: formatDistance(toModelMetres(model.au * AU_KM)),
+    like: model.like,
+    name,
+  }
+}
+
+/* Scroll model: intro (0), 10 chapters (1-10), return (11).
+   Text for a section is shown only inside its window, so it never appears
+   while the camera is still flying between planets. */
+const TOTAL_SECTIONS = JOURNEY.length + 2
+const TAIL = 0.6 // extra scroll after the return section so it can settle
+const MAX_PROGRESS = TOTAL_SECTIONS - 1 + TAIL
+const TEXT_IN = 0.16 // camera has arrived
+const TEXT_OUT = 0.93 // start leaving before the next flight
+const SNAP = 0.24 // where the rail / keyboard / buttons land inside a chapter
+
+const EASE_OUT_EXPO: [number, number, number, number] = [0.22, 1, 0.36, 1]
+
+
+
+const introVariants = {
+
+  initial: { opacity: 0, y: 30 },
+
+  animate: { opacity: 1, y: 0 },
+
+}
+
+
+
+const chapterTextVariants = {
+
+  initial: { opacity: 0, letterSpacing: '0.35em' },
+
+  animate: { opacity: 1, letterSpacing: '0.18em' },
+
+}
+
+
+
+const factCardVariants = {
+
+  initial: { opacity: 0, y: 24, filter: 'blur(8px)' },
+
+  animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
+
+  exit: { opacity: 0, y: -18, filter: 'blur(8px)' },
+
+}
+
+
+
+/* ============================================================
+
+   MAIN COMPONENT
+
+============================================================ */
+
+
+
+export default function Journey() {
+  const [section, setSection] = useState(0)
+  const [percent, setPercent] = useState(0)
+  const [activeFact, setActiveFact] = useState(0)
+  const [showFacts, setShowFacts] = useState(false)
+  const [textOn, setTextOn] = useState(true)
+
+  const rootRef = useRef<HTMLElement>(null)
+  const lenisRef = useRef<Lenis | null>(null)
+  const progressRef = useRef(0)
+
+  const frame = useRef<number | null>(null)
+  const lastSection = useRef(0)
+  const lastPercent = useRef(0)
+  const lastFact = useRef(0)
+  const lastFactsVisibility = useRef(false)
+  const lastTextOn = useRef(true)
+
+  /* Inertial smooth scrolling: scrollY (and so the camera) glides */
+  useEffect(() => {
+    // Respect "reduce motion": keep native scrolling, no inertia
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return
+    }
+
+    const lenis = new Lenis({
+      lerp: 0.075,
+      wheelMultiplier: 0.9,
+      smoothWheel: true,
+    })
+    lenisRef.current = lenis
+    let raf = 0
+    const tick = (time: number) => {
+      lenis.raf(time)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      lenisRef.current = null
+      lenis.destroy()
+    }
+  }, [])
+
+  useEffect(() => {
+    const updateScroll = () => {
+      frame.current = null
+
+      const scrollable =
+        document.documentElement.scrollHeight - window.innerHeight
+      const sectionHeight = Math.max(1, scrollable / MAX_PROGRESS)
+      const progress = Math.min(
+        MAX_PROGRESS,
+        Math.max(0, window.scrollY / sectionHeight),
+      )
+      progressRef.current = progress
+
+      const timeline = progress / MAX_PROGRESS
+      rootRef.current?.style.setProperty('--timeline', String(timeline))
+
+      const pct = Math.round(timeline * 100)
+      if (pct !== lastPercent.current) {
+        lastPercent.current = pct
+        setPercent(pct)
+      }
+
+      const sectionIndex = Math.min(
+        TOTAL_SECTIONS - 1,
+        Math.floor(progress),
+      )
+      const local = progress - sectionIndex
+
+      if (sectionIndex !== lastSection.current) {
+        lastSection.current = sectionIndex
+        setSection(sectionIndex)
+      }
+
+      const isIntro = sectionIndex === 0
+      const isReturn = sectionIndex === TOTAL_SECTIONS - 1
+      const isChapter = !isIntro && !isReturn
+
+      const nextTextOn = isIntro
+        ? local < 0.85
+        : isReturn
+          ? local >= TEXT_IN
+          : local >= TEXT_IN && local < TEXT_OUT
+
+      if (nextTextOn !== lastTextOn.current) {
+        lastTextOn.current = nextTextOn
+        setTextOn(nextTextOn)
+      }
+
+      const factsOn = isChapter && nextTextOn
+      if (factsOn !== lastFactsVisibility.current) {
+        lastFactsVisibility.current = factsOn
+        setShowFacts(factsOn)
+      }
+
+      if (!isChapter) return
+
+      const chapter = JOURNEY[sectionIndex - 1]
+      if (!chapter) return
+
+      const factCount = chapter.facts.length
+      const factLocal = Math.min(
+        0.999999,
+        Math.max(0, (local - TEXT_IN) / (TEXT_OUT - TEXT_IN)),
+      )
+      const factIndex = Math.min(
+        factCount - 1,
+        Math.floor(factLocal * factCount),
+      )
+
+      if (lastFact.current !== factIndex) {
+        lastFact.current = factIndex
+        setActiveFact(factIndex)
+      }
+    }
+
+    const handleScroll = () => {
+      if (frame.current !== null) return
+      frame.current = window.requestAnimationFrame(updateScroll)
+    }
+
+    window.addEventListener('scroll', handleScroll, {
+      passive: true,
+    })
+    window.addEventListener('resize', handleScroll)
+
+    updateScroll()
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('resize', handleScroll)
+
+      if (frame.current !== null) {
+        window.cancelAnimationFrame(frame.current)
+      }
+    }
+  }, [])
+
+  const chapterNo = (n: number) => String(n).padStart(2, '0')
+
+  const goToSection = (target: number) => {
+    const clamped = Math.max(0, Math.min(TOTAL_SECTIONS - 1, target))
+    const scrollable =
+      document.documentElement.scrollHeight - window.innerHeight
+    const unit = scrollable / MAX_PROGRESS
+    const top = unit * (clamped === 0 ? 0 : clamped + SNAP)
+    if (lenisRef.current) {
+      lenisRef.current.scrollTo(top, { duration: 1.8 })
+    } else {
+      window.scrollTo({ top, behavior: 'smooth' })
+    }
+  }
+
+  const scrollToStart = () => goToSection(1)
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const forward = ['ArrowDown', 'ArrowRight', 'PageDown']
+      const back = ['ArrowUp', 'ArrowLeft', 'PageUp']
+      if (forward.includes(event.key)) {
+        event.preventDefault()
+        goToSection(Math.min(TOTAL_SECTIONS - 1, section + 1))
+      } else if (back.includes(event.key)) {
+        event.preventDefault()
+        goToSection(Math.max(0, section - 1))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section])
+
+  const active =
+    section >= 1 && section <= JOURNEY.length
+      ? section - 1
+      : -1
+
+  const activeChapter =
+    active >= 0 ? JOURNEY[active] : null
+
+  const factText = activeChapter?.facts[activeFact]
+  const currentFact: UniverseFact | null =
+    activeChapter && factText
+      ? {
+          id: `${activeChapter.id}-${activeFact}`,
+          title: activeChapter.title,
+          eyebrow: `Fact ${chapterNo(activeFact + 1)} / ${chapterNo(activeChapter.facts.length)}`,
+          fact: factText,
+          detail: '',
+          visual: activeChapter.id,
+          stat: activeChapter.stats[
+            activeFact % Math.max(1, activeChapter.stats.length)
+          ]?.value,
+        }
+      : null
+
+  const telemetry = activeChapter ? TELEMETRY[activeChapter.id] : null
+  const showReticle = textOn && active >= 0 && active <= 8
+  const planetName = activeChapter
+    ? activeChapter.label.charAt(0) + activeChapter.label.slice(1).toLowerCase()
+    : ''
+  const scale = activeChapter ? scaleSentence(activeChapter.id, planetName) : null
+  const stageKind =
+    section === 0 ? 'intro' : section === TOTAL_SECTIONS - 1 ? 'return' : 'chapter'
+
+  return (
+    <MotionConfig reducedMotion="user">
+    <main
+      ref={rootRef}
+      className="universe-page"
+      style={
+        {
+          '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
+        } as CSSProperties
+      }
+    >
+      <div className="universe-canvas">
+        <UniverseCanvas progressRef={progressRef} />
+      </div>
+
+      <div className="universe-vignette" />
+      <div className="universe-aura" />
+
+      {/* FOCUS RETICLE: locks onto the planet in the centre of the screen */}
+      <div
+        className={`reticle ${showReticle ? 'reticle-on' : ''}`}
+        aria-hidden="true"
+      >
+        <span className="reticle-corner tl" />
+        <span className="reticle-corner tr" />
+        <span className="reticle-corner bl" />
+        <span className="reticle-corner br" />
+        <span className="reticle-ring" />
+        <span className="reticle-ring reticle-ring-2" />
+        <span className="reticle-scan" key={`scan-${active}`} />
+        <span className="reticle-tick t" />
+        <span className="reticle-tick b" />
+        <span className="reticle-tick l" />
+        <span className="reticle-tick r" />
+        <span className="reticle-tag reticle-tag-tl">
+          TARGET LOCK
+          <b>{activeChapter?.label ?? ''}</b>
+        </span>
+        <span className="reticle-tag reticle-tag-br">
+          {activeChapter?.stats[0]?.value ?? ''}
+          <b>{activeChapter?.stats[0]?.label ?? ''}</b>
+        </span>
+      </div>
+
+      {/* TOP HUD */}
+      <header className="hud-top">
+        <button
+          className="brand"
+          onClick={() => goToSection(0)}
+          aria-label="Back to start"
+        >
+          <span className="brand-mark" />
+          <span className="brand-name">UNIVERSE</span>
+        </button>
+
+        <div
+          className={`readouts ${telemetry && textOn ? 'readouts-on' : ''}`}
+          aria-hidden="true"
+        >
+          <div className="readout">
+            <span className="readout-label">DISTANCE FROM SUN</span>
+            <span className="readout-value" key={`au-${active}`}>
+              {telemetry?.au ?? '—'}
+              <i>AU</i>
+            </span>
+          </div>
+          <div className="readout">
+            <span className="readout-label">LIGHT TRAVEL TIME</span>
+            <span className="readout-value" key={`lt-${active}`}>
+              {telemetry?.light ?? '—'}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* LEFT CHAPTER RAIL */}
+      <nav className={`rail ${section === 0 ? 'rail-hidden' : ''}`} aria-label="Chapters">
+        <div className="rail-track">
+          <div
+            className="rail-fill"
+            style={{ transform: 'scaleY(var(--timeline, 0))' }}
+          />
+        </div>
+        {JOURNEY.map((chapter, index) => (
+          <button
+            key={chapter.id}
+            className={`rail-item ${active === index ? 'is-active' : ''} ${section > index + 1 ? 'is-passed' : ''}`}
+            onClick={() => goToSection(index + 1)}
+            aria-label={`Go to ${chapter.label}`}
+            aria-current={active === index ? 'true' : undefined}
+          >
+            <span className="rail-dot" />
+            <span className="rail-no">{chapterNo(index + 1)}</span>
+            <span className="rail-label">{chapter.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      <FactCard fact={currentFact} visible={showFacts} />
+
+      {/* BOTTOM HUD */}
+      <footer className="hud-bottom" aria-hidden="true">
+        <div className="hud-bar">
+          <div
+            className="hud-bar-fill"
+            style={{ transform: 'scaleX(var(--timeline, 0))' }}
+          />
+        </div>
+        <div className="hud-meta">
+          <span>
+            {activeChapter
+              ? `${chapterNo(active + 1)} / ${chapterNo(JOURNEY.length)}`
+              : section === 0
+                ? 'STANDBY'
+                : 'RETURN'}
+          </span>
+          <span>{percent}%</span>
+        </div>
+      </footer>
+
+      {/* Scroll track: empty spacers that only give the page its length.
+          All visible text lives in the pinned stage below. */}
+      <div className="story" aria-hidden="true">
+        {Array.from({ length: TOTAL_SECTIONS }).map((_, index) => (
+          <div className="story-spacer" key={index} />
+        ))}
+        <div className="story-tail" />
+      </div>
+
+      {/* Full text of every chapter for screen readers and search engines.
+          The pinned stage below only shows the current chapter visually. */}
+      <div className="sr-only">
+        <h1>The Solar System: an interactive journey</h1>
+        <p>
+          One star. Eight planets. A scroll-driven journey from the Sun to the
+          edge of the Solar System.
+        </p>
+        {JOURNEY.map((chapter) => (
+          <section key={chapter.id} aria-labelledby={`sr-${chapter.id}`}>
+            <h2 id={`sr-${chapter.id}`}>
+              {chapter.label}: {chapter.title}
+            </h2>
+            <p>{chapter.description}</p>
+            {(() => {
+              const model = scaleSentence(
+                chapter.id,
+                chapter.label.charAt(0) + chapter.label.slice(1).toLowerCase(),
+              )
+              return model ? (
+                <p>
+                  Scale model: if the Sun were a door 2 m tall, {model.name}{' '}
+                  would be {model.size} across, about {model.like},{' '}
+                  {model.distance} away.
+                </p>
+              ) : null
+            })()}
+            <dl>
+              {chapter.stats.map((stat) => (
+                <div key={stat.label}>
+                  <dt>{stat.label}</dt>
+                  <dd>{stat.value}</dd>
+                </div>
+              ))}
+            </dl>
+            <ul>
+              {chapter.facts.map((fact) => (
+                <li key={fact}>{fact}</li>
+              ))}
+            </ul>
+          </section>
+        ))}
+        <section aria-labelledby="sr-return">
+          <h2 id="sr-return">Now look back.</h2>
+          <p>
+            Eight worlds. One tiny corner of a much larger universe. And this is
+            only the beginning.
+          </p>
+        </section>
+      </div>
+
+      {/* PINNED STAGE: text stays put and swaps only once the camera has arrived */}
+      <div className={`stage stage-${stageKind}`}>
+        <AnimatePresence mode="wait">
+          {textOn && section === 0 && (
+            <motion.div
+              key="intro"
+              className="intro-content"
+              initial={{ opacity: 0, y: 30, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -24, filter: 'blur(8px)' }}
+              transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
+            >
+              <div className="eyebrow" aria-hidden="true">
+                <span className="eyebrow-dot" />
+                INTERACTIVE JOURNEY
+              </div>
+              <div className="hero-title" aria-hidden="true">
+                <span>The Solar</span>
+                <span className="hero-title-em">System</span>
+              </div>
+              <p className="hero-subtitle" aria-hidden="true">
+                One star. Eight planets. Scroll to travel from the Sun to
+                the edge of home, and see where you really are.
+              </p>
+              <button className="begin-button" onClick={scrollToStart}>
+                <span className="begin-ring">
+                  <span className="begin-arrow">↓</span>
+                </span>
+                <span className="begin-text">Begin the journey</span>
+              </button>
+            </motion.div>
+          )}
+
+          {textOn && activeChapter && (
+            <motion.div
+              key={activeChapter.id}
+              className="story-content"
+              initial={{ opacity: 0, y: 28, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -20, filter: 'blur(8px)' }}
+              transition={{ duration: 0.7, ease: EASE_OUT_EXPO }}
+            >
+              <div className="story-inner">
+                <div className="numeral" aria-hidden="true">
+                  {chapterNo(active + 1)}
+                </div>
+
+                <div className="chapter" aria-hidden="true">
+                  <span>{activeChapter.eyebrow}</span>
+                </div>
+
+                <div className="story-title" aria-hidden="true">
+                  {activeChapter.title.split(' ').map((word, wordIndex) => (
+                    <Fragment key={`${word}-${wordIndex}`}>
+                      <span className="word-mask" aria-hidden="true">
+                        <motion.span
+                          className="word"
+                          initial={{ y: '110%', rotate: 3 }}
+                          animate={{ y: '0%', rotate: 0 }}
+                          transition={{
+                            duration: 0.95,
+                            delay: 0.1 + wordIndex * 0.06,
+                            ease: EASE_OUT_EXPO,
+                          }}
+                        >
+                          {word}
+                        </motion.span>
+                      </span>{' '}
+                    </Fragment>
+                  ))}
+                </div>
+
+                <p className="story-description" aria-hidden="true">
+                  {activeChapter.description}
+                </p>
+
+                <div className="inline-stats" aria-hidden="true">
+                  {activeChapter.stats.map((stat, statIndex) => (
+                    <motion.div
+                      className="inline-stat"
+                      key={stat.label}
+                      initial={{ opacity: 0, y: 14 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        duration: 0.55,
+                        delay: 0.22 + statIndex * 0.08,
+                        ease: EASE_OUT_EXPO,
+                      }}
+                    >
+                      <strong>{stat.value}</strong>
+                      <span>{stat.label}</span>
+                    </motion.div>
+                  ))}
+                </div>
+
+                {scale && (
+                  <motion.div
+                    className="scale-model"
+                    aria-hidden="true"
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.5, ease: EASE_OUT_EXPO }}
+                  >
+                    <div className="scale-head">Scale model</div>
+                    <p className="scale-text">
+                      If the Sun were a door <b>2 m</b> tall, {scale.name} would
+                      be <b>{scale.size}</b> across, about {scale.like},{' '}
+                      <b>{scale.distance}</b> away.
+                    </p>
+                    <div className="scale-track">
+                      <span className="scale-sun" />
+                      {Object.entries(SCALE_MODEL).map(([id, model]) => (
+                        <span
+                          key={id}
+                          className={`scale-dot ${id === activeChapter.id ? 'is-current' : ''}`}
+                          style={{
+                            left: `${(toModelMetres(model.au * AU_KM) / MODEL_EDGE_M) * 100}%`,
+                          }}
+                        />
+                      ))}
+                      <span className="scale-end">
+                        {formatDistance(MODEL_EDGE_M)}
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+
+                <button
+                  className="journey-hint"
+                  onClick={() => goToSection(section + 1)}
+                >
+                  {active < JOURNEY.length - 1
+                    ? `Next · ${JOURNEY[active + 1].label}`
+                    : 'Continue'}
+                  <span>→</span>
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {textOn && section === TOTAL_SECTIONS - 1 && (
+            <motion.div
+              key="return"
+              className="return-content"
+              initial={{ opacity: 0, y: 30, filter: 'blur(10px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: 20, filter: 'blur(8px)' }}
+              transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}
+            >
+              <div className="chapter" aria-hidden="true">
+                <span>{TOTAL_SECTIONS - 1} · RETURN</span>
+              </div>
+              <div className="return-title" aria-hidden="true">
+                Now look <em>back.</em>
+              </div>
+              <p className="return-text" aria-hidden="true">
+                Eight worlds. One tiny corner of a much larger universe.
+                <br />
+                <strong>And this is only the beginning.</strong>
+              </p>
+              <button className="begin-button" onClick={() => goToSection(0)}>
+                <span className="begin-ring">
+                  <span className="begin-arrow">↑</span>
+                </span>
+                <span className="begin-text">Start again</span>
+              </button>
+              <p className="credits">
+                Planet textures:{' '}
+                <a
+                  href="https://www.solarsystemscope.com/textures/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Solar System Scope
+                </a>
+                , licensed{' '}
+                <a
+                  href="https://creativecommons.org/licenses/by/4.0/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  CC BY 4.0
+                </a>
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {section === 0 && textOn && (
+          <div className="scroll-cue" aria-hidden="true">
+            <span>SCROLL</span>
+            <i />
+          </div>
+        )}
+      </div>
+    </main>
+    </MotionConfig>
+  )
+}
