@@ -18,6 +18,7 @@ import {
 } from './orbit'
 import { simClock } from './simClock'
 import Belts from './Belts'
+import Comet from './Comet'
 import {
   SHARP_EARTH_MAPS,
   SHARP_PLANET_MAPS,
@@ -844,6 +845,7 @@ export default function SolarSystem({
 
       <group position={SYSTEM_OFFSET}>
         <Belts />
+        <Comet />
       </group>
       </group>
     </group>

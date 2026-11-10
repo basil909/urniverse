@@ -164,6 +164,76 @@ const starFragmentShader = /* glsl */ `
 `
 
 /* ============================================================
+   GLOW: the light between the stars
+
+   A single disc under the star points, drawn in the galaxy's plane:
+   a warm core and bulge, soft bluish arms following the same spiral as
+   the stars, dark dust lanes along the inner edge of each arm, and pink
+   star-forming knots strung along the arms. Gives the disc the smooth,
+   luminous look of a galaxy photograph instead of a cloud of dots.
+============================================================ */
+
+const glowVertexShader = /* glsl */ `
+  varying vec2 vPos;
+  void main() {
+    vPos = position.xy;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+const glowFragmentShader = /* glsl */ `
+  uniform float uStrength;
+  uniform float uRadius;
+  uniform float uTwist;
+  varying vec2 vPos;
+
+  float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+  float noise(vec2 p) {
+    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0; float a = 0.5;
+    for (int i = 0; i < 4; i++) { v += noise(p) * a; p = p * 2.03 + 1.7; a *= 0.5; }
+    return v;
+  }
+
+  void main() {
+    float r = length(vPos);
+    /* the plane is turned flat into the disc: its y runs along -z */
+    float theta = atan(-vPos.y, vPos.x);
+    /* the arms wander a little, so they are not perfect curves */
+    float wander = (fbm(vPos * 0.32 + 7.0) - 0.5) * 0.9;
+    float spiral = theta - log(r / 3.0 + 1.0) * uTwist + wander;
+    float wave = cos(4.0 * spiral);
+    float arms = pow(0.5 + 0.5 * wave, 3.0);
+    /* clumpy along their length, like real arms */
+    arms *= 0.45 + 0.9 * fbm(vPos * 0.8 + 1.3);
+    /* dust lanes trail just inside each arm, broken into filaments */
+    float lanes = pow(0.5 + 0.5 * cos(4.0 * spiral - 0.6), 8.0) * smoothstep(2.5, 6.0, r);
+    lanes *= smoothstep(0.3, 0.7, fbm(vPos * 1.4 + 5.0));
+
+    float mottle = 0.7 + 0.6 * fbm(vPos * 0.45 + 3.0);
+    float edge = 1.0 - smoothstep(uRadius * 0.7, uRadius * 1.05, r);
+
+    vec3 core = vec3(1.0, 0.82, 0.58) * (exp(-r / 1.6) * 1.25 + exp(-r / 4.5) * 0.35);
+    vec3 disc = vec3(0.62, 0.72, 1.0) * exp(-r / 9.0) * (0.12 + 0.55 * arms) * mottle;
+    vec3 light = (core + disc) * (1.0 - lanes * 0.75) * edge;
+
+    /* star-forming regions: small, round pink knots on the arms */
+    vec2 cell = floor(vPos * 1.6);
+    vec2 centre = cell + vec2(hash(cell), hash(cell + 17.0));
+    float knot = 1.0 - smoothstep(0.0, 0.11, length(vPos * 1.6 - centre));
+    float present = step(0.72, hash(cell + 41.0));
+    float knots = knot * present * pow(0.5 + 0.5 * wave, 6.0) * smoothstep(4.0, 8.0, r) * edge;
+    light += vec3(1.0, 0.5, 0.66) * knots * 0.28;
+
+    gl_FragColor = vec4(light * uStrength, 1.0);
+  }
+`
+
+/* ============================================================
    MAIN COMPONENT
 ============================================================ */
 
@@ -769,6 +839,31 @@ export default function Galaxy({
   }, [])
 
   /* ==========================================================
+     GLOW MATERIAL
+  ========================================================== */
+
+  const glowMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: glowVertexShader,
+        fragmentShader: glowFragmentShader,
+        uniforms: {
+          uStrength: { value: 0.14 },
+          uRadius: { value: GALAXY_RADIUS },
+          uTwist: { value: 3.2 },
+        },
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+      }),
+    [],
+  )
+  const glowStrength = useRef(0.14)
+  useEffect(() => () => glowMaterial.dispose(), [glowMaterial])
+
+  /* ==========================================================
      STAR MATERIAL
   ========================================================== */
 
@@ -854,6 +949,14 @@ export default function Galaxy({
     galaxy.current.rotation.y +=
       delta * 0.004
 
+    // the glow is a quiet backdrop until the finale, where it is the subject
+    if (progressRef) {
+      const target = (progressRef.current ?? 0) > 10.6 ? 0.6 : 0.14
+      glowStrength.current +=
+        (target - glowStrength.current) * (1 - Math.exp(-delta * 1.5))
+      glowMaterial.uniforms.uStrength.value = glowStrength.current
+    }
+
     // marker shows only once the camera has settled on the galaxy
     if (marker.current && progressRef) {
       const progress = progressRef.current ?? 0
@@ -892,6 +995,17 @@ export default function Galaxy({
             </div>
           </Html>
         )}
+        {/* ==================================================
+            GLOW (under the stars)
+        ================================================== */}
+        <mesh
+          material={glowMaterial}
+          rotation={[-Math.PI / 2, 0, 0]}
+          renderOrder={-6}
+        >
+          <planeGeometry args={[GALAXY_RADIUS * 2.2, GALAXY_RADIUS * 2.2]} />
+        </mesh>
+
         {/* ==================================================
             STELLAR DISK
         ================================================== */}
