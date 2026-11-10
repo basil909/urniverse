@@ -112,7 +112,6 @@ a:focus-visible {
   width: 100%;
   min-height: 100vh;
   overflow-x: hidden;
-  transition: --planet-accent 1.1s ease;
   /* horizontal drags spin the planet; vertical swipes still scroll */
   touch-action: pan-y;
 }

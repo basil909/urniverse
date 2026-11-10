@@ -543,8 +543,9 @@ function nearestRest(scroll: number) {
   return best
 }
 
-const easeInOutCubic = (t: number) =>
-  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+// sine in-out: gets moving visibly on the first frames (feels instant)
+// yet still lands softly
+const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2
 
 const EASE_OUT_EXPO: [number, number, number, number] = [0.22, 1, 0.36, 1]
 
@@ -614,6 +615,9 @@ export default function Journey() {
       lerp: 0.075,
       wheelMultiplier: 0.9,
       smoothWheel: true,
+      // touch goes through Lenis too, so swipes glide exactly like the
+      // wheel and native momentum never fights the glide
+      syncTouch: true,
     })
     lenisRef.current = lenis
     let raf = 0
@@ -624,11 +628,13 @@ export default function Journey() {
     raf = requestAnimationFrame(tick)
 
     /* ---- Snap controller -------------------------------------------
-       Scroll freely; once input stops, glide to a resting point.
-       Direction decides where: a small flick moves one chapter, a big
-       fling can travel several. Each glide is timed and eased, and the
-       page ignores leftover trackpad momentum right after landing so
-       one gesture never skips two chapters. */
+       Every wheel, trackpad and touch gesture becomes one eased glide
+       to the next resting point, starting on the very first input, so
+       there is no free scroll followed by a correction (that stop-start
+       is what reads as jank). Lenis's lock blocks the rest of the
+       gesture during the glide, and trackpad momentum that arrives just
+       after landing is swallowed so one swipe never moves two chapters.
+       Tiny jitter below a threshold never starts a flight. */
     const unit = () =>
       Math.max(
         1,
@@ -638,32 +644,19 @@ export default function Journey() {
 
     let snapping = false
     let lastRest = nearestRest(window.scrollY / unit())
-    let direction = 0
-    let lastInput: 'wheel' | 'touch' = 'wheel'
-    let idleTimer = 0
+    let accumulated = 0
+    let accumulateTimer = 0
     let quietUntil = 0
     let quietHardLimit = 0
-    let releaseTimer = 0
-
-    const releaseWhenQuiet = () => {
-      window.clearTimeout(releaseTimer)
-      const now = performance.now()
-      if (now >= quietUntil || now >= quietHardLimit) {
-        lenis.start()
-        return
-      }
-      releaseTimer = window.setTimeout(
-        releaseWhenQuiet,
-        Math.min(quietUntil, quietHardLimit) - now,
-      )
-    }
+    let settleTimer = 0
 
     const snapTo = (index: number) => {
       const target = Math.max(0, Math.min(TOTAL_SECTIONS - 1, index))
       const from = lenis.scroll / unit()
       const to = restPoint(target)
       const distance = Math.abs(to - from)
-      window.clearTimeout(idleTimer)
+      window.clearTimeout(settleTimer)
+      accumulated = 0
 
       if (distance < 0.003) {
         lastRest = target
@@ -671,95 +664,78 @@ export default function Journey() {
       }
 
       snapping = true
-      lenis.start()
       lenis.scrollTo(to * unit(), {
-        duration: Math.min(2.8, 1.1 + 0.6 * distance),
-        easing: easeInOutCubic,
+        duration: Math.min(2.6, 0.95 + 0.55 * distance),
+        easing: easeInOutSine,
         lock: true,
         force: true,
         onComplete: () => {
           snapping = false
           lastRest = target
-          // swallow trackpad momentum that arrives after landing
           const now = performance.now()
-          quietUntil = now + 250
-          quietHardLimit = now + 1200
-          lenis.stop()
-          releaseWhenQuiet()
+          quietUntil = now + 220
+          quietHardLimit = now + 1100
         },
       })
     }
     snapToRef.current = snapTo
 
-    const settle = () => {
-      if (snapping) return
-      const where = lenis.targetScroll / unit()
-      let target = nearestRest(where)
-      // moved, but not far enough to reach the next rest: still go there
-      if (
-        target === lastRest &&
-        direction !== 0 &&
-        Math.abs(where - restPoint(lastRest)) > 0.06
-      ) {
-        target = lastRest + direction
+    lenis.options.virtualScroll = ({ deltaX, deltaY, event }) => {
+      if (snapping) return true // locked: Lenis cancels the event
+
+      const isTouch = event.type.includes('touch')
+      const swallow = () => {
+        if (event.cancelable) event.preventDefault()
+        return false
       }
-      snapTo(target)
-    }
 
-    const scheduleSettle = (delay: number) => {
-      window.clearTimeout(idleTimer)
-      idleTimer = window.setTimeout(settle, delay)
-    }
-
-    const onWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) < 1) return
+      // just landed: trackpad momentum is still arriving
       const now = performance.now()
-      if (snapping) return
-      if (lenis.isStopped) {
-        // still in the post-landing quiet window: extend it, ignore input
-        quietUntil = Math.max(quietUntil, now + 160)
-        return
+      if (!isTouch && now < quietUntil && now < quietHardLimit) {
+        quietUntil = Math.max(quietUntil, now + 140)
+        return swallow()
       }
-      direction = Math.sign(event.deltaY)
-      lastInput = 'wheel'
-      scheduleSettle(140)
+
+      if (event.type === 'touchstart' || event.type === 'touchend') {
+        accumulated = 0
+        return swallow()
+      }
+
+      // mostly-sideways gestures are planet spins, not scrolling
+      if (Math.abs(deltaX) > Math.abs(deltaY)) return swallow()
+
+      accumulated += deltaY
+      window.clearTimeout(accumulateTimer)
+      accumulateTimer = window.setTimeout(() => {
+        accumulated = 0
+      }, 260)
+
+      const threshold = isTouch ? 18 : 6
+      if (Math.abs(accumulated) < threshold) return swallow()
+
+      snapTo(lastRest + Math.sign(accumulated))
+      return true // now locked: Lenis cancels the event, no drift
     }
 
-    let touchStartY = 0
-    let touchActive = false
-    const onTouchStart = (event: TouchEvent) => {
-      touchStartY = event.touches[0]?.clientY ?? 0
-      touchActive = true
-      lastInput = 'touch'
-      window.clearTimeout(idleTimer)
-    }
-    const onTouchEnd = (event: TouchEvent) => {
-      touchActive = false
-      const endY = event.changedTouches[0]?.clientY ?? touchStartY
-      const delta = touchStartY - endY
-      if (Math.abs(delta) > 8) direction = Math.sign(delta)
-      scheduleSettle(160)
-    }
-    // native touch momentum keeps scrolling after the finger lifts:
-    // wait until it has settled before snapping
+    // anything else that moves the page (dragging the scrollbar, browser
+    // find, accessibility tools) settles on the nearest resting point
     const onScroll = () => {
-      if (lastInput === 'touch' && !snapping && !touchActive && direction !== 0) {
-        scheduleSettle(140)
-      }
+      if (snapping) return
+      window.clearTimeout(settleTimer)
+      settleTimer = window.setTimeout(() => {
+        if (snapping) return
+        const where = lenis.scroll / unit()
+        const nearest = nearestRest(where)
+        if (Math.abs(where - restPoint(nearest)) > 0.003) snapTo(nearest)
+        else lastRest = nearest
+      }, 220)
     }
-
-    window.addEventListener('wheel', onWheel, { passive: true })
-    window.addEventListener('touchstart', onTouchStart, { passive: true })
-    window.addEventListener('touchend', onTouchEnd, { passive: true })
     lenis.on('scroll', onScroll)
 
     return () => {
-      window.removeEventListener('wheel', onWheel)
-      window.removeEventListener('touchstart', onTouchStart)
-      window.removeEventListener('touchend', onTouchEnd)
       lenis.off('scroll', onScroll)
-      window.clearTimeout(idleTimer)
-      window.clearTimeout(releaseTimer)
+      window.clearTimeout(accumulateTimer)
+      window.clearTimeout(settleTimer)
       cancelAnimationFrame(raf)
       snapToRef.current = null
       lenisRef.current = null

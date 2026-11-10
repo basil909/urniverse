@@ -9,7 +9,7 @@ import {
   Vignette,
 } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
-import { PerformanceMonitor } from '@react-three/drei'
+import { PerformanceMonitor, useProgress } from '@react-three/drei'
 import { memo, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import * as THREE from 'three'
 
@@ -847,6 +847,68 @@ function DeepStarLayer({
 
 
 
+/* ============================================================
+   WARM-UP
+   Shaders compile, and textures upload to the GPU, the first time
+   something is drawn: if that happens mid-flight it is a visible hitch.
+   Once every texture has loaded (behind the loading screen), compile all
+   materials and upload all textures up front, including objects that
+   are currently hidden (like the star streaks).
+============================================================ */
+
+function WarmUp() {
+  const gl = useThree((state) => state.gl)
+  const scene = useThree((state) => state.scene)
+  const camera = useThree((state) => state.camera)
+  const { active, loaded, total } = useProgress()
+  const warmedAt = useRef(-1)
+
+  useEffect(() => {
+    if (active || total === 0 || warmedAt.current === loaded) return
+    warmedAt.current = loaded
+
+    const warm = () => {
+      const hidden: THREE.Object3D[] = []
+      scene.traverse((object) => {
+        if (!object.visible) {
+          hidden.push(object)
+          object.visible = true
+        }
+      })
+
+      gl.compile(scene, camera)
+
+      const seen = new Set<THREE.Texture>()
+      const upload = (value: unknown) => {
+        if (value instanceof THREE.Texture && !seen.has(value)) {
+          seen.add(value)
+          gl.initTexture(value)
+        }
+      }
+      scene.traverse((object) => {
+        const material = (object as THREE.Mesh).material
+        const materials = Array.isArray(material) ? material : material ? [material] : []
+        materials.forEach((m) => {
+          Object.values(m).forEach(upload)
+          const uniforms = (m as THREE.ShaderMaterial).uniforms
+          if (uniforms) Object.values(uniforms).forEach((u) => upload(u?.value))
+        })
+      })
+
+      hidden.forEach((object) => {
+        object.visible = false
+      })
+    }
+
+    warm()
+    // Earth's material rebuilds as its maps arrive: warm again after that
+    const again = window.setTimeout(warm, 400)
+    return () => window.clearTimeout(again)
+  }, [active, loaded, total, gl, scene, camera])
+
+  return null
+}
+
 function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
   return (
@@ -905,6 +967,8 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
       <CinematicCamera progressRef={progressRef} />
 
+      <WarmUp />
+
       <StarStreaks />
 
 
@@ -941,7 +1005,11 @@ function Scene({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
 function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number> }) {
   // Adaptive resolution: drops pixel ratio when frame rate dips, restores when healthy
-  const [dpr, setDpr] = useState(1.5)
+  // start at up to 1.5x; if the frame rate struggles, step down once and
+  // stay there (switching back and forth resizes every buffer = a hitch)
+  const [dpr, setDpr] = useState(() =>
+    Math.min(1.5, typeof window === 'undefined' ? 1 : window.devicePixelRatio),
+  )
 
   return (
 
@@ -985,10 +1053,7 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
 
     >
 
-      <PerformanceMonitor
-        onDecline={() => setDpr(1)}
-        onIncline={() => setDpr(1.5)}
-      />
+      <PerformanceMonitor onDecline={() => setDpr((current) => Math.min(current, 1))} />
 
       <Scene progressRef={progressRef} />
 
