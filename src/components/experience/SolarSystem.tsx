@@ -17,6 +17,7 @@ import {
   SYSTEM_OFFSET,
 } from './orbit'
 import { simClock } from './simClock'
+import { lens } from './lens'
 import Belts from './Belts'
 import Comet from './Comet'
 import {
@@ -111,6 +112,14 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
         }
         reflectedLight.directDiffuse *= shade;
         reflectedLight.directSpecular *= shade;
+        /* low sun through more air: light along the day/night line turns
+           orange-red, as in astronaut photos of the terminator */
+        vec3 sunset = mix(vec3(1.0, 0.5, 0.28), vec3(1.0), smoothstep(0.02, 0.3, mu));
+        reflectedLight.directDiffuse *= sunset;
+        /* the thin bright blue edge of the atmosphere, on the day side */
+        float edgeView = 1.0 - max(dot(N, normalize(vViewPosition)), 0.0);
+        float air = pow(edgeView, 3.0) * smoothstep(-0.05, 0.25, mu);
+        reflectedLight.indirectDiffuse += vec3(0.18, 0.38, 0.9) * air * 0.55;
         /* sun glint: a tight, bright highlight where the water mirrors the Sun */
         vec3 V = normalize(vViewPosition);
         vec3 H = normalize(sunV + V);
@@ -617,6 +626,15 @@ vec3 uranusWeather(vec3 base, vec2 uv) {
 
 vec2 cloudFlow(vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
+  if (uPlanet == 1) {
+    /* Venus: super-rotation, the cloud tops circle the planet westwards in
+       about four days, nearly as a solid shell; slower towards the poles,
+       with broad eddies */
+    vec3 q = vec3(uv * vec2(6.0, 12.0), uTime * 0.03);
+    vec2 v = vec2(-cos(lat) * 1.0, 0.0);
+    v += vec2(noise(q + 4.0) - 0.5, (noise(q) - 0.5) * 0.8) * 0.7;
+    return v * 0.0011;
+  }
   bool jupiter = uPlanet == 4;
   float jets = jupiter
     ? sin(lat * 13.0) * 0.7 + sin(lat * 29.0 + 1.3) * 0.3
@@ -667,9 +685,16 @@ void main() {
 
   /* real surface map when loaded; procedural surface above is the fallback */
   if (uHasMap > 0.5) {
-    surface = (uPlanet == 4 || uPlanet == 5)
+    surface = (uPlanet == 4 || uPlanet == 5 || uPlanet == 1)
       ? flowingClouds(vUv)
       : texture2D(uMap, vUv).rgb;
+    /* Venus: the faint dark chevrons seen in ultraviolet, sweeping round */
+    if (uPlanet == 1) {
+      float lat = (vUv.y - 0.5) * 3.14159;
+      float x = vUv.x * 6.28318 + uTime * 0.025;
+      float chevron = sin(x * 2.0 + abs(lat) * 3.5 + fbm(vec3(vUv * vec2(5.0, 9.0), uTime * 0.01)) * 2.5);
+      surface *= 1.0 - 0.07 * smoothstep(0.2, 1.0, chevron) * cos(lat);
+    }
     if (uPlanet == 7) surface = neptuneWeather(surface, vUv);
     else if (uPlanet == 6) surface = uranusWeather(surface, vUv);
   }
@@ -1023,6 +1048,126 @@ function Corona() {
   return (
     <mesh ref={mesh} material={material} renderOrder={-1}>
       <planeGeometry args={[CORONA_SIZE, CORONA_SIZE]} />
+    </mesh>
+  )
+}
+
+/* ============================================================
+   RIM RAYS
+   In the backlit hero shots (Venus, Earth, Saturn) the Sun sits just
+   behind the planet: soft rays of light fan out from its rim, strongest
+   on the Sun's side. A camera-facing glow behind the planet (the planet
+   itself hides the inner part); fades in with the backlit drift.
+============================================================ */
+
+const RIM_RAYS: Record<number, string> = {
+  1: '#ffe0b0', // Venus: thick, golden haze
+  2: '#cfe3ff', // Earth: blue-white
+  5: '#ffe6c4', // Saturn: pale gold
+}
+const RIM_RAYS_SIZE = 7 // plane width in planet radii
+
+const RIM_VERTEX = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+
+const RIM_FRAGMENT = /* glsl */ `
+uniform vec3 uColor;
+uniform vec2 uSun;
+uniform float uStrength;
+uniform float uTime;
+varying vec2 vUv;
+float rimHash(float n) { return fract(sin(n) * 43758.5453); }
+float rimNoise(float x) {
+  float i = floor(x); float f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(rimHash(i), rimHash(i + 1.0), f);
+}
+void main() {
+  vec2 c = (vUv * 2.0 - 1.0) * ${(RIM_RAYS_SIZE / 2).toFixed(1)};
+  float r = length(c);
+  float above = r - 1.0;
+  if (above < 0.0) discard;
+  vec2 radial = c / r;
+  float a = atan(c.y, c.x);
+  /* stronger towards the Sun, a faint ring all round */
+  float sunward = pow(max(dot(radial, uSun), 0.0), 2.0);
+  float weight = 0.06 + 0.94 * sunward;
+  /* fine streaks of differing length, drifting very slowly */
+  float streaks = pow(rimNoise(a * 34.0 + uTime * 0.02), 2.0) * 0.7
+    + pow(rimNoise(a * 91.0 - uTime * 0.015 + 13.0), 3.0) * 0.5;
+  float reach = 0.12 + 0.45 * rimNoise(a * 17.0 + 5.0);
+  float rays = streaks * exp(-above / reach);
+  float halo = exp(-above / 0.06);
+  /* gone well before the plane's edge */
+  float edge = 1.0 - smoothstep(1.0, 2.6, r);
+  float glow = (rays * 0.16 + halo * 0.22) * weight * edge * uStrength;
+  gl_FragColor = vec4(uColor * glow, 1.0);
+}`
+
+const _rimSun = new THREE.Vector3()
+const _rimCenter = new THREE.Vector3()
+const _rimRight = new THREE.Vector3()
+const _rimUp = new THREE.Vector3()
+
+function RimRays({
+  index,
+  radius,
+  progressRef,
+}: {
+  index: number
+  radius: number
+  progressRef: RefObject<number>
+}) {
+  const mesh = useRef<THREE.Mesh>(null)
+  const camera = useThree((state) => state.camera)
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uColor: { value: new THREE.Color(RIM_RAYS[index] ?? '#ffffff') },
+          uSun: { value: new THREE.Vector2(1, 0) },
+          uStrength: { value: 0 },
+          uTime: { value: 0 },
+        },
+        vertexShader: RIM_VERTEX,
+        fragmentShader: RIM_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    [index],
+  )
+  useEffect(() => () => material.dispose(), [material])
+
+  useFrame((_, delta) => {
+    const plane = mesh.current
+    if (!plane) return
+    // only for the planet that is the subject of the current chapter
+    const chapter = Math.floor(progressRef.current ?? 0)
+    const strength = chapter - 2 === index ? lens.backlit : 0
+    material.uniforms.uStrength.value = strength
+    plane.visible = strength > 0.01
+    if (!plane.visible) return
+    material.uniforms.uTime.value += delta
+    plane.lookAt(camera.position)
+    // the Sun's direction, in the plane's own right/up axes
+    plane.getWorldPosition(_rimCenter)
+    _rimSun.copy(SYSTEM_OFFSET).sub(_rimCenter)
+    plane.updateMatrixWorld()
+    _rimRight.setFromMatrixColumn(plane.matrixWorld, 0).normalize()
+    _rimUp.setFromMatrixColumn(plane.matrixWorld, 1).normalize()
+    material.uniforms.uSun.value
+      .set(_rimSun.dot(_rimRight), _rimSun.dot(_rimUp))
+      .normalize()
+  })
+
+  return (
+    <mesh ref={mesh} material={material} scale={radius} renderOrder={-1} visible={false}>
+      <planeGeometry args={[RIM_RAYS_SIZE, RIM_RAYS_SIZE]} />
     </mesh>
   )
 }
@@ -1559,6 +1704,10 @@ function Planet({
             />
           )}
         </group>
+
+        {RIM_RAYS[index] && (
+          <RimRays index={index} radius={visualRadius} progressRef={progressRef} />
+        )}
 
         {planet.type === 'earth' && <Moon sharp={sharp} />}
 

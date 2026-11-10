@@ -1241,6 +1241,20 @@ function Lens({
   return null
 }
 
+/* How far into a backlit hero shot we are (0..1): the planet's rim rays
+   read it (see RimRays in SolarSystem) */
+function BacklitDriver({ progressRef }: { progressRef: MutableRefObject<number> }) {
+  useFrame(() => {
+    const progress = progressRef.current ?? 0
+    const chapter = Math.floor(progress)
+    lens.backlit =
+      isPlanetChapter(chapter) && HERO_BACKLIT.has(chapter - 2)
+        ? heroDrift[chapter] ?? 0
+        : 0
+  })
+  return null
+}
+
 function Scene({
   progressRef,
   glare,
@@ -1257,6 +1271,8 @@ function Scene({
       <Clock progressRef={progressRef} />
 
       <Lens progressRef={progressRef} glare={glare} />
+
+      <BacklitDriver progressRef={progressRef} />
 
       <MilkyWaySky progressRef={progressRef} />
 
