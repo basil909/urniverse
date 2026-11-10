@@ -314,10 +314,12 @@ a:focus-visible {
   inset: -25% -30% -25% -40%;
   z-index: -1;
   pointer-events: none;
+  /* closest-side: fully transparent before the box edge, so no visible
+     line where it ends (it showed over the bright Sun) */
   background: radial-gradient(
-    ellipse 60% 55% at 55% 50%,
+    ellipse closest-side at 55% 50%,
     rgba(1, 2, 6, 0.6) 0%,
-    rgba(1, 2, 6, 0.28) 50%,
+    rgba(1, 2, 6, 0.28) 55%,
     transparent 100%
   );
 }

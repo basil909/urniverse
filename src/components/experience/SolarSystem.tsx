@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import {
   getPlanetOrbitEllipsePoint,
   getPlanetOrbitPosition,
+  getPlanetPoleQuaternion,
   orbitalDisplayDistance,
   getPlanetVisualRadius,
   PLANETS,
@@ -207,39 +208,43 @@ void main() {
 const SUN_FRAGMENT_SHADER = /* glsl */ `
 
 uniform float uTime;
-
 varying vec3 vNormal;
-
 varying vec3 vWorldPosition;
-
 varying vec3 vLocalPosition;
 
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-
-float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); float n000 = hash(i); float n100 = hash(i + vec3(1,0,0)); float n010 = hash(i + vec3(0,1,0)); float n110 = hash(i + vec3(1,1,0)); float n001 = hash(i + vec3(0,0,1)); float n101 = hash(i + vec3(1,0,1)); float n011 = hash(i + vec3(0,1,1)); float n111 = hash(i + vec3(1,1,1)); float nx00 = mix(n000, n100, f.x); float nx10 = mix(n010, n110, f.x); float nx01 = mix(n001, n101, f.x); float nx11 = mix(n011, n111, f.x); float nxy0 = mix(nx00, nx10, f.y); float nxy1 = mix(nx01, nx11, f.y); return mix(nxy0, nxy1, f.z); }
-
-float fbm(vec3 p) { float v = 0.0; float a = 0.5; v += noise(p) * a; p *= 2.02; a *= 0.5; v += noise(p) * a; p *= 2.03; a *= 0.5; v += noise(p) * a; p *= 2.01; a *= 0.5; v += noise(p) * a; p *= 2.02; a *= 0.5; v += noise(p) * a; return v; }
+float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y), mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
+float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += noise(p) * a; p = p * 2.02 + vec3(1.7, 9.2, 3.1); a *= 0.5; } return v; }
 
 void main() {
+  vec3 n = normalize(vNormal);
+  vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+  float mu = clamp(dot(n, viewDir), 0.0, 1.0);
+  vec3 p = normalize(vLocalPosition);
 
-  vec3 normal = normalize(vNormal); vec3 p = vLocalPosition * 3.0; p.y += uTime * 0.035;
+  /* granulation: a fine, slowly churning cell pattern */
+  float cells = 1.0 - abs(noise(p * 42.0 + vec3(0.0, uTime * 0.08, uTime * 0.05)) * 2.0 - 1.0);
+  cells = pow(cells, 2.6);
+  float churn = fbm(p * 2.4 + vec3(uTime * 0.012, 0.0, 0.0));
 
-  float large = fbm(p * 1.35); float medium = fbm(p * 5.0 + vec3(uTime * 0.03, 0, 0)); float fine = noise(p * 16.0 + vec3(0, uTime * 0.04, 0));
+  /* faculae (bright active regions) and rare, small sunspots */
+  float faculae = smoothstep(0.6, 0.8, fbm(p * 5.5 - vec3(0.0, uTime * 0.01, 0.0)));
+  float spots = smoothstep(0.8, 0.87, fbm(p * 1.8 + vec3(3.1, 0.0, 1.4)));
 
-  float surface = large * 0.55 + medium * 0.30 + fine * 0.15; surface = smoothstep(0.18, 0.82, surface);
+  /* limb darkening: dimmer and redder towards the edge, as on the real Sun */
+  float limb = 1.0 - 0.6 * (1.0 - pow(mu, 0.75));
+  vec3 core = vec3(1.0, 0.94, 0.80);
+  vec3 middle = vec3(1.0, 0.70, 0.30);
+  vec3 edge = vec3(0.92, 0.33, 0.07);
+  vec3 base = mix(edge, middle, smoothstep(0.0, 0.55, mu));
+  base = mix(base, core, smoothstep(0.5, 1.0, mu));
 
-  vec3 dark = vec3(0.42, 0.025, 0.002); vec3 orange = vec3(0.95, 0.14, 0.01); vec3 gold = vec3(1.0, 0.50, 0.035); vec3 whiteHot = vec3(1.0, 0.88, 0.55);
+  float tone = 0.8 + 0.2 * cells + 0.12 * churn + 0.22 * faculae;
+  vec3 color = base * tone * limb;
+  color *= 1.0 - spots * 0.7;
 
-  vec3 color = mix(dark, orange, surface); color = mix(color, gold, smoothstep(0.48, 0.76, surface)); color = mix(color, whiteHot, smoothstep(0.78, 1.0, surface));
-
-  float spots = smoothstep(0.76, 0.91, fbm(vLocalPosition * 2.4)); color = mix(color, color * 0.35, spots * 0.7);
-
-  vec3 viewDirection = normalize(cameraPosition - vWorldPosition); float facing = max(dot(normal, viewDirection), 0.0); float limb = pow(facing, 0.42);
-
-  color *= mix(0.58, 1.08, limb); color *= 0.98 + 0.025 * sin(uTime * 1.5 + large * 9.0); color *= 1.65;
-
-  gl_FragColor = vec4(color, 1.0);
-
+  // only the hottest centre is bright enough to bloom
+  gl_FragColor = vec4(color * 1.12, 1.0);
 }`
 
 
@@ -271,6 +276,10 @@ void main() { vUv = uv; vNormal = normalize(mat3(modelMatrix) * normal); vLocalP
 const PLANET_FRAGMENT_SHADER = /* glsl */ `
 
 uniform float uTime; uniform int uType; uniform int uPlanet; uniform vec3 uBaseColor; uniform vec3 uAtmosphereColor; uniform vec3 uSunPosition; uniform sampler2D uMap; uniform float uHasMap;
+
+/* shadows (all in world space) */
+uniform vec3 uMoonPos[4]; uniform float uMoonRadius[4]; uniform int uMoonCount;
+uniform float uHasRings; uniform sampler2D uRingMap; uniform vec3 uRingNormal; uniform vec3 uPlanetCenter; uniform float uRingInner; uniform float uRingOuter;
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
 
@@ -420,8 +429,36 @@ void main() {
   float facing = max(dot(normal, vd), 0.0);
   float limb = (uType == 2 || uType == 3 || uPlanet == 1) ? mix(0.62, 1.0, pow(facing, 0.5)) : 1.0;
 
+  /* moon shadows: does a moon sit between this point and the Sun? */
+  float shadow = 1.0;
+  for (int i = 0; i < 4; i++) {
+    if (i >= uMoonCount) break;
+    vec3 toMoon = uMoonPos[i] - vWorldPosition;
+    float along = dot(toMoon, toSun);
+    if (along > 0.0) {
+      float miss = length(toMoon - toSun * along);
+      shadow *= mix(0.12, 1.0, smoothstep(uMoonRadius[i] * 0.7, uMoonRadius[i] * 1.25, miss));
+    }
+  }
+
+  /* ring shadow: where does the sunbeam cross the ring plane, and is
+     there ring material there? (the Cassini Division lets light through) */
+  if (uHasRings > 0.5) {
+    float facingRing = dot(toSun, uRingNormal);
+    if (abs(facingRing) > 0.0001) {
+      float t = dot(uPlanetCenter - vWorldPosition, uRingNormal) / facingRing;
+      if (t > 0.0) {
+        float r = length(vWorldPosition + toSun * t - uPlanetCenter);
+        float u = (r - uRingInner) / (uRingOuter - uRingInner);
+        if (u > 0.0 && u < 1.0) {
+          shadow *= 1.0 - texture2D(uRingMap, vec2(u, 0.5)).a * 0.82;
+        }
+      }
+    }
+  }
+
   float rim = pow(1.0 - facing, 3.5);
-  vec3 color = surface * (0.035 + light * 0.965) * limb;
+  vec3 color = surface * (0.035 + light * shadow * 0.965) * limb;
   color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
 
   gl_FragColor = vec4(max(color, vec3(0.003)), 1.0);
@@ -578,10 +615,6 @@ export default function SolarSystem({
 
 function Sun() {
   const sun = useRef<THREE.Mesh>(null)
-  const coronaOuter = useRef<THREE.Mesh>(null)
-  const coronaInner = useRef<THREE.Mesh>(null)
-  const coronaHalo = useRef<THREE.Mesh>(null)
-  const camera = useThree((state) => state.camera)
   const material = useRef<THREE.ShaderMaterial>(null)
   const timeRef = useRef(0)
 
@@ -595,39 +628,8 @@ function Sun() {
     }
 
     if (sun.current) {
+      // the Sun rotates about once every 25 days; here, slowly and visibly
       sun.current.rotation.y += delta * 0.012
-      sun.current.rotation.x = Math.sin(time * 0.08) * 0.015
-    }
-
-    /* Fade the back-faced glow shells when the camera is close, so the
-       Sun's light never washes over a planet in focus (e.g. Mercury) */
-    const sunDistance = camera.position.distanceTo(SYSTEM_OFFSET)
-    const glowFade = THREE.MathUtils.clamp((sunDistance - 2.2) / 4, 0, 1)
-    const shells: [THREE.Mesh | null, number][] = [
-      [coronaInner.current, 0.075],
-      [coronaOuter.current, 0.032],
-      [coronaHalo.current, 0.012],
-    ]
-    for (const [mesh, base] of shells) {
-      if (mesh) {
-        ;(mesh.material as THREE.MeshBasicMaterial).opacity = base * glowFade
-      }
-    }
-
-    if (coronaInner.current) {
-      const pulse =
-        1 +
-        Math.sin(time * 0.75) * 0.025 +
-        Math.sin(time * 1.9) * 0.008
-
-      coronaInner.current.scale.setScalar(1.075 * pulse)
-      coronaInner.current.rotation.y = time * 0.018
-    }
-
-    if (coronaOuter.current) {
-      const pulse = 1 + Math.sin(time * 0.42 + 1.5) * 0.035
-      coronaOuter.current.scale.setScalar(1.16 * pulse)
-      coronaOuter.current.rotation.y = -time * 0.008
     }
   })
 
@@ -645,44 +647,7 @@ function Sun() {
         />
       </mesh>
 
-      <mesh ref={coronaInner} scale={1.075}>
-        <sphereGeometry args={[1, 96, 96]} />
-        <meshBasicMaterial
-          color="#ffb347"
-          transparent
-          opacity={0.075}
-          side={THREE.BackSide}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          toneMapped={false}
-        />
-      </mesh>
-
-      <mesh ref={coronaOuter} scale={1.16}>
-        <sphereGeometry args={[1, 64, 64]} />
-        <meshBasicMaterial
-          color="#ff6b1a"
-          transparent
-          opacity={0.032}
-          side={THREE.BackSide}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          toneMapped={false}
-        />
-      </mesh>
-
-      <mesh ref={coronaHalo} scale={1.32}>
-        <sphereGeometry args={[1, 48, 48]} />
-        <meshBasicMaterial
-          color="#ff8a24"
-          transparent
-          opacity={0.012}
-          side={THREE.BackSide}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-          toneMapped={false}
-        />
-      </mesh>
+      <Corona />
 
       <pointLight
         color="#fff0d0"
@@ -691,6 +656,84 @@ function Sun() {
         decay={0}
       />
     </group>
+  )
+}
+
+/* Corona: a camera-facing glow with faint radiating streamers, drawn
+   behind the Sun's disc. It fades out when the camera is close so it
+   never washes over a planet in focus. */
+const CORONA_SIZE = 6.4 // in Sun radii, edge to edge
+
+const CORONA_VERTEX = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+
+const CORONA_FRAGMENT = /* glsl */ `
+uniform float uTime;
+uniform float uOpacity;
+uniform float uHalf;
+varying vec2 vUv;
+void main() {
+  vec2 c = vUv * 2.0 - 1.0;
+  float r = length(c) * uHalf; // distance from the centre, in Sun radii
+  float a = atan(c.y, c.x);
+  float t = uTime * 0.04;
+
+  float streamers = 0.55
+    + 0.25 * sin(a * 5.0 + 1.3 + t)
+    + 0.14 * sin(a * 11.0 - t * 1.7)
+    + 0.08 * sin(a * 23.0 + t * 0.6);
+
+  float above = max(r - 1.0, 0.0);
+  float glow = exp(-above * 3.4) * 0.55 + exp(-above * 1.0) * 0.16 * streamers;
+  glow *= 1.0 - smoothstep(uHalf * 0.72, uHalf, r);
+
+  gl_FragColor = vec4(vec3(1.0, 0.68, 0.34) * glow * uOpacity, 1.0);
+}`
+
+function Corona() {
+  const mesh = useRef<THREE.Mesh>(null)
+  const camera = useThree((state) => state.camera)
+
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uTime: { value: 0 },
+          uOpacity: { value: 1 },
+          uHalf: { value: CORONA_SIZE / 2 },
+        },
+        vertexShader: CORONA_VERTEX,
+        fragmentShader: CORONA_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    [],
+  )
+
+  useEffect(() => () => material.dispose(), [material])
+
+  useFrame((_, delta) => {
+    if (!mesh.current) return
+    // face the camera itself (not just its viewing direction), so the glow
+    // plane stays behind the Sun's disc even when the Sun is off-centre
+    mesh.current.lookAt(camera.position)
+    material.uniforms.uTime.value += delta
+    const distance = camera.position.distanceTo(SYSTEM_OFFSET)
+    const fade = THREE.MathUtils.clamp((distance - 3.5) / 5, 0, 1)
+    material.uniforms.uOpacity.value = fade
+    mesh.current.visible = fade > 0.01
+  })
+
+  return (
+    <mesh ref={mesh} material={material} renderOrder={-1}>
+      <planeGeometry args={[CORONA_SIZE, CORONA_SIZE]} />
+    </mesh>
   )
 }
 
@@ -716,9 +759,8 @@ function Planet({
   const { gl } = useThree()
 
   const visualRadius = getPlanetVisualRadius(index)
-  const axialTilt = THREE.MathUtils.degToRad(
-    planet.axialTiltDeg,
-  )
+  // real spin axis (IAU pole), so tilt, seasons and ring angle are true
+  const poleQuaternion = useMemo(() => getPlanetPoleQuaternion(index), [index])
   const planetType =
     planet.type === 'earth'
       ? 1
@@ -742,6 +784,16 @@ function Planet({
       uSunPosition: { value: SYSTEM_OFFSET },
       uMap: { value: null as THREE.Texture | null },
       uHasMap: { value: 0 },
+      // shadows
+      uMoonPos: { value: [0, 1, 2, 3].map(() => new THREE.Vector3()) },
+      uMoonRadius: { value: [0, 0, 0, 0] },
+      uMoonCount: { value: 0 },
+      uHasRings: { value: planet.name === 'Saturn' ? 1 : 0 },
+      uRingMap: { value: null as THREE.Texture | null },
+      uRingNormal: { value: new THREE.Vector3(0, 1, 0) },
+      uPlanetCenter: { value: new THREE.Vector3() },
+      uRingInner: { value: 0 },
+      uRingOuter: { value: 0 },
     }),
     [planet, planetType, index],
   )
@@ -990,6 +1042,17 @@ function Planet({
     const isFocused = focusedPlanetIndex(safeProgress) === index
     const held = isFocused && !!spinState?.hold
 
+    // ring-shadow geometry in world space (follows tilt, orbit and focus scale)
+    if (uniforms.uHasRings.value > 0.5) {
+      body.current.updateWorldMatrix(true, false)
+      body.current.getWorldPosition(uniforms.uPlanetCenter.value)
+      const e = body.current.matrixWorld.elements
+      const worldRadius = Math.hypot(e[0], e[1], e[2])
+      uniforms.uRingNormal.value.set(e[4], e[5], e[6]).normalize()
+      uniforms.uRingInner.value = worldRadius * SATURN_RING_INNER
+      uniforms.uRingOuter.value = worldRadius * SATURN_RING_OUTER
+    }
+
     // keep the Sun direction (in view space) current for Earth's night mask
     if (planet.name === 'Earth') {
       body.current.getWorldPosition(_earthWorld)
@@ -1022,7 +1085,7 @@ function Planet({
       <primitive object={orbitLine} />
 
       <group ref={orbit}>
-        <group rotation={[0, 0, axialTilt]}>
+        <group quaternion={poleQuaternion}>
           <mesh ref={body} scale={visualRadius}>
             {HOTSPOTS[index] && (
               <Hotspots
@@ -1088,6 +1151,7 @@ function Planet({
             <PlanetRings
               planet={planet}
               radius={visualRadius}
+              planetUniforms={uniforms}
             />
           )}
 
@@ -1096,6 +1160,7 @@ function Planet({
             <MoonSystem
               system={MOON_SYSTEMS[planet.name]}
               planetRadius={visualRadius}
+              shadowUniforms={uniforms}
             />
           )}
         </group>
@@ -1290,14 +1355,25 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
   },
 }
 
+type MoonShadowUniforms = {
+  uMoonPos: { value: THREE.Vector3[] }
+  uMoonRadius: { value: number[] }
+  uMoonCount: { value: number }
+}
+
+const _moonScale = new THREE.Vector3()
+
 function MoonSystem({
   system,
   planetRadius,
+  shadowUniforms,
 }: {
   system: MoonSystemSpec
   planetRadius: number
+  shadowUniforms?: MoonShadowUniforms
 }) {
   const arms = useRef<(THREE.Group | null)[]>([])
+  const bodies = useRef<(THREE.Mesh | null)[]>([])
   const time = useRef(0)
   const referencePeriod = system.moons[0]?.periodDays ?? 1
 
@@ -1309,6 +1385,20 @@ function MoonSystem({
       const seconds = system.baseSeconds * (moon.periodDays / referencePeriod)
       arm.rotation.y = moon.phase + (time.current / seconds) * Math.PI * 2
     })
+
+    // tell the planet where its moons are, so they can cast shadows on it
+    if (shadowUniforms) {
+      let count = 0
+      system.moons.forEach((moon, i) => {
+        const body = bodies.current[i]
+        if (!body || count >= 4) return
+        body.getWorldPosition(shadowUniforms.uMoonPos.value[count])
+        body.getWorldScale(_moonScale)
+        shadowUniforms.uMoonRadius.value[count] = Math.max(_moonScale.x, _moonScale.y, _moonScale.z)
+        count += 1
+      })
+      shadowUniforms.uMoonCount.value = count
+    }
   })
 
   return (
@@ -1321,6 +1411,9 @@ function MoonSystem({
           }}
         >
           <mesh
+            ref={(mesh) => {
+              bodies.current[i] = mesh
+            }}
             position={[moon.distance * planetRadius, 0, 0]}
             scale={(moon.shape ?? [1, 1, 1]).map(
               (axis) => axis * moon.radius * planetRadius,
@@ -1342,11 +1435,57 @@ function MoonSystem({
 /* Saturn's rings from the real ring map: the texture is a radial strip,
    so each vertex's u coordinate is its distance across the ring. */
 const SATURN_RING_TEXTURE = '/textures/planets/2k_saturn_ring_alpha.png'
+/* ring extent in planet radii (matches the ring texture) */
+const SATURN_RING_INNER = 1.24
+const SATURN_RING_OUTER = 2.35
 
-function SaturnRing({ radius }: { radius: number }) {
-  const [map, setMap] = useState<THREE.Texture | null>(null)
-  const inner = radius * 1.24
-  const outer = radius * 2.35
+/* Rings lit by the Sun, with Saturn's own shadow cut across them:
+   from each point on the ring, does the sunbeam hit the planet? */
+const RING_VERTEX = /* glsl */ `
+varying vec2 vUv;
+varying vec3 vWorld;
+void main() {
+  vUv = uv;
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  gl_Position = projectionMatrix * viewMatrix * world;
+}`
+
+const RING_FRAGMENT = /* glsl */ `
+uniform sampler2D uMap;
+uniform vec3 uTint;
+uniform vec3 uSunPosition;
+uniform vec3 uPlanetCenter;
+uniform float uPlanetRadius;
+varying vec2 vUv;
+varying vec3 vWorld;
+void main() {
+  vec4 ring = texture2D(uMap, vUv);
+  vec3 toSun = normalize(uSunPosition - vWorld);
+  vec3 toPlanet = uPlanetCenter - vWorld;
+  float along = dot(toPlanet, toSun);
+  float lit = 1.0;
+  if (along > 0.0) {
+    float miss = length(toPlanet - toSun * along);
+    lit = mix(0.06, 1.0, smoothstep(uPlanetRadius * 0.97, uPlanetRadius * 1.04, miss));
+  }
+  gl_FragColor = vec4(ring.rgb * uTint * lit, ring.a);
+}`
+
+type RingShadowUniforms = { uRingMap: { value: THREE.Texture | null } }
+
+const _ringScale = new THREE.Vector3()
+
+function SaturnRing({
+  radius,
+  planetUniforms,
+}: {
+  radius: number
+  planetUniforms?: RingShadowUniforms
+}) {
+  const ringMesh = useRef<THREE.Mesh>(null)
+  const inner = radius * SATURN_RING_INNER
+  const outer = radius * SATURN_RING_OUTER
 
   const geometry = useMemo(() => {
     const ring = new THREE.RingGeometry(inner, outer, 192, 1)
@@ -1363,7 +1502,32 @@ function SaturnRing({ radius }: { radius: number }) {
     return ring
   }, [inner, outer])
 
-  useEffect(() => () => geometry.dispose(), [geometry])
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uMap: { value: null as THREE.Texture | null },
+          uTint: { value: new THREE.Color('#efe3c8') },
+          uSunPosition: { value: SYSTEM_OFFSET },
+          uPlanetCenter: { value: new THREE.Vector3() },
+          uPlanetRadius: { value: radius },
+        },
+        vertexShader: RING_VERTEX,
+        fragmentShader: RING_FRAGMENT,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    [radius],
+  )
+
+  useEffect(
+    () => () => {
+      geometry.dispose()
+      material.dispose()
+    },
+    [geometry, material],
+  )
 
   useEffect(() => {
     let disposed = false
@@ -1374,41 +1538,37 @@ function SaturnRing({ radius }: { radius: number }) {
         texture.dispose()
         return
       }
-      texture.colorSpace = THREE.SRGBColorSpace
+      // raw values: the shader writes colour straight to the screen
+      texture.colorSpace = THREE.NoColorSpace
       loadedTexture = texture
-      setMap(texture)
+      material.uniforms.uMap.value = texture
+      // Saturn's own shader reads the same map to draw the rings' shadow
+      if (planetUniforms) planetUniforms.uRingMap.value = texture
     })
 
     return () => {
       disposed = true
       loadedTexture?.dispose()
     }
-  }, [])
+  }, [material, planetUniforms])
+
+  useFrame(() => {
+    const mesh = ringMesh.current
+    if (!mesh) return
+    // the ring sits at Saturn's centre; scale follows the focus shrink
+    mesh.getWorldPosition(material.uniforms.uPlanetCenter.value)
+    mesh.getWorldScale(_ringScale)
+    material.uniforms.uPlanetRadius.value = radius * _ringScale.x
+    mesh.visible = material.uniforms.uMap.value !== null
+  })
 
   return (
-    <mesh rotation={[Math.PI / 2, 0, 0]} geometry={geometry}>
-      {map ? (
-        // keyed + explicit opacity: swapping materials in place reset opacity to 0
-        <meshBasicMaterial
-          key="textured"
-          map={map}
-          color="#efe3c8"
-          transparent
-          opacity={1}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      ) : (
-        <meshBasicMaterial
-          key="fallback"
-          color="#c8b48d"
-          transparent
-          opacity={0.45}
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      )}
-    </mesh>
+    <mesh
+      ref={ringMesh}
+      rotation={[Math.PI / 2, 0, 0]}
+      geometry={geometry}
+      material={material}
+    />
   )
 }
 
@@ -1529,14 +1689,16 @@ function Hotspots({
 function PlanetRings({
   planet,
   radius,
+  planetUniforms,
 }: {
   planet: (typeof PLANETS)[number]
   radius: number
+  planetUniforms?: RingShadowUniforms
 }) {
   const isSaturn = planet.name === 'Saturn'
   const isUranus = planet.name === 'Uranus'
 
-  if (isSaturn) return <SaturnRing radius={radius} />
+  if (isSaturn) return <SaturnRing radius={radius} planetUniforms={planetUniforms} />
   const isNeptune = planet.name === 'Neptune'
 
   // Uranus and Neptune have thin, faint rings: a broad band read as a dark hole

@@ -313,3 +313,43 @@ export function getPlanetPosition(
   getPlanetOrbitPosition(index, jd, out)
   return out.add(SYSTEM_OFFSET)
 }
+
+/* ============================================================
+   REAL SPIN AXES
+   IAU north-pole directions (RA, Dec in degrees, J2000 equatorial),
+   converted to ecliptic and then scene axes. This gives every planet
+   its true axial tilt pointing the true way, so seasons, Saturn's ring
+   angle to the Sun (and its shadows) and Uranus lying on its side are
+   all real. Venus and Uranus spin backwards about these poles.
+============================================================ */
+
+const POLES: readonly (readonly [number, number])[] = [
+  [281.0103, 61.4155], // Mercury
+  [272.76, 67.16], // Venus
+  [0, 90], // Earth
+  [317.68143, 52.8865], // Mars
+  [268.057, 64.495], // Jupiter
+  [40.589, 83.537], // Saturn
+  [257.311, -15.175], // Uranus
+  [299.36, 43.46], // Neptune
+]
+
+const OBLIQUITY_J2000 = 23.4392911 * DEG
+const UP = new THREE.Vector3(0, 1, 0)
+
+/** Rotation that turns the planet's local +Y into its real north pole */
+export function getPlanetPoleQuaternion(index: number) {
+  const pole = POLES[index] ?? [0, 90]
+  const ra = pole[0] * DEG
+  const dec = pole[1] * DEG
+  const x = Math.cos(dec) * Math.cos(ra)
+  const y = Math.cos(dec) * Math.sin(ra)
+  const z = Math.sin(dec)
+  // equatorial -> ecliptic
+  const ex = x
+  const ey = y * Math.cos(OBLIQUITY_J2000) + z * Math.sin(OBLIQUITY_J2000)
+  const ez = -y * Math.sin(OBLIQUITY_J2000) + z * Math.cos(OBLIQUITY_J2000)
+  // ecliptic -> scene (same mapping as the orbits)
+  const axis = new THREE.Vector3(ex, ez, -ey).normalize()
+  return new THREE.Quaternion().setFromUnitVectors(UP, axis)
+}
