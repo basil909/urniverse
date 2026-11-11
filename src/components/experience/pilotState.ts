@@ -60,7 +60,9 @@ export const pilot = {
   /** where the ship stands, degrees */
   site: { lat: 0, lon: 0 },
   /** 'chase', 'flyby' or 'orbit' (V cycles) */
-  cameraMode: 'chase' as 'chase' | 'flyby' | 'orbit',
+  cameraMode: 'chase' as 'chase' | 'flyby' | 'orbit' | 'cockpit',
+  /** the ship's pitch and roll against the horizon (radians) */
+  attitude: { pitch: 0, roll: 0 },
   /** photo mode: no HUD (P) */
   photo: false,
   /** for sound and the HUD: thrust, re-entry heat, air density (0..1) */

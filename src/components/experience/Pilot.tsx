@@ -1514,6 +1514,9 @@ export default function Pilot() {
     const vertical = Math.abs(_forward.dot(_levelUp))
     // (the full roll angle, so it rights itself even from upside down)
     const rollAngle = Math.atan2(_right.dot(_levelUp), _up.dot(_levelUp))
+    // for the cockpit's attitude indicator
+    pilot.attitude.pitch = Math.asin(THREE.MathUtils.clamp(_forward.dot(_levelUp), -1, 1))
+    pilot.attitude.roll = rollAngle
     const level = rollInput === 0 ? THREE.MathUtils.clamp(rollAngle * 2.2, -2.2, 2.2) * (1 - vertical) : 0
     // close to the ground, the nose is eased up rather than flown in
     // over solid ground the floor is the ground itself (with the ship's
@@ -1961,7 +1964,17 @@ export default function Pilot() {
       .addScaledVector(_forward, reach * 6)
       .addScaledVector(_right, -reach * yawRate * 0.9)
       .addScaledVector(_up, reach * pitchRate * 0.5)
-    if (mode === 'chase') {
+    if (mode === 'cockpit') {
+      // on the flight deck: just behind the forward windows, looking out
+      // along the nose, rolling with the ship
+      camera.position
+        .copy(jet.position)
+        .addScaledVector(_forward, SHIP_LENGTH * 0.33)
+        .addScaledVector(_up, SHIP_LENGTH * 0.055)
+      if (buffet > 0.01) camera.position.addScaledVector(_shake, buffet * SHIP_LENGTH * 0.004)
+      camera.quaternion.copy(jet.quaternion)
+      camera.rotateZ(-bank.current)
+    } else if (mode === 'chase') {
       camera.up.copy(_up)
       camera.lookAt(_camTarget)
       camera.rotateZ(-bank.current * 0.35)
@@ -1976,6 +1989,8 @@ export default function Pilot() {
     // a camera placed as the real one is, in ship lengths
     const view = visual.current
     if (view) {
+      // from the cockpit the ship itself is not drawn (the frame is)
+      view.visible = mode !== 'cockpit'
       view.quaternion.copy(jet.quaternion)
       // the ship leans into the turn, and its nose follows the pitch
       const model = view.children[0]

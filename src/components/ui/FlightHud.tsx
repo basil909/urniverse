@@ -107,6 +107,84 @@ const WORLDS: World[] = [
   })),
 ]
 
+/* The view from the flight deck: the Shuttle's forward windows, and
+   under them the panel: the attitude ball (the "eight ball": sky above,
+   ground below, turning as the ship pitches and rolls against the
+   horizon), altitude and speed. Updated every frame, without React. */
+function Cockpit() {
+  const ball = useRef<SVGGElement>(null)
+  const alt = useRef<SVGTextElement>(null)
+  const vel = useRef<SVGTextElement>(null)
+  useEffect(() => {
+    let frame = 0
+    const tick = () => {
+      frame = requestAnimationFrame(tick)
+      const { pitch, roll } = pilot.attitude
+      const deg = 180 / Math.PI
+      ball.current?.setAttribute('transform', `rotate(${(-roll * deg).toFixed(2)}) translate(0 ${(pitch * deg * 2.2).toFixed(2)})`)
+      const km = pilot.altitudeKm
+      const altText = km < 0 ? '—' : km < 1 ? `${Math.round(km * 1000)} m` : km < 1e5 ? `${km < 10 ? km.toFixed(1) : Math.round(km).toLocaleString('en-GB')} km` : `${(km / 1e6).toFixed(km < 1e7 ? 2 : 1)}M km`
+      const kms = pilot.kms
+      const velText = kms < 1 ? `${Math.round(kms * 3600)} km/h` : kms < 1e5 ? `${kms < 10 ? kms.toFixed(2) : Math.round(kms).toLocaleString('en-GB')} km/s` : `${(kms / 299792.458).toFixed(1)} c`
+      if (alt.current && alt.current.textContent !== altText) alt.current.textContent = altText
+      if (vel.current && vel.current.textContent !== velText) vel.current.textContent = velText
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  const ladder = [-30, -20, -10, 10, 20, 30]
+  return (
+    <svg className="flight-cockpit" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <clipPath id="cockpit-ball">
+          <circle r="74" />
+        </clipPath>
+        <linearGradient id="cockpit-panel" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#15171c" />
+          <stop offset="1" stopColor="#08090c" />
+        </linearGradient>
+      </defs>
+      {/* the frame round the forward windows (and the windows themselves cut out) */}
+      <path
+        className="cockpit-frame"
+        fillRule="evenodd"
+        d="M-400 -400H2000V1400H-400Z
+           M70 270L330 168L352 575L120 618Z
+           M368 160L782 112L788 560L388 572Z
+           M818 112L1232 160L1212 572L812 560Z
+           M1270 168L1530 270L1480 618L1248 575Z"
+      />
+      {/* the window edges catch a little light */}
+      <path
+        className="cockpit-edge"
+        d="M70 270L330 168L352 575L120 618Z M368 160L782 112L788 560L388 572Z M818 112L1232 160L1212 572L812 560Z M1270 168L1530 270L1480 618L1248 575Z"
+      />
+      {/* the panel */}
+      <path className="cockpit-panel" d="M-400 690Q800 640 2000 690V1400H-400Z" fill="url(#cockpit-panel)" />
+      <g transform="translate(800 815)">
+        <g clipPath="url(#cockpit-ball)">
+          <g ref={ball}>
+            <rect x="-300" y="-600" width="600" height="600" className="cockpit-sky" />
+            <rect x="-300" y="0" width="600" height="600" className="cockpit-ground" />
+            <line x1="-300" x2="300" y1="0" y2="0" className="cockpit-horizon" />
+            {ladder.map((p) => (
+              <line key={p} x1={-18 - Math.abs(p) * 0.4} x2={18 + Math.abs(p) * 0.4} y1={-p * 2.2} y2={-p * 2.2} className="cockpit-ladder" />
+            ))}
+          </g>
+        </g>
+        <circle r="74" className="cockpit-rim" />
+        {/* the ship's own wings, fixed */}
+        <path d="M-46 0H-14L-6 8M46 0H14L6 8" className="cockpit-wings" />
+        <circle r="2.5" className="cockpit-dot" />
+      </g>
+      <text x="560" y="800" className="cockpit-label">ALTITUDE</text>
+      <text ref={alt} x="560" y="836" className="cockpit-value" />
+      <text x="1040" y="800" className="cockpit-label" textAnchor="end">SPEED</text>
+      <text ref={vel} x="1040" y="836" className="cockpit-value" textAnchor="end" />
+    </svg>
+  )
+}
+
 /* the "Go to" list: every world, by kind */
 const GROUPS: { kind: Kind; title: string }[][] = [
   [
@@ -235,6 +313,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const heatGlare = useRef<HTMLDivElement>(null)
   const [hullK, setHullK] = useState(0)
   const [goTo, setGoTo] = useState(false)
+  const [cockpit, setCockpit] = useState(false)
   const goToOpen = useRef(false)
   useEffect(() => {
     goToOpen.current = goTo
@@ -465,9 +544,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         return
       }
       if (event.key.toLowerCase() === 'v' && !event.repeat) {
-        const order = ['chase', 'flyby', 'orbit'] as const
+        const order = ['chase', 'cockpit', 'flyby', 'orbit'] as const
         pilot.cameraMode = order[(order.indexOf(pilot.cameraMode) + 1) % order.length]
-        setToast(pilot.cameraMode === 'chase' ? 'Chase camera' : pilot.cameraMode === 'flyby' ? 'Fly-by camera' : 'Orbit camera')
+        setCockpit(pilot.cameraMode === 'cockpit')
+        setToast(
+          { chase: 'Chase camera', cockpit: 'Cockpit', flyby: 'Fly-by camera', orbit: 'Orbit camera' }[pilot.cameraMode],
+        )
         window.clearTimeout(toastTimer)
         toastTimer = window.setTimeout(() => setToast(''), 1600)
         return
@@ -571,6 +653,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <div ref={haze} className="flight-haze" aria-hidden="true" />
       <div ref={mist} className="flight-mist" aria-hidden="true" />
       <div ref={heatGlare} className="flight-heat" aria-hidden="true" />
+      {cockpit && <Cockpit />}
       {guideStep >= 0 && (
         <div className="flight-guide-card" role="status">
           <span className="flight-guide-step">{guideStep + 1} / 3</span>
@@ -677,7 +760,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly · tap a world to warp there'
-          : 'Steer with the mouse or arrows · W or click to fly · click a world, 1–8 or G to warp · L land · O orbit · T time · V camera · P photo · Esc exits'}
+          : 'Steer with the mouse or arrows · W or click to fly · click a world, 1–8 or G to warp · L land · O orbit · T time · V camera (cockpit) · P photo · Esc exits'}
       </p>
 
       {touch && (
