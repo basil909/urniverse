@@ -26,7 +26,7 @@ const INCLINATION = 32 * DEG
 const NODE = 205 * DEG
 const ARG_PERIHELION = 75 * DEG
 /* days after the visitor's "today" when the comet rounds the Sun */
-const PERIHELION_DELAY = 140
+const PERIHELION_DELAY = 40
 
 const TAIL_COUNT = 6000
 

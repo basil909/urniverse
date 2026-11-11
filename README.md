@@ -39,7 +39,7 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 
 **Simplified**
 - Distances are compressed so everything fits on screen; the Sun is drawn much smaller than its true 109 Earth-widths; moons are enlarged and drawn closer to their planets. The text gives the true scale model.
-- The simulated date starts at today and runs forward as you travel (fast in the wide views, slowly in close-ups); it is shown at the top right.
+- By default the motion is calm: the planets drift along their real orbits from today's positions (faster in the wide views, slowly in close-ups), while spins and moons turn at a gentle pace of their own. The **Real motion** button (top right) puts everything on one clock from this moment, at 1 hour, 1 day or 1 week per second, so orbits, Earth's day and night, the Moon's phases and the moons all keep true time together; the clock is shown beside it.
 - The comet is illustrative, not a real comet. Saturn's, Mars's and Uranus's moons have real periods but not real positions. The Milky Way model is a stylised barred spiral.
 - Weather details (Jupiter's flowing bands, Neptune's dark spot, Mars's dust storm) are artistic, based on what spacecraft have seen.
 

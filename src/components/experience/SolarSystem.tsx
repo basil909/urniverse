@@ -1711,7 +1711,7 @@ function Planet({
 
     // Earth turns with the simulated clock to its real orientation; the
     // others spin at their real relative rates. Dragging adds an offset.
-    const trueSpin = planet.name === 'Earth' ? earthSpinAngle(simClock.jd, poleQuaternion) : null
+    const trueSpin = planet.name === 'Earth' ? earthSpinAngle(simClock.bodyJd, poleQuaternion) : null
     if (trueSpin !== null && held) {
       // a hovered marker holds Earth still: absorb the clock's turn
       userSpin.current -= trueSpin - lastTrueSpin.current
@@ -1975,7 +1975,7 @@ function Moon({ sharp }: { sharp: boolean }) {
     const moon = body.current
     if (moon) {
       // where the Moon really is, seen from Earth (distance compressed)
-      moonDirection(simClock.jd, moon.position).multiplyScalar(MOON_ORBIT_RADIUS)
+      moonDirection(simClock.bodyJd, moon.position).multiplyScalar(MOON_ORBIT_RADIUS)
       // tidally locked: the near side (longitude 0) always faces Earth
       moon.parent?.getWorldPosition(_moonEarth)
       moon.lookAt(_moonEarth)
@@ -2129,7 +2129,7 @@ function MoonSystem({
     time.current += delta
     // on the shared simulated clock, at their real periods; the Galilean
     // moons at their real longitudes (measured from the vernal equinox)
-    const days = simClock.jd - 2451545.0
+    const days = simClock.bodyJd - 2451545.0
     const equinox = tilt ? angleInFrame(VERNAL_EQUINOX, tilt) : 0
     system.moons.forEach((moon, i) => {
       const arm = arms.current[i]

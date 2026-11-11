@@ -14,7 +14,7 @@ import UniverseCanvas from './experience/UniverseCanvas'
 import Loader from './ui/Loader'
 import DetailPanel from './ui/DetailPanel'
 import CountUp from './ui/CountUp'
-import SimDate from './ui/SimDate'
+import MotionControl from './ui/MotionControl'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
@@ -975,8 +975,8 @@ export default function Journey() {
           <span className="brand-name">You Are Here</span>
         </button>
 
-        {/* the simulated moment: time runs on as you travel */}
-        {section > 0 && <SimDate />}
+        {/* "Real motion", and the simulated moment */}
+        <MotionControl showDate={section > 0} />
       </header>
 
       {/* LEFT CHAPTER RAIL */}
@@ -1102,7 +1102,7 @@ export default function Journey() {
               </button>
               {today && (
                 <p className="hero-note">
-                  Planets start where they are today, {today}, then time runs forward
+                  Planets start where they are today, {today}
                 </p>
               )}
             </motion.div>

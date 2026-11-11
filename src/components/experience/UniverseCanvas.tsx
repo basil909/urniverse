@@ -15,7 +15,7 @@ import { memo, Suspense, useEffect, useMemo, useRef, useState, type MutableRefOb
 import * as THREE from 'three'
 
 import SolarSystem from './SolarSystem'
-import { CLOSE_UP_RATE, simClock, WIDE_VIEW_RATE } from './simClock'
+import { BODY_RATE, CLOSE_UP_RATE, simClock, WIDE_VIEW_RATE } from './simClock'
 import Galaxy, {
   GALAXY_POSITION,
   GALAXY_RADIUS,
@@ -1041,12 +1041,22 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
   useFrame((_, delta) => {
     const chapter = Math.floor(progressRef.current ?? 0)
-    // the Pale Blue Dot (10) holds still, like a photograph
+    // clamp delta so a backgrounded tab does not jump the planets
+    const step = Math.min(delta, 0.1)
+    if (simClock.real) {
+      // real motion: one clock for everything, at the chosen speed
+      simClock.rate = simClock.realRate
+      simClock.jd += simClock.rate * step
+      simClock.bodyJd = simClock.jd
+      return
+    }
+    // cinematic: the Pale Blue Dot (10) holds still, like a photograph
     const wideView = chapter === 0 || chapter === 1 || chapter === 12
     const target = reducedMotion ? 0 : wideView ? WIDE_VIEW_RATE : CLOSE_UP_RATE
     simClock.rate += (target - simClock.rate) * (1 - Math.exp(-delta * 1.5))
-    // clamp delta so a backgrounded tab does not jump the planets
-    simClock.jd += simClock.rate * Math.min(delta, 0.1)
+    simClock.jd += simClock.rate * step
+    // spins and moons keep a calm pace of their own
+    if (!reducedMotion) simClock.bodyJd += BODY_RATE * step
   })
 
   return null
