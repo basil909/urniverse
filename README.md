@@ -46,6 +46,7 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - By default the motion is calm: the planets drift along their real orbits from today's positions (faster in the wide views, slowly in close-ups), while spins and moons turn at a gentle pace of their own. The **Real motion** button (top right) puts everything on one clock from this moment, at 1 hour, 1 day or 1 week per second, so orbits, Earth's day and night, the Moon's phases and the moons all keep true time together; the clock is shown beside it.
 - The comet is illustrative, not a real comet. Saturn's, Mars's and Uranus's moons have real periods but not real positions. The Milky Way model is a stylised barred spiral, shown only in the finale (from inside the galaxy it can never appear as a spiral in our sky). 
 - Weather details (Jupiter's flowing bands, Neptune's dark spot, Mars's dust storm) are artistic, based on what spacecraft have seen.
+- In flight, the finest detail below the surface maps' resolution (roughly 10 km on Earth) is generated texture, not data: the coastlines, mountains and cloud systems you fly over are real, the grain within them is not.
 
 ## Tech stack
 
@@ -113,6 +114,7 @@ To add or remove a chapter, edit the `JOURNEY` array in `Journey.tsx` and add a 
 
 - **Planet textures** (Mercury, Venus, Mars, Jupiter, Saturn and its rings, Uranus, Neptune, the 4K set in `hd/`), **Earth's day map, clouds and city lights**, the **Moon** and the **Milky Way sky**: [Solar System Scope](https://www.solarsystemscope.com/textures/), licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Converted to WebP. See `public/textures/planets/CREDITS.txt`. The site also credits them on its closing screen.
 - **Stars**: the Yale Bright Star Catalogue, 5th revised edition (Hoffleit & Warren 1991), from the Smithsonian Astrophysical Observatory's Telescope Data Center. See `public/data/CREDITS.txt`.
+- **Space Shuttle** (the ship in flight mode): NASA's "Space Shuttle (A)" model from [NASA 3D Resources](https://nasa3d.arc.nasa.gov/), free of copyright; only the orbiter is used, recoloured as flown. It is Draco-compressed, read with the Draco decoder that ships with three.js (`public/draco/`). See `public/models/CREDITS.txt`.
 - **Relief and moon surfaces** (public domain): Mars and Mercury elevation from USGS Astrogeology (MGS MOLA, MESSENGER); the Moon's elevation from the LRO LOLA data in NASA's Scientific Visualization Studio CGI Moon Kit; Io, Europa, Ganymede and Callisto from USGS Galileo / Voyager mosaics. Details in `public/textures/planets/CREDITS.txt`.
 - **Earth's normal and specular maps** in `public/textures/`: the source and licence of these files are not recorded in this repository. Confirm them before publishing the site.
 

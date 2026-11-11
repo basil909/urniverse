@@ -65,13 +65,116 @@ const _earthQuat = new THREE.Quaternion()
 /* cloud deck height in Earth radii (the cloud shell sits at 1.012) */
 const CLOUD_HEIGHT = 0.012
 
+/* ============================================================
+   CLOSE-UP DETAIL
+   The surface maps are 2K–4K: a texel is some 10 km on Earth, so from a
+   few hundred km up (flying) they turn soft. This adds what lies below
+   that size: four octaves of fine relief and tone, each a quarter the
+   size of the last, and each shown only once it spans a few pixels. So
+   nothing changes in the wide views, and nothing shimmers. It is texture,
+   not data: the real features stay those of the maps.
+============================================================ */
+const CLOSE_DETAIL_GLSL = /* glsl */ `
+float cdHash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float cdNoise(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(cdHash(i), cdHash(i + vec3(1,0,0)), f.x), mix(cdHash(i + vec3(0,1,0)), cdHash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(cdHash(i + vec3(0,0,1)), cdHash(i + vec3(1,0,1)), f.x), mix(cdHash(i + vec3(0,1,1)), cdHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+/* p: direction on the unit sphere. rugged: 1 for ridged rock, 0 for soft
+   cloud. stretch: streaks the pattern east-west (banded giants).
+   Returns (height in radii, tone -0.5..0.5, how much is shown 0..1). */
+vec3 closeDetail(vec3 p, float rugged, float stretch) {
+  float px = length(fwidth(p)); /* one pixel, in radii */
+  vec3 q = p * vec3(1.0, stretch, 1.0);
+  float h = 0.0; float tone = 0.0; float shown = 0.0;
+  float f = 300.0;
+  for (int i = 0; i < 4; i++) {
+    float a = 1.0 - smoothstep(0.22, 0.9, px * f);
+    if (a > 0.002) {
+      vec3 c = q * f + float(i) * 31.7;
+      /* a little warp, so the pattern never reads as a regular grain */
+      c += (vec3(cdNoise(c * 0.31), cdNoise(c * 0.31 + 5.2), cdNoise(c * 0.31 + 9.7)) - 0.5) * 1.8;
+      float n = cdNoise(c);
+      float ridge = 1.0 - abs(2.0 * n - 1.0);
+      float v = mix(n, ridge * ridge, rugged) - 0.5;
+      h += v * a / f;
+      tone += v * a * 0.6;
+      shown = max(shown, a);
+    }
+    f *= 4.0;
+  }
+  /* rough ground in some places, smooth plains in others */
+  float rough = shown > 0.0 ? mix(0.2, 1.0, smoothstep(0.3, 0.7, cdNoise(q * 45.0 + 3.3))) : 1.0;
+  return vec3(h * rough, clamp(tone * mix(0.5, 1.0, rough), -0.5, 0.5), shown);
+}
+/* tilt a normal by a height field, from its screen-space slope (pos and
+   n in the same space, h in its units) */
+vec3 closeBump(vec3 n, vec3 pos, float h) {
+  vec3 dpdx = dFdx(pos); vec3 dpdy = dFdy(pos);
+  float dhdx = dFdx(h); float dhdy = dFdy(h);
+  vec3 r1 = cross(dpdy, n); vec3 r2 = cross(n, dpdx);
+  float det = dot(dpdx, r1);
+  if (abs(det) < 1e-30) return n;
+  vec3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
+  return normalize(abs(det) * n - grad);
+}
+`
+
+/* for three.js's own materials: the vertex shader passes the point's
+   direction on the sphere and the body's size */
+function withSurfaceVaryings(shader: THREE.WebGLProgramParametersWithUniforms) {
+  shader.vertexShader =
+    'varying vec3 vSurfaceP; varying float vSurfaceScale;\n' +
+    shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      vSurfaceP = position;
+      vSurfaceScale = length(modelMatrix[0].xyz);`,
+    )
+  shader.fragmentShader =
+    'varying vec3 vSurfaceP; varying float vSurfaceScale;\n' + CLOSE_DETAIL_GLSL + shader.fragmentShader
+}
+
+/* Earth's clouds: fine wisps that break up the soft edges up close */
+function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
+  withSurfaceVaryings(shader)
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <alphamap_fragment>',
+    `#include <alphamap_fragment>
+      {
+        vec3 cd = closeDetail(normalize(vSurfaceP), 0.0, 1.0);
+        diffuseColor.a *= clamp(1.0 + cd.y * 1.5, 0.0, 1.6);
+        diffuseColor.rgb *= 1.0 + cd.y * 0.3;
+      }`,
+  )
+}
+
 function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
   Object.assign(shader.uniforms, earthNight)
+  withSurfaceVaryings(shader)
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
 uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
 ` +
     shader.fragmentShader
+      .replace(
+        '#include <specularmap_fragment>',
+        `#include <specularmap_fragment>
+      /* close up: land gets fine relief and tone, the sea stays smooth */
+      vec3 closeEarth = closeDetail(normalize(vSurfaceP), 0.45, 1.0);
+      #ifdef USE_SPECULARMAP
+      float closeSea = smoothstep(0.25, 0.6, specularStrength);
+      #else
+      float closeSea = smoothstep(0.02, 0.08, diffuseColor.b - diffuseColor.r);
+      #endif
+      diffuseColor.rgb *= 1.0 + closeEarth.y * mix(0.3, 0.04, closeSea);`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+      normal = closeBump(normal, -vViewPosition, closeEarth.x * vSurfaceScale * mix(0.16, 0.0, closeSea));`,
+      )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
@@ -491,10 +594,11 @@ void main() {
 const PLANET_VERTEX_SHADER = /* glsl */ `
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
-varying vec3 vEast; varying vec3 vNorth;
+varying vec3 vEast; varying vec3 vNorth; varying float vScale;
 
 void main() {
   vUv = uv;
+  vScale = length(modelMatrix[0].xyz);
   vNormal = normalize(mat3(modelMatrix) * normal);
   vLocalPosition = position;
   /* map directions on the sphere: east = increasing u, north = increasing v */
@@ -521,7 +625,7 @@ uniform float uHasRings; uniform sampler2D uRingMap; uniform vec3 uRingNormal; u
 uniform sampler2D uHeight; uniform float uHasHeight; uniform float uRelief; uniform vec2 uHeightTexel; /* surface relief */
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
-varying vec3 vEast; varying vec3 vNorth;
+varying vec3 vEast; varying vec3 vNorth; varying float vScale;
 
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 
@@ -754,6 +858,7 @@ vec3 flowingClouds(vec2 uv) {
   return mix(a, b, abs(1.0 - 2.0 * t0));
 }
 
+${CLOSE_DETAIL_GLSL}
 void main() {
 
   vec3 normal = normalize(vNormal);
@@ -809,6 +914,12 @@ void main() {
     vec2 slope = vec2((hE - hW) / across, hN - hS) * uRelief;
     lit = normalize(normal - slope.x * normalize(vEast) - slope.y * normalize(vNorth));
   }
+  /* close up (flying): fine relief and tone below the maps' resolution:
+     rugged rock on Mercury and Mars, soft streaky cloud on the others */
+  bool rocky = uPlanet == 0 || uPlanet == 3;
+  vec3 close = closeDetail(p, rocky ? 0.6 : 0.0, rocky ? 1.0 : 5.0);
+  surface *= 1.0 + close.y * (rocky ? 0.28 : 0.14);
+  lit = closeBump(lit, vWorldPosition, close.x * vScale * (rocky ? 0.16 : 0.04));
   float ndlLit = dot(lit, toSun);
 
   /* soft terminator, a touch of wrap lighting for thick atmospheres */
@@ -816,7 +927,7 @@ void main() {
   float light = clamp((ndlLit + wrap) / (1.0 + wrap), 0.0, 1.0);
   light = smoothstep(0.0, 1.0, light);
   /* relief never lights a slope past the real day/night line */
-  if (uHasHeight > 0.5) light *= smoothstep(-0.12, 0.06, ndl);
+  if (uHasHeight > 0.5 || close.z > 0.0) light *= smoothstep(-0.12, 0.06, ndl);
 
   /* limb darkening on gas / ice giants */
   float facing = max(dot(normal, vd), 0.0);
@@ -1907,6 +2018,7 @@ function EarthCloudLayer({
         opacity={0.85}
         depthWrite={false}
         shininess={0}
+        onBeforeCompile={detailClouds}
       />
     </mesh>
   )

@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 
 import { getPlanetPosition, getPlanetVisualRadius, PLANETS, SYSTEM_OFFSET } from './orbit'
 import { simClock } from './simClock'
@@ -282,7 +284,235 @@ function Jet({ thrust }: { thrust: { current: number } }) {
   )
 }
 
+/* ============================================================
+   THE SHUTTLE
+   NASA's "Space Shuttle (A)" model (NASA 3D Resources, free and without
+   copyright). The file holds the whole launch stack; only the orbiter is
+   used. It has no textures, so it is coloured as the real orbiter was:
+   white above, the black heat-shield tiles below. Its three main engines
+   are found from the model itself, and the flames sit at their nozzles.
+============================================================ */
+
+const SHUTTLE_URL = '/models/space-shuttle.glb'
+
+type ShuttleModel = {
+  body: THREE.Mesh
+  engines: { position: THREE.Vector3; radius: number }[]
+}
+
+function useShuttle() {
+  const [model, setModel] = useState<ShuttleModel | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    let built: ShuttleModel | null = null
+    // NASA's file is Draco-compressed: three.js's own decoder, served from /draco/
+    const draco = new DRACOLoader().setDecoderPath('/draco/')
+    const loader = new GLTFLoader().setDRACOLoader(draco)
+    loader.load(
+      SHUTTLE_URL,
+      (gltf) => {
+        if (cancelled) return
+        gltf.scene.updateMatrixWorld(true)
+        const white = new THREE.Color('#e9ecef')
+        const tile = new THREE.Color('#1d1f24')
+        const metal = new THREE.Color('#6a707a')
+        const parts: THREE.BufferGeometry[] = []
+        const engineBoxes = new Map<string, THREE.Box3>()
+        // whole groups that belong to the tank and boosters: any node one
+        // of whose parts uses their materials (some mix in a plain one)
+        const json = gltf.parser.json as {
+          nodes: { name?: string; mesh?: number }[]
+          meshes: { primitives: { material?: number }[] }[]
+          materials: { name?: string }[]
+        }
+        const launchStack = new Set(
+          json.nodes
+            .filter((node) =>
+              node.mesh !== undefined &&
+              json.meshes[node.mesh].primitives.some((p) =>
+                (json.materials[p.material ?? -1]?.name ?? '').startsWith('shuttlesrbsande'),
+              ),
+            )
+            .map((node) => THREE.PropertyBinding.sanitizeNodeName(node.name ?? '')),
+        )
+        const inLaunchStack = (object: THREE.Object3D) => {
+          let o: THREE.Object3D | null = object
+          while (o) {
+            if (launchStack.has(o.name)) return true
+            o = o.parent
+          }
+          return false
+        }
+        // the cockpit windows
+        const WINDOW_MATERIALS = new Set(['lambert5SG', 'anisotropic1SG', 'initialShadingGr'])
+        const glass = new THREE.Color('#07090d')
+        const engineGroup = (object: THREE.Object3D) => {
+          let o: THREE.Object3D | null = object
+          while (o) {
+            if (o.name.startsWith('group13')) return o.name
+            o = o.parent
+          }
+          return ''
+        }
+        gltf.scene.traverse((object) => {
+          const mesh = object as THREE.Mesh
+          if (!mesh.isMesh) return
+          const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+          // the external tank and solid rocket boosters stay on the pad
+          if (inLaunchStack(mesh) || materials.some((m) => m.name.startsWith('shuttlesrbsande'))) return
+          const isWindow = materials.some((m) => WINDOW_MATERIALS.has(m.name))
+          let geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld)
+          if (geometry.index) geometry = geometry.toNonIndexed()
+          if (!geometry.getAttribute('normal')) geometry.computeVertexNormals()
+          // keep only what every part shares, so they merge into one
+          for (const name of Object.keys(geometry.attributes)) {
+            if (!['position', 'normal'].includes(name)) geometry.deleteAttribute(name)
+          }
+          const engine = engineGroup(mesh)
+          const normal = geometry.getAttribute('normal')
+          const colors = new Float32Array(normal.count * 3)
+          for (let i = 0; i < normal.count; i += 1) {
+            const c = isWindow ? glass : engine ? metal : normal.getY(i) < -0.3 ? tile : white
+            colors[i * 3] = c.r
+            colors[i * 3 + 1] = c.g
+            colors[i * 3 + 2] = c.b
+          }
+          geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+          parts.push(geometry)
+          if (engine) {
+            geometry.computeBoundingBox()
+            const box = engineBoxes.get(engine) ?? new THREE.Box3()
+            box.union(geometry.boundingBox!)
+            engineBoxes.set(engine, box)
+          }
+        })
+        // one body, centred and scaled to unit length along z
+        const merged = mergeGeometries(parts)
+        merged.computeBoundingBox()
+        const bounds = merged.boundingBox!
+        const center = bounds.getCenter(new THREE.Vector3())
+        const length = bounds.max.z - bounds.min.z
+        merged.translate(-center.x, -center.y, -center.z)
+        merged.scale(1 / length, 1 / length, 1 / length)
+        const body = new THREE.Mesh(
+          merged,
+          new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide }),
+        )
+        // the three main engines: the largest engine groups
+        const engines = [...engineBoxes.values()]
+          .map((box) => ({ box, size: box.getSize(new THREE.Vector3()) }))
+          .sort((a, b) => b.size.length() - a.size.length())
+          .slice(0, 3)
+          .map(({ box, size }) => {
+            const c = box.getCenter(new THREE.Vector3())
+            return {
+              position: new THREE.Vector3(
+                (c.x - center.x) / length,
+                (c.y - center.y) / length,
+                (box.max.z - center.z) / length,
+              ),
+              radius: (Math.min(size.x, size.y) * 0.32) / length,
+            }
+          })
+        parts.forEach((part) => part.dispose())
+        built = { body, engines }
+        setModel(built)
+      },
+      undefined,
+      (error) => {
+        // keep the built-in jet
+        console.warn('Shuttle model could not be loaded:', error)
+      },
+    )
+    return () => {
+      cancelled = true
+      draco.dispose()
+      built?.body.geometry.dispose()
+      ;(built?.body.material as THREE.Material | undefined)?.dispose()
+    }
+  }, [])
+  return model
+}
+
+/* merge position/normal/color geometries into one (all non-indexed) */
+function mergeGeometries(parts: THREE.BufferGeometry[]) {
+  let count = 0
+  parts.forEach((p) => (count += p.getAttribute('position').count))
+  const position = new Float32Array(count * 3)
+  const normal = new Float32Array(count * 3)
+  const color = new Float32Array(count * 3)
+  let offset = 0
+  parts.forEach((p) => {
+    position.set(p.getAttribute('position').array as Float32Array, offset * 3)
+    normal.set(p.getAttribute('normal').array as Float32Array, offset * 3)
+    color.set(p.getAttribute('color').array as Float32Array, offset * 3)
+    offset += p.getAttribute('position').count
+  })
+  const merged = new THREE.BufferGeometry()
+  merged.setAttribute('position', new THREE.BufferAttribute(position, 3))
+  merged.setAttribute('normal', new THREE.BufferAttribute(normal, 3))
+  merged.setAttribute('color', new THREE.BufferAttribute(color, 3))
+  return merged
+}
+
+function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: number } }) {
+  const flames = useRef<THREE.Group[]>([])
+  const look = useMemo(
+    () => ({
+      outer: new THREE.MeshBasicMaterial({
+        color: '#7fb6ff', transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      }),
+      core: new THREE.MeshBasicMaterial({
+        color: '#fff2dc', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      }),
+      outerGeometry: new THREE.ConeGeometry(1, 9, 18, 1, true).translate(0, 4.5, 0),
+      coreGeometry: new THREE.ConeGeometry(0.6, 3.5, 14, 1, true).translate(0, 1.75, 0),
+    }),
+    [],
+  )
+  useEffect(
+    () => () => {
+      look.outer.dispose()
+      look.core.dispose()
+      look.outerGeometry.dispose()
+      look.coreGeometry.dispose()
+    },
+    [look],
+  )
+  useFrame((state) => {
+    const t = thrust.current
+    const time = state.clock.elapsedTime
+    const flicker = 0.92 + Math.sin(time * 47) * 0.05 + Math.sin(time * 29) * 0.03
+    flames.current.forEach((flame) => {
+      if (flame) flame.scale.y = (0.15 + t * 1.4 * flicker) * flame.userData.radius
+    })
+    look.outer.opacity = 0.15 + t * 0.5
+    look.core.opacity = 0.3 + t * 0.65
+  })
+  return (
+    <group scale={SHIP_LENGTH}>
+      <primitive object={model.body} />
+      {model.engines.map((engine, i) => (
+        <group
+          key={i}
+          position={engine.position}
+          rotation={[Math.PI / 2, 0, 0]}
+          scale={[engine.radius, engine.radius, engine.radius]}
+          userData={{ radius: engine.radius }}
+          ref={(group) => {
+            if (group) flames.current[i] = group
+          }}
+        >
+          <mesh geometry={look.outerGeometry} material={look.outer} />
+          <mesh geometry={look.coreGeometry} material={look.core} />
+        </group>
+      ))}
+    </group>
+  )
+}
+
 export default function Pilot() {
+  const shuttle = useShuttle()
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
   const ship = useRef<THREE.Group>(null)
   const wasActive = useRef(false)
@@ -385,9 +615,9 @@ export default function Pilot() {
     // ---- move, and stay out of solid bodies (skimming is allowed)
     _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
     jet.position.addScaledVector(_forward, speed.current * delta)
-    // the closest approach: about 8% of the radius (some 500 km over Earth),
-    // where the surface maps still hold up
-    const minimum = nearestRadius * 1.08 + SHIP_LENGTH * 2
+    // the closest approach: 6.5% of the radius, some 410 km over Earth,
+    // the height the Space Station flies (fine detail fills in below the maps)
+    const minimum = nearestRadius * 1.065 + SHIP_LENGTH * 2
     const offset = _axis.copy(jet.position).sub(_bodyPos)
     if (offset.length() < minimum) {
       jet.position.copy(_bodyPos).addScaledVector(offset.normalize(), minimum)
@@ -422,7 +652,7 @@ export default function Pilot() {
   return (
     <group ref={ship} visible={false}>
       <group>
-        <Jet thrust={thrust} />
+        {shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : <Jet thrust={thrust} />}
       </group>
     </group>
   )

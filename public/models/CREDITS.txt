@@ -1,0 +1,7 @@
+space-shuttle.glb
+"Space Shuttle (A)" from NASA's 3D Resources
+(science.nasa.gov/3d-resources/space-shuttle-a/), downloaded 2026-11-11.
+NASA 3D Resources are free and without copyright; NASA does not endorse
+this use. The site shows only the orbiter (the external tank and solid
+rocket boosters in the file are left out at load time) and colours it
+white with a black heat-shield underside.
