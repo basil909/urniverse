@@ -66,7 +66,7 @@ const TERRAIN_FRAGMENT = /* glsl */ `
 uniform sampler2D uMap; uniform int uPlanetId;
 uniform vec3 uSunL; uniform float uLight; uniform vec3 uLightTint;
 uniform vec3 uSky; uniform float uSkyLight; uniform vec3 uHaze; uniform float uHazeK; uniform float uWorldRadius;
-uniform float uEarth; uniform float uAlbedo;
+uniform float uEarth; uniform float uAlbedo; uniform float uCracks;
 uniform sampler2D uNight; uniform float uHasNight;
 uniform sampler2D uImgFine; uniform vec4 uImgFineRect; uniform sampler2D uImgCoarse; uniform vec4 uImgCoarseRect;
 uniform vec3 uShipView; uniform vec3 uShipFwd; uniform vec3 uShipRight; uniform float uShipLen; uniform float uShipShadow;
@@ -106,6 +106,18 @@ void main() {
   // Earth, low down: Sentinel-2 imagery, about 10 m a pixel
   if (uEarth > 0.5) base = patched(base, uImgFine, uImgFineRect, uImgCoarse, uImgCoarseRect, vec2(uv.x, gMercV(uv)), vec3(1.0)).rgb;
   base *= uAlbedo;
+  // Europa: its ice is crossed by long reddish-brown cracks and ridges
+  // (lineae), at every scale (generated, like the real pattern)
+  if (uCracks > 0.5) {
+    float lines = 0.0;
+    float f = uDetailFreq * 2.0;
+    for (int k = 0; k < 6; k++) {
+      float n = gNoise(d * f + float(k) * 9.1);
+      lines = max(lines, smoothstep(0.965, 0.995, 1.0 - abs(2.0 * n - 1.0)) * (1.0 - float(k) * 0.1));
+      f *= 2.3;
+    }
+    base = mix(base, vec3(0.52, 0.32, 0.2), lines * 0.65);
+  }
   float land = gLandAt(uv);
   vec3 n = normalize(vNormalL);
   // fine tone below the maps, and bare rock on steep slopes
@@ -176,6 +188,14 @@ const LOOK: Record<number, { sky: string; skyLight: number; hazeK: number; albed
   3: { sky: '#d9a07a', skyLight: 0.22, hazeK: 22 },
   // the Moon's map is brightened; the real ground is as dark as asphalt
   12: { sky: '#000000', skyLight: 0, hazeK: 0, albedo: 0.42 },
+  13: { sky: '#000000', skyLight: 0, hazeK: 0 },
+  14: { sky: '#000000', skyLight: 0, hazeK: 0 },
+  15: { sky: '#000000', skyLight: 0, hazeK: 0, albedo: 0.8 },
+  16: { sky: '#000000', skyLight: 0, hazeK: 0, albedo: 0.7 },
+  // Titan: thick orange haze, dim at the ground
+  17: { sky: '#c98a3e', skyLight: 0.35, hazeK: 260, albedo: 0.6 },
+  18: { sky: '#000000', skyLight: 0, hazeK: 0, albedo: 0.55 },
+  19: { sky: '#000000', skyLight: 0, hazeK: 0, albedo: 0.6 },
 }
 
 const _ship = new THREE.Vector3()
@@ -262,6 +282,7 @@ export default function Terrain({
           uWorldRadius: { value: 1 },
           uEarth: { value: earth ? 1 : 0 },
           uAlbedo: { value: look.albedo ?? 1 },
+          uCracks: { value: index === 14 ? 1 : 0 },
           uNight: { value: null as THREE.Texture | null },
           uHasNight: { value: 0 },
           ...surfacePatch,
@@ -350,6 +371,7 @@ export default function Terrain({
     ground.ready = true
     ground.matrix.copy(body.matrixWorld)
     ground.worldRadius = _scale.x
+    ground.object = body
     // cut the sphere away under the patch
     groundHole.uHolePlanet.value = index
     groundHole.uHoleDir.value.copy(_c)

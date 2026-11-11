@@ -1,4 +1,4 @@
-import { julianDate, setMoonClock } from './orbit'
+import { julianDate, setMoonClock, setOrbitClock } from './orbit'
 
 /* ============================================================
    SIMULATION CLOCK
@@ -69,3 +69,4 @@ export function resetToNow() {
 
 // the Moon (as a body to fly to) follows the spins-and-moons clock
 setMoonClock(() => simClock.bodyJd)
+setOrbitClock(() => simClock.jd)

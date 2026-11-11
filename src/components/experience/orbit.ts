@@ -485,11 +485,12 @@ export function getSmallBodyOrbitPosition(index: number, jd: number, out: THREE.
 
 /* Every body you can fly to: 0-7 the planets, then the small bodies.
    (The Sun is -1 wherever it appears.) */
-export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1
+export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1 + 7
 
 const _moonOffset = new THREE.Vector3()
 export function getBodyOrbitPosition(id: number, jd: number, out: THREE.Vector3) {
   if (id < 0) return out.set(0, 0, 0)
+  if (id > PLANETS.length + SMALL_BODIES.length) return satelliteOrbitPosition(id - PLANETS.length - SMALL_BODIES.length - 1, out)
   if (id === PLANETS.length + SMALL_BODIES.length) {
     // the Moon: from Earth, at its true distance in flight
     getPlanetOrbitPosition(2, jd, out)
@@ -507,6 +508,9 @@ export function getBodyPosition(id: number, jd: number, out: THREE.Vector3) {
 export function getBodyRadius(id: number) {
   if (id < 0) return SUN_TRUE_RADIUS
   if (id === PLANETS.length + SMALL_BODIES.length) return (MOON_RADIUS_KM / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
+  if (id > PLANETS.length + SMALL_BODIES.length) {
+    return (SATELLITES[id - PLANETS.length - SMALL_BODIES.length - 1].radiusKm / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
+  }
   if (id < PLANETS.length) return getPlanetVisualRadius(id)
   const body = SMALL_BODIES[id - PLANETS.length]
   return ((body?.diameterKm ?? 1) / 2 / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
@@ -515,6 +519,7 @@ export function getBodyRadius(id: number) {
 export function getBodyName(id: number) {
   if (id < 0) return 'the Sun'
   if (id === PLANETS.length + SMALL_BODIES.length) return 'the Moon'
+  if (id > PLANETS.length + SMALL_BODIES.length) return SATELLITES[id - PLANETS.length - SMALL_BODIES.length - 1].name
   return id < PLANETS.length ? PLANETS[id].name : SMALL_BODIES[id - PLANETS.length].name
 }
 
@@ -552,4 +557,63 @@ export function setMoonClock(source: () => number) {
 }
 function simMoonJd() {
   return moonJdSource()
+}
+
+/* ============================================================
+   THE PLANETS' LARGE MOONS, AS BODIES TO FLY TO (flying only)
+   Body ids 13-19, at their true sizes and distances, in their planet's
+   equatorial plane: the Galilean moons at their real longitudes (Lieske's
+   E5 mean longitudes), the others at their real periods.
+============================================================ */
+export type Satellite = {
+  name: string
+  parent: number
+  radiusKm: number
+  distanceKm: number
+  /** mean longitude at J2000 and daily motion (degrees) */
+  longitude?: [number, number]
+  periodDays?: number
+  phase?: number
+}
+
+export const SATELLITES: readonly Satellite[] = [
+  { name: 'Io', parent: 4, radiusKm: 1821.6, distanceKm: 421700, longitude: [106.07719, 203.48895579] },
+  { name: 'Europa', parent: 4, radiusKm: 1560.8, distanceKm: 671034, longitude: [175.73161, 101.374724735] },
+  { name: 'Ganymede', parent: 4, radiusKm: 2634.1, distanceKm: 1070412, longitude: [120.55883, 50.317609207] },
+  { name: 'Callisto', parent: 4, radiusKm: 2410.3, distanceKm: 1882709, longitude: [84.44459, 21.571071177] },
+  { name: 'Titan', parent: 5, radiusKm: 2574.7, distanceKm: 1221870, periodDays: 15.945, phase: 1.2 },
+  { name: 'Phobos', parent: 3, radiusKm: 11.27, distanceKm: 9376, periodDays: 0.319, phase: 0.4 },
+  { name: 'Deimos', parent: 3, radiusKm: 6.2, distanceKm: 23463, periodDays: 1.263, phase: 2.7 },
+]
+export const FIRST_SATELLITE_ID = PLANETS.length + 5
+
+const KM_PER_SCENE_UNIT = EARTH_RADIUS_KM / EARTH_RENDER_RADIUS
+const _satRef = new THREE.Vector3()
+const _satInverse = new THREE.Quaternion()
+
+/** the angle (radians) a satellite stands at round its planet, in the
+    planet's equatorial frame (as the scene draws it) */
+export function satelliteAngle(satellite: Satellite, jd: number, tilt: THREE.Quaternion) {
+  const days = jd - 2451545.0
+  if (satellite.longitude) {
+    // measured from the vernal equinox, seen in the planet's frame
+    _satRef.set(1, 0, 0).applyQuaternion(_satInverse.copy(tilt).invert())
+    const equinox = Math.atan2(-_satRef.z, _satRef.x)
+    return equinox + ((satellite.longitude[0] + satellite.longitude[1] * days) * Math.PI) / 180
+  }
+  return (satellite.phase ?? 0) + (days / (satellite.periodDays ?? 1)) * Math.PI * 2
+}
+
+function satelliteOrbitPosition(index: number, out: THREE.Vector3) {
+  const satellite = SATELLITES[index]
+  const tilt = getPlanetPoleQuaternion(satellite.parent)
+  const angle = satelliteAngle(satellite, moonJdSource(), tilt)
+  const distance = satellite.distanceKm / KM_PER_SCENE_UNIT
+  _satRef.set(Math.cos(angle) * distance, 0, -Math.sin(angle) * distance).applyQuaternion(tilt)
+  return getPlanetOrbitPosition(satellite.parent, simJdSource(), out).add(_satRef)
+}
+
+let simJdSource: () => number = () => 2451545.0
+export function setOrbitClock(source: () => number) {
+  simJdSource = source
 }

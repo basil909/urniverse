@@ -24,7 +24,8 @@ import {
 import { simClock } from './simClock'
 import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
-import { cloudDeck, ground, groundAltitude, groundLatLon, shipShadow, sphereUv } from './groundState'
+import { cloudDeck, ground, groundAltitude, groundLatLon, ringState, shipShadow, sphereUv } from './groundState'
+import { FEATURES } from './features'
 import { sunVisibility } from './sunVisibility'
 
 /* ============================================================
@@ -67,6 +68,170 @@ const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
 const _identity = new THREE.Quaternion()
 const _local = new THREE.Vector3()
+const _orbitM = new THREE.Matrix4()
+const _featureDir = new THREE.Vector3()
+
+/* gravity (GM, km^3/s^2) of each body, for circular orbits (O): the
+   planets, the four asteroids, the Moon, then the large moons */
+const GM = [
+  22032, 324859, 398600, 42828, 1.26687e8, 3.7931e7, 5.794e6, 6.8365e6,
+  62.6, 17.3, 13.6, 5.8, 4903, 5960, 3203, 9888, 7179, 8978, 7.1e-4, 9.6e-5,
+]
+const SUN_GM = 1.32712e11
+
+/* the objects the end-of-frame correction moves (see GroundCarry) */
+export const pilotObjects = {
+  jet: null as THREE.Group | null,
+  visual: null as THREE.Group | null,
+  camera: null as THREE.PerspectiveCamera | null,
+  shipLength: 0,
+}
+const _carry = new THREE.Matrix4()
+const _carryQ = new THREE.Quaternion()
+const _carryP = new THREE.Vector3()
+const _carryS = new THREE.Vector3()
+
+/* Standing on a world (or flying low over it) the ship is carried with
+   it. The world turns and moves after the ship has been placed this
+   frame (its turn and orbit are worked out later), so this runs last: it
+   moves ship and camera by exactly how the world moved. */
+export function GroundCarry() {
+  useFrame(() => {
+    const { jet, camera } = pilotObjects
+    const body = ground.object
+    if (!pilot.active || !jet || !camera || !body || ground.body !== pilot.nearestIndex || pilot.orbiting) return
+    if (pilot.timeScale <= 0) return
+    body.updateWorldMatrix(true, false)
+    // how the body moved since the ship was placed
+    _carry.copy(body.matrixWorld).multiply(ground.inverse)
+    jet.position.applyMatrix4(_carry)
+    camera.position.applyMatrix4(_carry)
+    _carry.decompose(_carryP, _carryQ, _carryS)
+    jet.quaternion.premultiply(_carryQ)
+    camera.quaternion.premultiply(_carryQ)
+    pilotObjects.visual?.quaternion.copy(jet.quaternion)
+    shipCamera.position.copy(camera.position).sub(jet.position).divideScalar(pilotObjects.shipLength)
+    shipCamera.quaternion.copy(camera.quaternion)
+    ground.matrix.copy(body.matrixWorld)
+    ground.inverse.copy(body.matrixWorld).invert()
+  })
+  return null
+}
+
+/* ============================================================
+   SATURN'S RINGS, UP CLOSE
+   Near the ring plane, within the rings, chunks of ice tumble past: from
+   pebbles to boulders a few tens of metres across, in a slab under a km
+   thick, as thick as the ring map says the ring is there (none in the
+   Cassini Division). They stand still in the rings' frame; the ship
+   flies through them. In the ship's layer, in ship lengths.
+============================================================ */
+const CHUNKS = 900
+const CHUNK_BOX = 90 // ship lengths, about 3.4 km
+
+let ringAlpha: { width: number; data: Uint8ClampedArray } | null = null
+let ringAlphaLoading = false
+function loadRingAlpha() {
+  if (ringAlphaLoading) return
+  ringAlphaLoading = true
+  fetch('/textures/planets/2k_saturn_ring_alpha.png')
+    .then((response) => response.blob())
+    .then((blob) => createImageBitmap(blob))
+    .then((bitmap) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = bitmap.width
+      canvas.height = 1
+      const context = canvas.getContext('2d', { willReadFrequently: true })!
+      context.drawImage(bitmap, 0, Math.floor(bitmap.height / 2), bitmap.width, 1, 0, 0, bitmap.width, 1)
+      ringAlpha = { width: bitmap.width, data: context.getImageData(0, 0, bitmap.width, 1).data }
+    })
+    .catch(() => {})
+}
+/* how much ring there is at a distance from Saturn's centre (radii) */
+function ringDensity(r: number) {
+  if (!ringAlpha) return 0
+  const u = (r - 1.24) / (2.35 - 1.24)
+  if (u < 0 || u > 1) return 0
+  return ringAlpha.data[Math.min(ringAlpha.width - 1, Math.floor(u * ringAlpha.width)) * 4 + 3] / 255
+}
+
+function RingChunks({ jetRef }: { jetRef: { current: THREE.Group | null } }) {
+  const parts = useMemo(() => {
+    const geometry = new THREE.IcosahedronGeometry(1, 2)
+    const position = geometry.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < position.count; i += 1) {
+      // lumpy: the same direction always gets the same bump
+      const x = position.getX(i), y = position.getY(i), z = position.getZ(i)
+      const k = 0.8 + 0.35 * Math.abs(Math.sin(x * 5.1 + y * 3.7) * Math.cos(z * 4.3 - x * 2.1))
+      position.setXYZ(i, position.getX(i) * k, position.getY(i) * k * 0.8, position.getZ(i) * k)
+    }
+    geometry.computeVertexNormals()
+    const material = new THREE.MeshStandardMaterial({ color: '#e4dfd6', roughness: 0.75, metalness: 0 })
+    const seeds = Array.from({ length: CHUNKS }, (_, i) => {
+      const r = (n: number) => Math.abs(Math.sin((i + 1) * 12.9898 * n) * 43758.5453) % 1
+      return {
+        x: (r(1) - 0.5) * CHUNK_BOX,
+        y: (r(2) - 0.5) * CHUNK_BOX,
+        z: (r(3) - 0.5) * CHUNK_BOX,
+        size: 0.05 + Math.pow(r(4), 3) * 1.1,
+        keep: r(5),
+        spin: (r(6) - 0.5) * 1.2,
+        tilt: r(7) * Math.PI,
+      }
+    })
+    return { geometry, material, seeds, matrix: new THREE.Matrix4(), q: new THREE.Quaternion(), e: new THREE.Euler(), s: new THREE.Vector3(), p: new THREE.Vector3() }
+  }, [])
+  useEffect(() => {
+    loadRingAlpha()
+    return () => {
+      parts.geometry.dispose()
+      parts.material.dispose()
+    }
+  }, [parts])
+  const mesh = useRef<THREE.InstancedMesh>(null)
+  const _rel = useMemo(() => new THREE.Vector3(), [])
+  const _w = useMemo(() => new THREE.Vector3(), [])
+  useFrame((state) => {
+    const instances = mesh.current
+    const jet = jetRef.current
+    if (!instances || !jet) return
+    let near = false
+    if (pilot.active && ringState.ready && pilot.nearestIndex === 5 && ringAlpha) {
+      _rel.copy(jet.position).sub(ringState.center)
+      const height = _rel.dot(ringState.normal)
+      const across = Math.sqrt(Math.max(_rel.lengthSq() - height * height, 0)) / ringState.radius
+      near = Math.abs(height) < pilotObjects.shipLength * CHUNK_BOX && across > 1.2 && across < 2.4
+    }
+    instances.visible = near
+    if (!near) return
+    const L = pilotObjects.shipLength
+    const half = CHUNK_BOX / 2
+    const wrap = (v: number) => ((((v + half) % CHUNK_BOX) + CHUNK_BOX) % CHUNK_BOX) - half
+    // the ship's place in the rings' frame, in ship lengths
+    const jx = _rel.x / L
+    const jy = _rel.y / L
+    const jz = _rel.z / L
+    const time = state.clock.elapsedTime
+    parts.seeds.forEach((seed, i) => {
+      const x = wrap(seed.x - jx)
+      const y = wrap(seed.y - jy)
+      const z = wrap(seed.z - jz)
+      // is there ring here: within the slab, and as dense as the map says
+      _w.set(x, y, z).multiplyScalar(L).add(jet.position).sub(ringState.center)
+      const h = _w.dot(ringState.normal)
+      const across = Math.sqrt(Math.max(_w.lengthSq() - h * h, 0)) / ringState.radius
+      const slab = 1 - THREE.MathUtils.smoothstep(Math.abs(h) / L, 3, 10)
+      const shown = seed.keep < ringDensity(across) * slab
+      parts.e.set(seed.tilt + time * seed.spin, time * seed.spin * 0.7, seed.tilt * 0.5)
+      parts.q.setFromEuler(parts.e)
+      parts.s.setScalar(shown ? seed.size : 0)
+      parts.matrix.compose(parts.p.set(x, y, z), parts.q, parts.s)
+      instances.setMatrixAt(i, parts.matrix)
+    })
+    instances.instanceMatrix.needsUpdate = true
+  })
+  return <instancedMesh ref={mesh} args={[parts.geometry, parts.material, CHUNKS]} frustumCulled={false} visible={false} />
+}
 
 /* diving into clouds (the giants, and Venus): how deep you may go (a
    fraction of the radius), the pressure (bar) and temperature (K) at the
@@ -814,6 +979,15 @@ export default function Pilot() {
   const shine = useRef<THREE.DirectionalLight>(null)
   const shineFor = useRef(-2)
   const warp = useRef<Warp | null>(null)
+  const orbit = useRef<{
+    body: number
+    radius: number
+    axisA: THREE.Vector3
+    axisB: THREE.Vector3
+    angle: number
+    rate: number // radians per second of real time
+    kms: number
+  } | null>(null)
   // landing: where the ship stands, in the planet's own frame (it turns)
   const landedAt = useRef(new THREE.Vector3())
   const landedTurn = useRef(new THREE.Quaternion())
@@ -872,6 +1046,9 @@ export default function Pilot() {
         pilot.warping = ''
         pilot.warpGlow = 0
         pilot.landState = 'flying'
+        pilot.orbiting = false
+        orbit.current = null
+        pilot.timeScale = 0
         if (startDpr.current) setDpr(startDpr.current)
         quality.current.level = 2
         // back to the journey's compressed Solar System, and its camera
@@ -923,6 +1100,10 @@ export default function Pilot() {
       camOffset.current.copy(camera.position).sub(jet.position)
     }
     getShipPass().enabled = true
+    pilotObjects.jet = jet
+    pilotObjects.visual = visual.current
+    pilotObjects.camera = camera
+    pilotObjects.shipLength = SHIP_LENGTH
     // floating origin: once the ship strays from the origin, the whole
     // Solar System is moved back under it (32-bit precision stays fine)
     if (jet.position.lengthSq() > 400) {
@@ -982,6 +1163,16 @@ export default function Pilot() {
       pilot.air = air ? Math.min(1, air.density * Math.exp(-pilot.altitudeKm / air.height)) : 0
     }
 
+    // near Saturn's ring plane, within the rings: as close as a surface
+    if (nearestIndex === 5 && ringState.ready) {
+      _local.copy(jet.position).sub(ringState.center)
+      const height = _local.dot(ringState.normal)
+      const across = Math.sqrt(Math.max(_local.lengthSq() - height * height, 0)) / ringState.radius
+      if (across > 1.1 && across < 2.45) {
+        clearance = Math.min(clearance, Math.max(Math.abs(height), SHIP_LENGTH * 20))
+      }
+    }
+
     // ---- controls: keys, mouse or touch, and a gamepad if one is in use
     const keys = pilot.keys
     const pad = readGamepad()
@@ -1033,6 +1224,17 @@ export default function Pilot() {
     _axis.divideScalar(fromCentre)
     const nearWeight = 1 - THREE.MathUtils.smoothstep(fromCentre / nearestRadius, 1.6, 4)
     _levelUp.set(0, 1, 0).lerp(_axis, nearWeight).normalize()
+    // in Saturn's rings, level means level with the rings: they are the horizon
+    if (nearestIndex === 5 && ringState.ready) {
+      _local.copy(jet.position).sub(ringState.center)
+      const height = _local.dot(ringState.normal)
+      const across = Math.sqrt(Math.max(_local.lengthSq() - height * height, 0)) / ringState.radius
+      const inRings = across > 1.05 && across < 2.5 ? 1 - THREE.MathUtils.smoothstep(Math.abs(height) / ringState.radius, 0.05, 0.3) : 0
+      if (inRings > 0) {
+        _local.copy(ringState.normal).multiplyScalar(height >= 0 ? 1 : -1)
+        _levelUp.lerp(_local, inRings).normalize()
+      }
+    }
 
     // ---- turning: the inputs set turn rates, which the ship reaches
     // quickly but not instantly, so it has weight without lag
@@ -1165,6 +1367,47 @@ export default function Pilot() {
       const site = groundLatLon(jet.position)
       pilot.site.lat = site.lat
       pilot.site.lon = site.lon
+    }
+
+    // ---- orbit (O): a circular orbit round the nearest world, at the
+    // height you are, at the true orbital speed; any control leaves it
+    if (pilot.orbiting && !orbit.current) {
+      const body = nearestIndex
+      const gm = body < 0 ? SUN_GM : GM[body]
+      getBodyPosition(body, simClock.jd, _bodyCenter)
+      _axis.copy(jet.position).sub(_bodyCenter)
+      const radius = _axis.length()
+      const axisA = _axis.clone().normalize()
+      _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
+      const axisB = _forward.clone().addScaledVector(axisA, -_forward.dot(axisA))
+      if (axisB.lengthSq() < 1e-8) axisB.set(0, 1, 0).cross(axisA)
+      axisB.normalize()
+      const kms = Math.sqrt(gm / Math.max(radius * KM_PER_UNIT, 1))
+      orbit.current = { body, radius, axisA, axisB, angle: 0, rate: kms / (radius * KM_PER_UNIT), kms }
+      pilot.orbitMinutes = ((2 * Math.PI) / orbit.current.rate) / 60
+      pilot.landState = 'flying'
+    }
+    const leave = thrustHeld || keys.has('s') || Math.abs(steerX) > 0.3 || Math.abs(steerY) > 0.3 || warp.current || pilot.warpRequest !== null
+    if (orbit.current && (!pilot.orbiting || leave)) {
+      // leaving orbit keeps its speed and heading
+      speed.current = orbit.current.kms / KM_PER_UNIT
+      orbit.current = null
+      pilot.orbiting = false
+    }
+    if (orbit.current) {
+      const o = orbit.current
+      o.angle += o.rate * delta * Math.max(1, pilot.timeScale)
+      getBodyPosition(o.body, simClock.jd, _bodyCenter)
+      const c = Math.cos(o.angle)
+      const s = Math.sin(o.angle)
+      _axis.copy(o.axisA).multiplyScalar(c).addScaledVector(o.axisB, s)
+      jet.position.copy(_bodyCenter).addScaledVector(_axis, o.radius)
+      // nose along the way, belly to the world
+      _forward.copy(o.axisB).multiplyScalar(c).addScaledVector(o.axisA, -s)
+      _orbitM.lookAt(_camPos.set(0, 0, 0), _forward, _axis)
+      jet.quaternion.setFromRotationMatrix(_orbitM)
+      velocity.current.copy(_forward).multiplyScalar(o.kms / KM_PER_UNIT)
+      pilot.kms = o.kms
     }
 
     // ---- warp: asked for by the HUD; while it runs it flies the ship
@@ -1501,6 +1744,31 @@ export default function Pilot() {
       marker.x = _markerDir.x
       marker.y = _markerDir.y
     })
+
+    // ---- named features on the ground below, while it is up close
+    pilot.features.length = 0
+    if (onGround && ground.model) {
+      ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
+      for (const feature of FEATURES) {
+        if (feature.body !== nearestIndex) continue
+        const u = (feature.lon + 180) / 360
+        const v = (feature.lat + 90) / 180
+        const theta = (1 - v) * Math.PI
+        const phi = u * Math.PI * 2
+        _featureDir.set(-Math.cos(phi) * Math.sin(theta), Math.cos(theta), Math.sin(phi) * Math.sin(theta))
+        const lift = 1 + ground.model.height(_featureDir, ground.fade)
+        _markerDir.copy(_featureDir).multiplyScalar(lift).applyMatrix4(ground.matrix)
+        // above this point's horizon, within a few thousand km, ahead
+        _local.copy(_featureDir).applyQuaternion(_bodyQuat)
+        const above = _camPos.copy(camera.position).sub(_markerDir).dot(_local) > 0
+        const km = _markerDir.distanceTo(camera.position) * KM_PER_UNIT
+        if (!above || km > 2500) continue
+        if (_camPos.copy(_markerDir).sub(camera.position).dot(_camForward) <= 0) continue
+        _markerDir.project(camera)
+        if (Math.abs(_markerDir.x) > 0.95 || Math.abs(_markerDir.y) > 0.92) continue
+        pilot.features.push({ name: feature.name, x: _markerDir.x, y: _markerDir.y, shown: true })
+      }
+    }
   })
 
   return (
@@ -1514,6 +1782,7 @@ export default function Pilot() {
             <Plasma heat={heat} />
           </group>
           <AirStreaks state={streaks.current} />
+          <RingChunks jetRef={ship} />
           <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
           <directionalLight ref={shine} intensity={0} />
           <ambientLight intensity={0.05} />

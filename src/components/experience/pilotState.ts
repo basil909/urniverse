@@ -75,7 +75,16 @@ export const pilot = {
       sunlit */
   mist: 0,
   mistLight: 1,
+  /** time in flight: 0 (held still), 1 (real time) or faster (T cycles) */
+  timeScale: 0,
+  /** orbiting the nearest world (O), and that orbit's period, minutes */
+  orbiting: false,
+  orbitMinutes: 0,
+  /** named features on screen (x, y in -1..1), for the HUD */
+  features: [] as { name: string; x: number; y: number; shown: boolean }[],
 }
+
+export const TIME_STEPS = [0, 1, 60, 600, 3600]
 
 export const VIEW_NEAR = 3.2
 export const VIEW_FAR = 300000

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { pilot, resetPilotInput, setView, VIEW_STEPS } from '../experience/pilotState'
+import { pilot, resetPilotInput, setView, TIME_STEPS, VIEW_STEPS } from '../experience/pilotState'
 import { FlightAudio, SOUND_EVENT, soundSwitch } from './flightAudio'
 
 /* the first flight's guide: three steps, shown once (remembered) */
@@ -31,7 +31,7 @@ function formatShort(km: number) {
 }
 
 /* the worlds, as the markers list them (index -1: the Sun) */
-const WORLDS = [
+const WORLDS: { index: number; name: string; key: string; parent?: number }[] = [
   { index: -1, name: 'Sun', key: '0' },
   { index: 0, name: 'Mercury', key: '1' },
   { index: 1, name: 'Venus', key: '2' },
@@ -47,7 +47,27 @@ const WORLDS = [
   { index: 10, name: 'Pallas', key: '' },
   { index: 11, name: 'Hygiea', key: '' },
   { index: 12, name: 'Moon', key: '' },
+  // the large moons: shown near their planet
+  { index: 13, name: 'Io', key: '', parent: 4 },
+  { index: 14, name: 'Europa', key: '', parent: 4 },
+  { index: 15, name: 'Ganymede', key: '', parent: 4 },
+  { index: 16, name: 'Callisto', key: '', parent: 4 },
+  { index: 17, name: 'Titan', key: '', parent: 5 },
+  { index: 18, name: 'Phobos', key: '', parent: 3 },
+  { index: 19, name: 'Deimos', key: '', parent: 3 },
 ]
+
+const FEATURE_SLOTS = 12
+
+/* how long one orbit takes */
+function formatPeriod(minutes: number) {
+  if (minutes < 120) return `${Math.round(minutes)} min`
+  if (minutes < 48 * 60) return `${(minutes / 60).toFixed(1)} h`
+  return `${(minutes / 1440).toFixed(1)} days`
+}
+
+const timeLabel = (scale: number) =>
+  scale === 0 ? 'Time held still' : scale === 1 ? 'Real time' : `Time ×${scale.toLocaleString('en-GB')}`
 
 /* true speed, and past light speed, as a multiple of it */
 const LIGHT_KMS = 299792.458
@@ -92,6 +112,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [pressure, setPressure] = useState(0)
   const [guideStep, setGuideStep] = useState(-1)
   const haze = useRef<HTMLDivElement>(null)
+  const featureRefs = useRef<(HTMLSpanElement | null)[]>([])
+  const [orbiting, setOrbiting] = useState(false)
+  const [orbitMinutes, setOrbitMinutes] = useState(0)
+  const [timeScale, setTimeScale] = useState(0)
   const mist = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -110,6 +134,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       const { lat, lon } = pilot.site
       setSite(`${Math.abs(lat).toFixed(1)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lon).toFixed(1)}° ${lon < 0 ? 'W' : 'E'}`)
       setImmersion(pilot.immersion)
+      setOrbiting(pilot.orbiting)
+      setOrbitMinutes(pilot.orbitMinutes)
+      setTimeScale(pilot.timeScale)
       setPressure(pilot.pressureBar)
       // the guide moves on as each step is done
       setGuideStep((step) => {
@@ -204,8 +231,11 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         element.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`
         element.dataset.edge = onScreen ? 'false' : 'true'
         element.dataset.side = x > width * 0.62 ? 'left' : 'right'
-        // once the world itself is plainly visible, its marker steps aside
-        element.classList.toggle('is-hidden', marker.radiusPx > 40)
+        // once the world itself is plainly visible, its marker steps aside;
+        // a planet's moons only show near it
+        const parent = WORLDS[slot].parent
+        const away = parent !== undefined && pilot.nearestIndex !== parent && pilot.nearestIndex !== marker.index
+        element.classList.toggle('is-hidden', marker.radiusPx > 40 || away)
         element.classList.toggle('is-target', pilot.warping !== '' && pilot.warping.endsWith(WORLDS[slot].name))
         const label = element.querySelector<HTMLElement>('.flight-marker-label')
         if (label) {
@@ -213,6 +243,15 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           if (label.textContent !== text) label.textContent = text
           placed.push({ x, y, km: marker.km, label })
         }
+      })
+      // named features on the ground below
+      featureRefs.current.forEach((element, i) => {
+        if (!element) return
+        const feature = pilot.features[i]
+        element.style.opacity = feature ? '1' : '0'
+        if (!feature) return
+        element.style.transform = `translate(${(((feature.x + 1) / 2) * width).toFixed(1)}px, ${(((1 - feature.y) / 2) * height).toFixed(1)}px)`
+        if (element.textContent !== feature.name) element.textContent = feature.name
       })
       // where markers crowd (the inner planets from far away), only the
       // nearest keeps its name
@@ -254,6 +293,21 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           window.clearTimeout(toastTimer)
           toastTimer = window.setTimeout(() => setToast(''), 1600)
         }
+        return
+      }
+      if (event.key.toLowerCase() === 'o' && !event.repeat) {
+        pilot.orbiting = !pilot.orbiting
+        setToast(pilot.orbiting ? 'Orbit' : 'Leaving orbit')
+        window.clearTimeout(toastTimer)
+        toastTimer = window.setTimeout(() => setToast(''), 1600)
+        return
+      }
+      if (event.key.toLowerCase() === 't' && !event.repeat) {
+        const at = TIME_STEPS.indexOf(pilot.timeScale)
+        pilot.timeScale = TIME_STEPS[(at + 1) % TIME_STEPS.length]
+        setToast(timeLabel(pilot.timeScale))
+        window.clearTimeout(toastTimer)
+        toastTimer = window.setTimeout(() => setToast(''), 1600)
         return
       }
       if (event.key.toLowerCase() === 'v' && !event.repeat) {
@@ -384,6 +438,18 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           <line ref={guideLine} x1="50%" y1="50%" x2="50%" y2="50%" />
         </svg>
       )}
+      <div className="flight-features" aria-hidden="true">
+        {Array.from({ length: FEATURE_SLOTS }, (_, i) => (
+          <span
+            key={i}
+            className="flight-feature"
+            ref={(element) => {
+              featureRefs.current[i] = element
+            }}
+          />
+        ))}
+      </div>
+
       <div className="flight-markers">
         {WORLDS.map((world, i) => (
           <button
@@ -407,6 +473,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         <span className="flight-near">
           {warping
             ? `Warping to ${warping} · ${formatSpeed(kms)} · S to stop`
+            : orbiting
+              ? `Orbiting ${nearest} · ${formatSpeed(kms)} · once round every ${formatPeriod(orbitMinutes)}`
             : immersion > 0
               ? `Inside ${nearest}’s clouds · ${pressure < 10 ? pressure.toFixed(1) : Math.round(pressure)} bar${immersion > 0.9 ? ' · the pressure turns you back' : ''}`
             : landState === 'landed'
@@ -418,6 +486,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
                 .filter(Boolean)
                 .join(' · ')}
         </span>
+        {timeScale !== 0 && <span className="flight-time">{timeLabel(timeScale)}</span>}
         <span className="flight-speed" aria-hidden="true">
           <span style={{ transform: `scaleX(${Math.max(0.02, speed)})` }} />
         </span>
@@ -434,7 +503,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly · tap a world to warp there'
-          : 'Steer with the mouse or arrows · W or click to fly, S to slow · click a world or 1–8 to warp · L to land · V camera · P photo, K saves it · Esc exits'}
+          : 'Steer with the mouse or arrows · W or click to fly · click a world or 1–8 to warp · L land · O orbit · T time · V camera · P photo · Esc exits'}
       </p>
 
       {touch && (

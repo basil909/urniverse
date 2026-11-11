@@ -28,13 +28,15 @@ import {
   MOON_RADIUS_KM,
   EARTH_RADIUS_KM,
   EARTH_RENDER_RADIUS,
+  SATELLITES,
+  FIRST_SATELLITE_ID,
 } from './orbit'
 import { simClock } from './simClock'
 import { pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
-import { cloudDeck, GROUND, groundHole } from './groundState'
+import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
 import Belts from './Belts'
@@ -1696,6 +1698,7 @@ function Planet({
   const body = useRef<THREE.Mesh>(null)
   const timeRef = useRef(0)
   const focusScale = useRef(1)
+  const lastSpinJd = useRef(0)
   const { gl } = useThree()
   // sharper maps once the camera has arrived (desktop only)
   const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
@@ -2136,6 +2139,11 @@ function Planet({
       uniforms.uRingNormal.value.set(e[4], e[5], e[6]).normalize()
       uniforms.uRingInner.value = worldRadius * SATURN_RING_INNER
       uniforms.uRingOuter.value = worldRadius * SATURN_RING_OUTER
+      // for flying through them
+      ringState.center.copy(uniforms.uPlanetCenter.value)
+      ringState.normal.copy(uniforms.uRingNormal.value)
+      ringState.radius = worldRadius
+      ringState.ready = true
     }
 
     // keep the Sun direction (in view space) current for Earth's night mask
@@ -2162,8 +2170,13 @@ function Planet({
     if (trueSpin !== null) lastTrueSpin.current = trueSpin
 
     if (!held) {
-      // (flying, the worlds hold still: you can stand on them)
-      if (trueSpin === null && !pilot.active) body.current.rotation.y += delta * rotationSpeed
+      // flying, they turn at their real rates on the flight's clock (which
+      // can be sped up); in the journey, at a gentle pace of their own
+      if (trueSpin === null) {
+        if (!pilot.active) body.current.rotation.y += delta * rotationSpeed
+        else body.current.rotation.y += ((simClock.bodyJd - lastSpinJd.current) * 24 * Math.PI * 2) / planet.rotationPeriodHours
+      }
+      lastSpinJd.current = simClock.bodyJd
     } else if (spinState) {
       spinState.velocity = 0
     }
@@ -2411,6 +2424,42 @@ function moonGround(shader: THREE.WebGLProgramParametersWithUniforms) {
 
 const MOON_LIGHT_TINT = new THREE.Color(1, 1, 1)
 
+/* a moon's material, cut away under its landing ground (one per body) */
+const satelliteGround = new Map<number, (shader: THREE.WebGLProgramParametersWithUniforms) => void>()
+function satelliteHole(id: number) {
+  let hook = satelliteGround.get(id)
+  if (!hook) {
+    hook = (shader) => {
+      Object.assign(shader.uniforms, groundHole)
+      withSurfaceVaryings(shader)
+      shader.fragmentShader =
+        'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
+        shader.fragmentShader.replace(
+          '#include <clipping_planes_fragment>',
+          `#include <clipping_planes_fragment>
+      if (uHolePlanet == ${id} && dot(normalize(vSurfaceP), uHoleDir) > uHoleCos) discard;`,
+        )
+    }
+    satelliteGround.set(id, hook)
+  }
+  return hook
+}
+
+/* a plain texture of one colour, for moons without a map */
+const plainMaps = new Map<string, THREE.Texture>()
+function plainMap(color: string) {
+  let texture = plainMaps.get(color)
+  if (!texture) {
+    const c = new THREE.Color(color)
+    texture = new THREE.DataTexture(new Uint8Array([c.r * 255, c.g * 255, c.b * 255, 255]), 1, 1)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.needsUpdate = true
+    plainMaps.set(color, texture)
+  }
+  return texture
+}
+const _satScale = new THREE.Vector3()
+
 function Moon({ sharp }: { sharp: boolean }) {
   const { gl } = useThree()
   const sharpMap = useSharpTexture(SHARP_EARTH_MAPS.moon, sharp, {
@@ -2633,9 +2682,11 @@ function MoonSystem({
         uShell: { value: 1.14 },
         uSunPosition: { value: SYSTEM_OFFSET },
         uLight: { value: sunlight?.strength ?? 1 },
+        uGroundSky: { value: 0 },
       })),
     [system, sunlight],
   )
+  const hazes = useRef<(THREE.Mesh | null)[]>([])
   const time = useRef(0)
 
   useFrame((_, delta) => {
@@ -2650,6 +2701,31 @@ function MoonSystem({
       arm.rotation.y = moon.longitude
         ? equinox + ((moon.longitude[0] + moon.longitude[1] * days) * Math.PI) / 180
         : moon.phase + (days / moon.periodDays) * Math.PI * 2
+      // flying: at their true sizes and distances (scene units)
+      const satellite = SATELLITES.find((entry) => entry.name === moon.name)
+      const body = bodies.current[i]
+      if (satellite && body) {
+        if (layout.trueScale) {
+          const kmPerUnit = EARTH_RADIUS_KM / EARTH_RENDER_RADIUS
+          // the group above may be scaled (a far planet drawn smaller)
+          arm.parent?.getWorldScale(_satScale)
+          body.position.set(satellite.distanceKm / kmPerUnit, 0, 0)
+          body.scale.setScalar(satellite.radiusKm / kmPerUnit)
+        } else {
+          body.position.set(moon.distance * planetRadius, 0, 0)
+          const shape = moon.shape ?? [1, 1, 1]
+          body.scale.set(shape[0] * moon.radius * planetRadius, shape[1] * moon.radius * planetRadius, shape[2] * moon.radius * planetRadius)
+        }
+        // low over Titan, its orange sky
+        const haze = hazes.current[i]
+        if (haze) {
+          const id = FIRST_SATELLITE_ID + SATELLITES.indexOf(satellite)
+          const low = pilot.active && pilot.nearestIndex === id && pilot.altitudeKm >= 0
+          ;(haze.material as THREE.ShaderMaterial).uniforms.uGroundSky.value = low
+            ? 1 - THREE.MathUtils.smoothstep(pilot.altitudeKm, 40, 300)
+            : 0
+        }
+      }
     })
 
     // tell the planet where its moons are, so they can cast shadows on it
@@ -2685,7 +2761,7 @@ function MoonSystem({
               (axis) => axis * moon.radius * planetRadius,
             ) as [number, number, number]}
           >
-            <sphereGeometry args={[1, 48, 32]} />
+            <sphereGeometry args={[1, 128, 96]} />
             <meshStandardMaterial
               // rebuilt once the map arrives (a new map needs a recompile)
               key={moonMaps[i] ? 'mapped' : 'plain'}
@@ -2693,13 +2769,32 @@ function MoonSystem({
               map={moonMaps[i] ?? undefined}
               roughness={1}
               metalness={0}
+              onBeforeCompile={satelliteIdOf(moon.name) >= 0 ? satelliteHole(satelliteIdOf(moon.name)) : undefined}
+              customProgramCacheKey={() => `satellite-${moon.name}-${moonMaps[i] ? 'mapped' : 'plain'}`}
             />
+            {/* landing ground (flying) */}
+            {satelliteIdOf(moon.name) >= 0 && (
+              <Terrain
+                index={satelliteIdOf(moon.name)}
+                map={() => moonMaps[i] ?? plainMap(moon.color)}
+                sunPosition={SYSTEM_OFFSET}
+                light={sunlight?.strength ?? 1}
+                lightTint={sunlight?.tint ?? MOON_LIGHT_TINT}
+                srgb
+              />
+            )}
             {moon.haze && (
-              <mesh scale={1.14}>
-                <sphereGeometry args={[1, 32, 24]} />
+              <mesh
+                scale={1.14}
+                ref={(mesh) => {
+                  hazes.current[i] = mesh
+                }}
+              >
+                <sphereGeometry args={[1, 64, 48]} />
                 <shaderMaterial
                   transparent
                   depthWrite={false}
+                  side={THREE.DoubleSide}
                   blending={THREE.AdditiveBlending}
                   toneMapped={false}
                   uniforms={hazeUniforms[i]}
@@ -2713,6 +2808,11 @@ function MoonSystem({
       ))}
     </>
   )
+}
+
+function satelliteIdOf(name: string) {
+  const index = SATELLITES.findIndex((satellite) => satellite.name === name)
+  return index < 0 ? -1 : FIRST_SATELLITE_ID + index
 }
 
 /* Saturn's rings from the real ring map: the texture is a radial strip,

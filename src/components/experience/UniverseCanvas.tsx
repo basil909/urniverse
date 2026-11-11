@@ -25,7 +25,7 @@ import Galaxy, {
 import Starfield from './Starfield'
 import NightSky from './NightSky'
 import { lens } from './lens'
-import Pilot from './Pilot'
+import Pilot, { GroundCarry } from './Pilot'
 import { getShipPass } from './shipLayer'
 import { pilot } from './pilotState'
 import {
@@ -1026,10 +1026,11 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
     // clamp delta so a backgrounded tab does not jump the planets
     const step = Math.min(delta, 0.1)
     if (pilot.active) {
-      // flying, at true scale, the Solar System holds still: Earth alone
-      // covers 30 km a second and turns 465 m a second at the equator, and
-      // would slip out from under the ship (or a ship standing on it)
+      // flying, at true scale, the planets hold their places (Earth alone
+      // covers 30 km a second); spins and moons run on the flight's own
+      // clock, held still or sped up with T
       simClock.rate = 0
+      simClock.bodyJd += (step / 86400) * pilot.timeScale
       return
     }
     if (simClock.real) {
@@ -1364,6 +1365,9 @@ function Scene({
       <Suspense fallback={<LoadingUniverse />}>
 
         <SolarSystem progressRef={progressRef} />
+
+      {/* after the planets have moved: carry a ship standing on one */}
+      <GroundCarry />
 
       </Suspense>
 

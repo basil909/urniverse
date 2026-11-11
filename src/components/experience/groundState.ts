@@ -34,6 +34,14 @@ export type GroundConfig = {
 export const GROUND: Record<number, GroundConfig> = {
   0: { heightMap: '/textures/relief/mercury-height.webp', radiusKm: 2439.7, reliefKm: 9, roughKm: 1.4, ridged: 0.4 },
   2: { seaMap: '/textures/earth-specular.webp', cloudMap: '/textures/earth-clouds.webp', radiusKm: 6371, reliefKm: 0, roughKm: 1.6, ridged: 0.7 },
+  // the large moons (bodies 13-19): no elevation maps, generated relief
+  13: { radiusKm: 1821.6, reliefKm: 0, roughKm: 1.2, ridged: 0.25 }, // Io
+  14: { radiusKm: 1560.8, reliefKm: 0, roughKm: 0.35, ridged: 0.95 }, // Europa: smooth ice, ridges
+  15: { radiusKm: 2634.1, reliefKm: 0, roughKm: 0.9, ridged: 0.5 }, // Ganymede
+  16: { radiusKm: 2410.3, reliefKm: 0, roughKm: 1.1, ridged: 0.3 }, // Callisto
+  17: { radiusKm: 2574.7, reliefKm: 0, roughKm: 0.5, ridged: 0.2 }, // Titan
+  18: { radiusKm: 11.27, reliefKm: 0, roughKm: 0.9, ridged: 0.3 }, // Phobos
+  19: { radiusKm: 6.2, reliefKm: 0, roughKm: 0.45, ridged: 0.3 }, // Deimos
   // the Moon (body 12): LRO's elevation
   12: { heightMap: '/textures/moon-height.webp', radiusKm: 1737.4, reliefKm: 18, roughKm: 1.1, ridged: 0.3 },
   3: { heightMap: '/textures/relief/mars-height.webp', radiusKm: 3389.5, reliefKm: 26, roughKm: 1.8, ridged: 0.55 },
@@ -288,6 +296,16 @@ export const ground = {
   matrix: new THREE.Matrix4(),
   inverse: new THREE.Matrix4(),
   worldRadius: 1,
+  /** the body's own object (for the end-of-frame correction) */
+  object: null as THREE.Object3D | null,
+}
+
+/* Saturn's rings, for flying through them: written by Saturn each frame */
+export const ringState = {
+  ready: false,
+  center: new THREE.Vector3(),
+  normal: new THREE.Vector3(0, 1, 0),
+  radius: 1,
 }
 
 const _local = new THREE.Vector3()
