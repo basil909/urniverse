@@ -1510,7 +1510,7 @@ html.is-spinning * {
   padding: 0;
   border: 0;
   background: none;
-  color: var(--text-2);
+  color: var(--kind);
   font: 500 10px / 1 var(--sans);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1521,7 +1521,15 @@ html.is-spinning * {
   transition: opacity 0.4s, color 0.3s;
 }
 .flight-marker:hover,
-.flight-marker:focus-visible { opacity: 1; color: var(--text-1); }
+.flight-marker:focus-visible { opacity: 1; }
+/* each kind its tint: planets white, the Sun gold, asteroids stone,
+   moons silver, spacecraft mint, the stars pale blue */
+[data-kind] { --kind: var(--text-2); }
+[data-kind='sun'] { --kind: rgba(255, 212, 140, 0.95); }
+[data-kind='dwarf'] { --kind: rgba(214, 196, 166, 0.85); }
+[data-kind='moon'] { --kind: rgba(190, 204, 222, 0.82); }
+[data-kind='craft'] { --kind: rgba(132, 228, 196, 0.9); }
+[data-kind='star'] { --kind: rgba(184, 198, 255, 0.92); }
 .flight-marker.is-target { opacity: 1; color: var(--planet-accent); }
 .flight-marker.is-hidden { opacity: 0; pointer-events: none; }
 .flight-marker[data-side='left'] { flex-direction: row-reverse; }
@@ -1531,17 +1539,43 @@ html.is-spinning * {
   width: 12px;
   height: 12px;
   flex: none;
-  border: 1px solid currentColor;
-  border-radius: 50%;
 }
+.flight-glyph {
+  display: block;
+  width: 12px;
+  height: 12px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  stroke-linecap: round;
+}
+.flight-glyph .is-filled { fill: currentColor; stroke: none; }
+.flight-marker[data-kind='dwarf'] .flight-glyph { transform: scale(0.85); }
 .flight-marker[data-edge='true'] .flight-marker-mark {
-  border: 0;
-  border-radius: 0;
   background: currentColor;
   clip-path: polygon(100% 50%, 15% 8%, 35% 50%, 15% 92%);
   transform: rotate(var(--angle, 0rad));
 }
-.flight-marker-label { transition: opacity 0.3s; }
+.flight-marker[data-edge='true'] .flight-glyph { display: none; }
+.flight-marker-text { position: relative; display: block; }
+.flight-marker-label { display: block; transition: opacity 0.3s; }
+/* what it is: on hover, a quiet line beneath the name */
+.flight-marker-what {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  font: 400 10.5px / 1 var(--sans);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+.flight-marker[data-side='left'] .flight-marker-what { left: auto; right: 0; }
+.flight-marker:hover .flight-marker-what,
+.flight-marker:focus-visible .flight-marker-what { opacity: 1; }
 .flight-credit {
   position: absolute;
   right: var(--pad);
@@ -1698,6 +1732,83 @@ html.is-photo .flight-land { opacity: 0; pointer-events: none; }
   border-radius: 50%;
   touch-action: none;
 }
+/* the "Go to" list: every world, grouped by kind */
+.flight-goto-button {
+  position: absolute;
+  left: calc(var(--pad) + 80px);
+  bottom: 30px;
+  padding: 0.55rem 1rem;
+  pointer-events: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: rgba(6, 8, 14, 0.45);
+  backdrop-filter: blur(6px);
+  color: var(--text-1);
+  font: 500 12px / 1 var(--sans);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.flight-goto-button.is-open { border-color: rgba(255, 255, 255, 0.3); }
+.flight-goto-button kbd,
+.flight-goto kbd {
+  margin-left: 6px;
+  font: 500 9.5px / 1 var(--sans);
+  color: var(--text-3);
+}
+html.is-photo .flight-goto-button,
+html.is-photo .flight-goto { opacity: 0; pointer-events: none; }
+.flight-goto {
+  position: absolute;
+  left: var(--pad);
+  bottom: 78px;
+  width: min(560px, calc(100vw - 2 * var(--pad)));
+  max-height: min(62vh, 520px);
+  overflow-y: auto;
+  padding: 18px 20px 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  column-gap: 24px;
+  pointer-events: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: rgba(6, 8, 14, 0.72);
+  backdrop-filter: blur(10px);
+  animation: goto-in 0.25s var(--ease) both;
+}
+@keyframes goto-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+.flight-goto-group { margin-bottom: 14px; color: var(--kind); }
+.flight-goto-group h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  font: 500 9.5px / 1 var(--sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.flight-goto-group h3 .flight-glyph { width: 10px; height: 10px; }
+.flight-goto ul { list-style: none; }
+.flight-goto li button {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: 400 13px / 1.2 var(--sans);
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.flight-goto li button:hover,
+.flight-goto li button:focus-visible { color: var(--text-1); }
+.flight-goto li button.is-here { color: var(--kind); }
+.flight-goto li button span { font-size: 11px; color: var(--text-3); }
+.flight-goto li button kbd { margin-left: auto; }
 .flight-thrust:active { background: color-mix(in srgb, var(--planet-accent) 30%, rgba(6, 8, 14, 0.45)); }
 @media (max-width: 640px) {
   .flight-hint { white-space: normal; width: 80%; text-align: center; }

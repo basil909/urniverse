@@ -34,51 +34,129 @@ function formatShort(km: number) {
   return `${round2(km)} km`
 }
 
-/* the worlds, as the markers list them (index -1: the Sun) */
+/* the worlds, as the markers list them (index -1: the Sun). Each is of
+   a kind, and each kind has its own mark and tint, so a glance tells a
+   planet from a moon, a spacecraft or a star; hovering says what it is */
+type Kind = 'sun' | 'planet' | 'dwarf' | 'moon' | 'craft' | 'star'
+type World = { index: number; name: string; key: string; kind: Kind; what: string; parent?: number; show?: () => boolean }
 const nearAny = (...ids: number[]) => () => ids.includes(pilot.nearestIndex)
-const STAR_NAMES = [
-  'Proxima Centauri', 'Alpha Centauri A', "Barnard's Star", 'Sirius', 'Procyon', 'Altair', 'Vega', 'Fomalhaut', 'Arcturus',
-  'Capella', 'Aldebaran', 'Pollux', 'Regulus', 'Betelgeuse', 'Rigel', 'Polaris', 'Antares', 'Deneb', 'Spica', 'Canopus',
+const STARS: [string, string][] = [
+  ['Proxima Centauri', 'Red dwarf · the nearest star'],
+  ['Alpha Centauri A', 'Star like the Sun · the nearest such'],
+  ["Barnard's Star", 'Red dwarf · fastest across our sky'],
+  ['Sirius', 'White star · brightest in our night sky'],
+  ['Procyon', 'White star · with a white dwarf companion'],
+  ['Altair', 'White star · spins once every nine hours'],
+  ['Vega', 'White star · ringed with dust'],
+  ['Fomalhaut', 'White star · ringed with dust'],
+  ['Arcturus', 'Orange giant'],
+  ['Capella', 'A pair of yellow giants'],
+  ['Aldebaran', 'Orange giant · the eye of Taurus'],
+  ['Pollux', 'Orange giant · has a planet'],
+  ['Regulus', 'Blue-white star · spins near breaking'],
+  ['Betelgeuse', 'Red supergiant · near its end'],
+  ['Rigel', 'Blue supergiant'],
+  ['Polaris', 'Yellow supergiant · the pole star'],
+  ['Antares', 'Red supergiant · the heart of Scorpius'],
+  ['Deneb', 'White supergiant · among the most luminous'],
+  ['Spica', 'Blue giants, a close pair'],
+  ['Canopus', 'White bright giant · second in our sky'],
 ]
-const WORLDS: { index: number; name: string; key: string; parent?: number; show?: () => boolean }[] = [
-  { index: -1, name: 'Sun', key: '0' },
-  { index: 0, name: 'Mercury', key: '1' },
-  { index: 1, name: 'Venus', key: '2' },
-  { index: 2, name: 'Earth', key: '3' },
-  { index: 3, name: 'Mars', key: '4' },
-  { index: 4, name: 'Jupiter', key: '5' },
-  { index: 5, name: 'Saturn', key: '6' },
-  { index: 6, name: 'Uranus', key: '7' },
-  { index: 7, name: 'Neptune', key: '8' },
-  // the largest asteroids
-  { index: 8, name: 'Ceres', key: '9' },
-  { index: 9, name: 'Vesta', key: '' },
-  { index: 10, name: 'Pallas', key: '' },
-  { index: 11, name: 'Hygiea', key: '' },
-  { index: 12, name: 'Moon', key: '' },
+const WORLDS: World[] = [
+  { index: -1, name: 'Sun', key: '0', kind: 'sun', what: 'Our star' },
+  { index: 0, name: 'Mercury', key: '1', kind: 'planet', what: 'Rocky planet · nearest the Sun' },
+  { index: 1, name: 'Venus', key: '2', kind: 'planet', what: 'Rocky planet · under acid clouds' },
+  { index: 2, name: 'Earth', key: '3', kind: 'planet', what: 'Rocky planet · home' },
+  { index: 3, name: 'Mars', key: '4', kind: 'planet', what: 'Rocky planet · cold desert' },
+  { index: 4, name: 'Jupiter', key: '5', kind: 'planet', what: 'Gas giant · the largest planet' },
+  { index: 5, name: 'Saturn', key: '6', kind: 'planet', what: 'Gas giant · ringed' },
+  { index: 6, name: 'Uranus', key: '7', kind: 'planet', what: 'Ice giant · tipped on its side' },
+  { index: 7, name: 'Neptune', key: '8', kind: 'planet', what: 'Ice giant · the farthest planet' },
+  // the largest of the asteroid belt
+  { index: 8, name: 'Ceres', key: '9', kind: 'dwarf', what: 'Dwarf planet · the asteroid belt' },
+  { index: 9, name: 'Vesta', key: '', kind: 'dwarf', what: 'Asteroid · a giant crater at its pole' },
+  { index: 10, name: 'Pallas', key: '', kind: 'dwarf', what: 'Asteroid · on a steep orbit' },
+  { index: 11, name: 'Hygiea', key: '', kind: 'dwarf', what: 'Asteroid · almost round' },
+  { index: 12, name: 'Moon', key: '', kind: 'moon', what: 'Moon of Earth' },
   // the large moons: shown near their planet
-  { index: 13, name: 'Io', key: '', parent: 4 },
-  { index: 14, name: 'Europa', key: '', parent: 4 },
-  { index: 15, name: 'Ganymede', key: '', parent: 4 },
-  { index: 16, name: 'Callisto', key: '', parent: 4 },
-  { index: 17, name: 'Titan', key: '', parent: 5 },
-  { index: 18, name: 'Phobos', key: '', parent: 3 },
-  { index: 19, name: 'Deimos', key: '', parent: 3 },
+  { index: 13, name: 'Io', key: '', kind: 'moon', what: 'Moon of Jupiter · volcanic', parent: 4 },
+  { index: 14, name: 'Europa', key: '', kind: 'moon', what: 'Moon of Jupiter · ocean under ice', parent: 4 },
+  { index: 15, name: 'Ganymede', key: '', kind: 'moon', what: 'Moon of Jupiter · the largest moon', parent: 4 },
+  { index: 16, name: 'Callisto', key: '', kind: 'moon', what: 'Moon of Jupiter · cratered', parent: 4 },
+  { index: 17, name: 'Titan', key: '', kind: 'moon', what: 'Moon of Saturn · thick orange haze', parent: 5 },
+  { index: 18, name: 'Phobos', key: '', kind: 'moon', what: 'Moon of Mars', parent: 3 },
+  { index: 19, name: 'Deimos', key: '', kind: 'moon', what: 'Moon of Mars', parent: 3 },
   // spacecraft: near Earth (or the Moon), out past the planets, on Mars
-  { index: 20, name: 'Space Station', key: '', show: nearAny(2, 12, 20, 21, 22) },
-  { index: 21, name: 'Hubble', key: '', show: nearAny(2, 12, 20, 21, 22) },
-  { index: 22, name: 'Webb', key: '', show: nearAny(2, 12, 20, 21, 22) },
-  { index: 23, name: 'Voyager 1', key: '', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 23 },
-  { index: 24, name: 'Voyager 2', key: '', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 24 },
-  { index: 25, name: 'Perseverance', key: '', show: nearAny(3, 25) },
+  { index: 20, name: 'Space Station', key: '', kind: 'craft', what: 'Spacecraft · crewed, 420 km up', show: nearAny(2, 12, 20, 21, 22) },
+  { index: 21, name: 'Hubble', key: '', kind: 'craft', what: 'Space telescope · 530 km up', show: nearAny(2, 12, 20, 21, 22) },
+  { index: 22, name: 'Webb', key: '', kind: 'craft', what: 'Space telescope · 1.5 million km out', show: nearAny(2, 12, 20, 21, 22) },
+  { index: 23, name: 'Voyager 1', key: '', kind: 'craft', what: 'Spacecraft · the farthest ever sent', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 23 },
+  { index: 24, name: 'Voyager 2', key: '', kind: 'craft', what: 'Spacecraft · in interstellar space', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 24 },
+  { index: 25, name: 'Perseverance', key: '', kind: 'craft', what: 'Rover · Jezero Crater, Mars', show: nearAny(3, 25) },
   // the stars: once you are out beyond the planets
-  ...STAR_NAMES.map((name, i) => ({
+  ...STARS.map(([name, what], i): World => ({
     index: 26 + i,
     name,
     key: '',
+    kind: 'star',
+    what,
     show: () => pilot.sunAU > 60 || pilot.nearestIndex >= 26 || pilot.warping !== '',
   })),
 ]
+
+/* the "Go to" list: every world, by kind */
+const GROUPS: { kind: Kind; title: string }[][] = [
+  [
+    { kind: 'sun', title: 'Our star' },
+    { kind: 'planet', title: 'Planets' },
+    { kind: 'dwarf', title: 'Asteroid belt' },
+  ],
+  [
+    { kind: 'moon', title: 'Moons' },
+    { kind: 'craft', title: 'Spacecraft' },
+  ],
+  [{ kind: 'star', title: 'Other stars' }],
+]
+const PARENT_NAMES: Record<number, string> = { 2: 'Earth', 3: 'Mars', 4: 'Jupiter', 5: 'Saturn' }
+
+/* the world being warped to, from the name the pilot gives */
+const worldNamed = (name: string) => WORLDS.find((world) => name !== '' && name.replace(/^the /, '') === world.name)
+
+/* how each kind is approached */
+function warpLine(name: string) {
+  const world = worldNamed(name)
+  if (world?.index === 20) return 'Rendezvous with the Space Station'
+  if (world?.index === 25) return `Heading down to ${name}`
+  if (world?.kind === 'craft') return `Rendezvous with ${name}`
+  if (world?.kind === 'star') return `Crossing to ${name}`
+  return `Warping to ${name}`
+}
+
+/* each kind's mark: the Sun rayed, a planet a ring, an asteroid a
+   diamond, a moon a crescent, a spacecraft a tracking bracket, a star a
+   four-pointed glint */
+function Glyph({ kind }: { kind: Kind }) {
+  return (
+    <svg className="flight-glyph" viewBox="0 0 12 12" aria-hidden="true">
+      {kind === 'sun' && (
+        <>
+          <circle cx="6" cy="6" r="2.4" className="is-filled" />
+          <path d="M6 0.6V2.2M6 9.8V11.4M0.6 6H2.2M9.8 6H11.4M2.2 2.2L3.3 3.3M8.7 8.7L9.8 9.8M2.2 9.8L3.3 8.7M8.7 3.3L9.8 2.2" />
+        </>
+      )}
+      {kind === 'planet' && <circle cx="6" cy="6" r="5" />}
+      {kind === 'dwarf' && <path d="M6 1.4L10.6 6L6 10.6L1.4 6Z" />}
+      {kind === 'moon' && <path className="is-filled" d="M8.75 1.82A5 5 0 1 0 8.75 10.18A4.2 4.2 0 0 1 8.75 1.82Z" />}
+      {kind === 'craft' && (
+        <>
+          <path d="M1 4V1H4M8 1H11V4M11 8V11H8M4 11H1V8" />
+          <circle cx="6" cy="6" r="1" className="is-filled" />
+        </>
+      )}
+      {kind === 'star' && <path className="is-filled" d="M6 0.4L7 5L11.6 6L7 7L6 11.6L5 7L0.4 6L5 5Z" />}
+    </svg>
+  )
+}
 
 const FEATURE_SLOTS = 12
 
@@ -142,6 +220,15 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const mist = useRef<HTMLDivElement>(null)
   const heatGlare = useRef<HTMLDivElement>(null)
   const [hullK, setHullK] = useState(0)
+  const [goTo, setGoTo] = useState(false)
+  const goToOpen = useRef(false)
+  useEffect(() => {
+    goToOpen.current = goTo
+    if (goTo) {
+      pilot.steer.x = 0
+      pilot.steer.y = 0
+    }
+  }, [goTo])
 
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches
@@ -149,6 +236,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     const hintTimer = window.setTimeout(() => setHint(false), 7000)
     let toastTimer = 0
     let lastSunAU = pilot.sunAU
+    let lastWarp = ''
     const showToast = (text: string) => {
       setToast(text)
       window.clearTimeout(toastTimer)
@@ -160,6 +248,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setAltitude(pilot.altitudeKm)
       setKms(pilot.kms)
       setWarping(pilot.warping)
+      // arriving: what it is
+      if (lastWarp && !pilot.warping) {
+        const world = worldNamed(lastWarp)
+        if (world && pilot.nearestIndex === world.index) showToast(`${capital(lastWarp)} · ${world.what}`)
+      }
+      lastWarp = pilot.warping
       setLandState(pilot.landState)
       setCanLand(pilot.canLand)
       const { lat, lon } = pilot.site
@@ -307,7 +401,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     const key = (event: KeyboardEvent) => event.key.toLowerCase()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onLand()
+        if (goToOpen.current) setGoTo(false)
+        else onLand()
+        return
+      }
+      if (event.key.toLowerCase() === 'g' && !event.repeat) {
+        setGoTo((open) => !open)
         return
       }
       const world = WORLDS.find((entry) => entry.key !== '' && entry.key === event.key)
@@ -389,6 +488,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     // mouse: steer by the pointer's offset from the centre of the screen
     let dragFrom: { x: number; y: number } | null = null
     const onMove = (event: PointerEvent) => {
+      if (goToOpen.current) return
       if (event.pointerType === 'mouse') {
         pilot.steer.x = (event.clientX / window.innerWidth) * 2 - 1
         pilot.steer.y = (event.clientY / window.innerHeight) * 2 - 1
@@ -402,7 +502,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
     }
     const onDown = (event: PointerEvent) => {
-      if ((event.target as Element).closest('button')) return
+      if ((event.target as Element).closest('button, .flight-goto')) return
       if (event.pointerType === 'mouse') pilot.keys.add('w') // hold to fly
       else dragFrom = { x: event.clientX, y: event.clientY }
     }
@@ -499,14 +599,20 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
             type="button"
             className="flight-marker"
             data-edge="false"
-            aria-label={world.key ? `Warp to ${world.name} (${world.key})` : `Warp to ${world.name}`}
+            data-kind={world.kind}
+            aria-label={`Warp to ${world.name}, ${world.what}${world.key ? ` (${world.key})` : ''}`}
             ref={(element) => {
               markerRefs.current[i] = element
             }}
             onClick={() => (pilot.warpRequest = world.index)}
           >
-            <span className="flight-marker-mark" aria-hidden="true" />
-            <span className="flight-marker-label" />
+            <span className="flight-marker-mark" aria-hidden="true">
+              <Glyph kind={world.kind} />
+            </span>
+            <span className="flight-marker-text">
+              <span className="flight-marker-label" />
+              <span className="flight-marker-what">{world.what}</span>
+            </span>
           </button>
         ))}
       </div>
@@ -514,7 +620,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <div className="flight-readout" aria-live="polite">
         <span className="flight-near">
           {warping
-            ? [`Warping to ${warping}`, formatSpeed(kms), 'S to stop'].filter(Boolean).join(' · ')
+            ? [warpLine(warping), formatSpeed(kms), 'S to stop'].filter(Boolean).join(' · ')
             : nearest === 'the Sun' && hullK > 600
               ? `The Sun · hull ${Math.round(hullK - 273).toLocaleString('en-GB')} °C${hullK > 1500 ? ' · the heat holds you back' : ''}`
             : orbiting
@@ -547,7 +653,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly · tap a world to warp there'
-          : 'Steer with the mouse or arrows · W or click to fly · click a world or 1–8 to warp · L land · O orbit · T time · V camera · P photo · Esc exits'}
+          : 'Steer with the mouse or arrows · W or click to fly · click a world, 1–8 or G to warp · L land · O orbit · T time · V camera · P photo · Esc exits'}
       </p>
 
       {touch && (
@@ -566,6 +672,49 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <button type="button" className="flight-land" onClick={onLand}>
         Land
       </button>
+      <button
+        type="button"
+        className={`flight-goto-button ${goTo ? 'is-open' : ''}`}
+        aria-expanded={goTo}
+        onClick={() => setGoTo((open) => !open)}
+      >
+        Go to <kbd>G</kbd>
+      </button>
+      {goTo && (
+        <nav className="flight-goto" aria-label="Go to">
+          {GROUPS.map((column) => (
+            <div key={column[0].kind}>
+              {column.map((group) => (
+                <section key={group.kind} className="flight-goto-group" data-kind={group.kind}>
+                  <h3>
+                    <Glyph kind={group.kind} />
+                    {group.title}
+                  </h3>
+                  <ul>
+                    {WORLDS.filter((world) => world.kind === group.kind).map((world) => (
+                      <li key={world.name}>
+                        <button
+                          type="button"
+                          title={world.what}
+                          className={nearest.replace(/^the /, '') === world.name ? 'is-here' : ''}
+                          onClick={() => {
+                            pilot.warpRequest = world.index
+                            setGoTo(false)
+                          }}
+                        >
+                          {world.name}
+                          {world.parent !== undefined && <span>{PARENT_NAMES[world.parent]}</span>}
+                          {world.key && <kbd>{world.key}</kbd>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          ))}
+        </nav>
+      )}
     </div>
   )
 }
