@@ -913,120 +913,6 @@ function mulberry32(seed: number) {
   }
 }
 
-const SPREAD_FAR: [number, number, number] = [150, 100, 190]
-const SPREAD_NEAR: [number, number, number] = [90, 70, 130]
-
-function DeepStarLayer({
-
-  count,
-
-  spread,
-
-  size,
-
-  opacity,
-
-  speed,
-
-}: {
-
-  count: number
-
-  spread: [number, number, number]
-
-  size: number
-
-  opacity: number
-
-  speed: number
-
-}) {
-
-  const points = useRef<THREE.Points>(null)
-
-  const positions = useMemo(() => {
-    const data = new Float32Array(count * 3)
-    const random = mulberry32(
-      count * 1000 + Math.round(spread[2]),
-    )
-
-    for (let i = 0; i < count; i++) {
-
-      const i3 = i * 3
-
-      data[i3] = (random() - 0.5) * spread[0]
-
-      data[i3 + 1] = (random() - 0.5) * spread[1]
-
-      data[i3 + 2] = (random() - 0.5) * spread[2]
-
-    }
-
-    return data
-
-  }, [count, spread])
-
-
-
-  useFrame((state, delta) => {
-
-    if (!points.current) return
-
-    points.current.rotation.y += delta * speed
-
-    points.current.rotation.x += delta * speed * 0.08
-
-    points.current.position.x += (state.pointer.x * speed * 5 - points.current.position.x) * 0.004
-
-    points.current.position.y += (state.pointer.y * speed * 3 - points.current.position.y) * 0.004
-
-  })
-
-
-
-  return (
-
-    <points ref={points}>
-
-      <bufferGeometry>
-
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-
-      </bufferGeometry>
-
-      <pointsMaterial
-
-        size={size}
-
-        transparent
-
-        opacity={opacity}
-
-        depthWrite={false}
-
-        sizeAttenuation
-
-        toneMapped={false}
-        fog={false}
-
-      />
-
-    </points>
-
-  )
-
-}
-
-
-
-/* ============================================================
-
-   SCENE
-
-============================================================ */
-
-
-
 /* ============================================================
    WARM-UP
    Shaders compile, and textures upload to the GPU, the first time
@@ -1412,9 +1298,7 @@ function Scene({
 
 
 
-      <DeepStarLayer count={850} spread={SPREAD_FAR} size={0.028} opacity={0.42} speed={0.00025} />
 
-      <DeepStarLayer count={420} spread={SPREAD_NEAR} size={0.045} opacity={0.28} speed={0.00055} />
 
 
 

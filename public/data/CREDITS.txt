@@ -1,0 +1,8 @@
+stars.bin
+The Yale Bright Star Catalogue, 5th revised edition (Hoffleit & Warren,
+1991): all 9,110 entries (9,096 with positions), the stars visible to the
+naked eye. Binary edition (BSC5) from the Smithsonian Astrophysical
+Observatory's Telescope Data Center, tdc-www.harvard.edu/catalogs/bsc5.html.
+Downloaded 2026-11-11. Repacked as four float32 per star: J2000 right
+ascension and declination (radians), V magnitude, spectral class (O-M as
+0-6, plus subclass / 10); C, S and N types mapped to M, R to K, W to O.

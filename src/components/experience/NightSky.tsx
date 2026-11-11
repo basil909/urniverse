@@ -209,7 +209,7 @@ const EPS = 0.4090928 // obliquity of the ecliptic (J2000)
 
 /* equatorial (RA, Dec) -> the scene's sky direction (ecliptic frame,
    with ecliptic x -> X, ecliptic north -> Y, ecliptic y -> -Z) */
-function skyDirection(raHours: number, decDeg: number, out: THREE.Vector3) {
+export function skyDirection(raHours: number, decDeg: number, out: THREE.Vector3) {
   const ra = (raHours * 15 * Math.PI) / 180
   const dec = (decDeg * Math.PI) / 180
   const x = Math.cos(dec) * Math.cos(ra)
@@ -219,6 +219,10 @@ function skyDirection(raHours: number, decDeg: number, out: THREE.Vector3) {
   const eclZ = -y * Math.sin(EPS) + z * Math.cos(EPS)
   return out.set(x, eclZ, -eclY)
 }
+
+/* the named stars' directions, so the full catalogue (Starfield) can
+   skip them and not draw them twice */
+export const NAMED_STAR_DIRECTIONS = STARS.map(([, ra, dec]) => skyDirection(ra, dec, new THREE.Vector3()))
 
 /* B-V colour index -> an approximate star colour */
 function starColor(bv: number) {
