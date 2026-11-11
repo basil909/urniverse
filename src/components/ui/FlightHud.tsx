@@ -73,11 +73,14 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [landState, setLandState] = useState('flying')
   const [canLand, setCanLand] = useState(false)
   const [site, setSite] = useState('')
+  const [photo, setPhoto] = useState(false)
+  const [toast, setToast] = useState('')
 
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches
     setTouch(coarse)
     const hintTimer = window.setTimeout(() => setHint(false), 7000)
+    let toastTimer = 0
     const hud = window.setInterval(() => {
       setNearest(pilot.nearest)
       setSpeed(pilot.speed)
@@ -162,6 +165,20 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         pilot.warpRequest = world.index
         return
       }
+      if (event.key.toLowerCase() === 'v' && !event.repeat) {
+        const order = ['chase', 'flyby', 'orbit'] as const
+        pilot.cameraMode = order[(order.indexOf(pilot.cameraMode) + 1) % order.length]
+        setToast(pilot.cameraMode === 'chase' ? 'Chase camera' : pilot.cameraMode === 'flyby' ? 'Fly-by camera' : 'Orbit camera')
+        window.clearTimeout(toastTimer)
+        toastTimer = window.setTimeout(() => setToast(''), 1600)
+        return
+      }
+      if (event.key.toLowerCase() === 'p' && !event.repeat) {
+        pilot.photo = !pilot.photo
+        setPhoto(pilot.photo)
+        document.documentElement.classList.toggle('is-photo', pilot.photo)
+        return
+      }
       if (event.key.toLowerCase() === 'l' && !event.repeat) {
         pilot.landRequest = true
         return
@@ -228,6 +245,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     window.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       window.clearTimeout(hintTimer)
+      window.clearTimeout(toastTimer)
+      pilot.photo = false
+      pilot.cameraMode = 'chase'
+      document.documentElement.classList.remove('is-photo')
       window.clearInterval(hud)
       cancelAnimationFrame(frame)
       window.removeEventListener('keydown', onKeyDown)
@@ -243,7 +264,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   }, [onLand])
 
   return (
-    <div className={`flight-hud ${landState === 'landed' ? 'is-landed' : ''}`}>
+    <div className={`flight-hud ${landState === 'landed' ? 'is-landed' : ''} ${photo ? 'is-photo' : ''}`}>
+      {toast && <p className="flight-toast">{toast}</p>}
       {!touch && (
         <svg ref={guide} className="flight-guide" aria-hidden="true">
           <circle cx="50%" cy="50%" r="18" />
@@ -287,10 +309,18 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         </span>
       </div>
 
+      {/* credit for the streamed ground data, shown while it is on screen */}
+      {nearest === 'Earth' && altitude >= 0 && altitude < 300 && (
+        <p className="flight-credit">
+          Imagery: Sentinel-2 cloudless 2016 by EOX (s2maps.eu), contains modified Copernicus Sentinel data ·
+          Elevation: Terrain Tiles, AWS Open Data
+        </p>
+      )}
+
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly · tap a world to warp there'
-          : 'Steer with the mouse or arrows · W or click to fly, S to slow · click a world or press 1–8 to warp there · scroll or C to pull back · Esc lands'}
+          : 'Steer with the mouse or arrows · W or click to fly, S to slow · click a world or 1–8 to warp · L to land · V camera · P photo · Esc exits'}
       </p>
 
       {touch && (

@@ -7,7 +7,9 @@ import * as THREE from 'three'
 import { pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import { SURFACE_PATCH_GLSL, surfacePatch } from './surfaceTiles'
-import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole } from './groundState'
+import { aimEarthGround, earthElevation, earthGround, releaseEarthGround } from './earthTiles'
+import { sphereUv } from './groundState'
+import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, shipShadow } from './groundState'
 
 /* The patch of ground under the ship (see groundState.ts). A child of the
    planet's sphere, so it turns with it; its vertices are placed on the
@@ -65,6 +67,31 @@ uniform sampler2D uMap; uniform int uPlanetId;
 uniform vec3 uSunL; uniform float uLight; uniform vec3 uLightTint;
 uniform vec3 uSky; uniform float uSkyLight; uniform vec3 uHaze; uniform float uHazeK; uniform float uWorldRadius;
 uniform float uEarth;
+uniform sampler2D uImgFine; uniform vec4 uImgFineRect; uniform sampler2D uImgCoarse; uniform vec4 uImgCoarseRect;
+uniform vec3 uShipView; uniform vec3 uShipFwd; uniform vec3 uShipRight; uniform float uShipLen; uniform float uShipShadow;
+/* the Shuttle's shadow: is the way to the Sun blocked by its body or wings
+   (a few overlapping discs along the hull)? Soft-edged, as the Sun is
+   half a degree wide */
+float shipShade(vec3 p, vec3 sun) {
+  if (uShipShadow < 0.5) return 0.0;
+  float shade = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec3 c = uShipView;
+    float r = uShipLen * 0.1;
+    if (i == 0) { c += uShipFwd * uShipLen * 0.36; r = uShipLen * 0.07; }
+    if (i == 1) { c += uShipFwd * uShipLen * 0.08; r = uShipLen * 0.1; }
+    if (i == 2) { c -= uShipFwd * uShipLen * 0.3; r = uShipLen * 0.11; }
+    if (i == 3) { c += uShipRight * uShipLen * 0.24 - uShipFwd * uShipLen * 0.2; r = uShipLen * 0.12; }
+    if (i == 4) { c -= uShipRight * uShipLen * 0.24 + uShipFwd * uShipLen * 0.2; r = uShipLen * 0.12; }
+    vec3 w = c - p;
+    float along = dot(w, sun);
+    if (along <= 0.0) continue;
+    float off = length(w - sun * along);
+    float blur = r * 0.25 + along * 0.0047;
+    shade = max(shade, 1.0 - smoothstep(r - blur, r + blur, off));
+  }
+  return shade;
+}
 varying vec3 vDir; varying vec3 vNormalL; varying vec3 vViewPos; varying float vEdge;
 varying vec3 vUpView; varying vec3 vSunView;
 ${GROUND_GLSL}
@@ -75,16 +102,19 @@ void main() {
   vec2 uv = gUv(d);
   vec3 base = texture2D(uMap, uv).rgb;
   if (uPatchPlanet == uPlanetId) base = patched(base, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, uv, uPatchGain).rgb;
-  float land = gLand(uv);
+  // Earth, low down: Sentinel-2 imagery, about 10 m a pixel
+  if (uEarth > 0.5) base = patched(base, uImgFine, uImgFineRect, uImgCoarse, uImgCoarseRect, vec2(uv.x, gMercV(uv)), vec3(1.0)).rgb;
+  float land = gLandAt(uv);
   vec3 n = normalize(vNormalL);
   // fine tone below the maps, and bare rock on steep slopes
   vec3 cd = closeDetail(d, 0.6, 1.0);
-  base *= 1.0 + cd.y * 0.3 * land;
+  base *= 1.0 + cd.y * (uEarth > 0.5 ? 0.12 : 0.3) * land;
   float slope = 1.0 - dot(n, d);
   base = mix(base, base * vec3(0.8, 0.76, 0.72), smoothstep(0.03, 0.2, slope) * land);
   float sunUp = dot(d, uSunL);
   float day = smoothstep(-0.12, 0.08, sunUp);
   float lit = max(dot(n, uSunL), 0.0) * smoothstep(-0.05, 0.05, sunUp);
+  lit *= 1.0 - 0.88 * shipShade(vViewPos, normalize(vSunView));
   // sunlight, plus light from the sky itself (none on airless Mercury)
   vec3 color = base * (vec3(0.02) + lit * uLight * uLightTint + uSky * uSkyLight * day * (0.6 + 0.4 * dot(n, d)));
   // Earth's sea: darker, with the Sun's glint
@@ -215,6 +245,10 @@ export default function Terrain({
           uWorldRadius: { value: 1 },
           uEarth: { value: earth ? 1 : 0 },
           ...surfacePatch,
+          ...shipShadow,
+          ...earthGround,
+          uEarthElev: { value: earth ? 1 : 0 },
+          uRadiusM: { value: config.radiusKm * 1000 },
         },
         vertexShader: TERRAIN_VERTEX,
         fragmentShader: TERRAIN_FRAGMENT,
@@ -231,7 +265,7 @@ export default function Terrain({
     [geometry, material, reliefTexture],
   )
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const patch = mesh.current
     const body = patch?.parent
     if (!patch || !body) return
@@ -246,6 +280,10 @@ export default function Terrain({
     const active = near && altitude < 0.05
     patch.visible = active
     if (!active) {
+      if (earth) {
+        releaseEarthGround()
+        model.elevation = null
+      }
       if (ground.body === index) {
         ground.body = -2
         ground.model = null
@@ -262,6 +300,12 @@ export default function Terrain({
     if (_e1.lengthSq() < 1e-10) _e1.set(1, 0, 0)
     _e1.normalize()
     _e2.copy(_c).cross(_e1)
+    // Earth: stream real elevation and imagery under the ship
+    if (earth) {
+      const [u, v] = sphereUv(_c)
+      aimEarthGround(u * 360 - 180, v * 180 - 90, altitude * config.radiusKm, delta)
+      model.elevation = earthElevation
+    }
     const h0 = model.height(_c, fade)
     patch.position.copy(_c).multiplyScalar(1 + h0)
     const u = material.uniforms

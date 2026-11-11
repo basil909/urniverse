@@ -27,6 +27,7 @@ import { simClock } from './simClock'
 import { pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import Terrain from './Terrain'
+import { sunVisibility } from './sunVisibility'
 import { GROUND, groundHole } from './groundState'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
@@ -1393,10 +1394,16 @@ varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
 const FLIGHT_GLARE_FRAGMENT = /* glsl */ `
 uniform float uOpacity;
+uniform float uBurst;
 varying vec2 vUv;
 void main() {
-  float r = length(vUv - 0.5) * 2.0;
+  vec2 q = vUv - 0.5;
+  float r = length(q) * 2.0;
   float glow = pow(max(1.0 - r, 0.0), 4.0) * 0.55 + exp(-r * 22.0) * 3.0;
+  /* the Sun breaking over a planet's limb: a starburst of rays */
+  float angle = atan(q.y, q.x);
+  float rays = pow(abs(cos(angle * 3.0)), 60.0) + pow(abs(cos(angle * 3.0 + 0.52)), 140.0) * 0.6;
+  glow += uBurst * rays * exp(-r * 3.2) * 2.2 + uBurst * exp(-r * 6.0) * 1.2;
   vec3 color = mix(vec3(1.0, 0.74, 0.48), vec3(1.0, 0.97, 0.92), exp(-r * 9.0));
   gl_FragColor = vec4(color * glow * uOpacity, 1.0);
 }`
@@ -1409,7 +1416,7 @@ function FlightGlare() {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms: { uOpacity: { value: 0 } },
+        uniforms: { uOpacity: { value: 0 }, uBurst: { value: 0 } },
         vertexShader: FLIGHT_GLARE_VERTEX,
         fragmentShader: FLIGHT_GLARE_FRAGMENT,
         transparent: true,
@@ -1423,8 +1430,11 @@ function FlightGlare() {
   useFrame((_, delta) => {
     const glare = mesh.current
     if (!glare) return
-    const target = layout.trueScale ? 1 : 0
-    material.uniforms.uOpacity.value += (target - material.uniforms.uOpacity.value) * (1 - Math.exp(-delta * 4))
+    // hidden behind a planet, breaking out in a burst at its limb
+    const seen = layout.trueScale ? sunVisibility(camera.position) : 0
+    const target = layout.trueScale ? Math.max(seen, 0.0) : 0
+    material.uniforms.uOpacity.value += (target - material.uniforms.uOpacity.value) * (1 - Math.exp(-delta * 8))
+    material.uniforms.uBurst.value = layout.trueScale ? Math.pow(Math.sin(Math.PI * Math.min(seen, 1)), 0.7) * (seen < 0.999 ? 1 : 0) : 0
     glare.visible = material.uniforms.uOpacity.value > 0.01
     if (!glare.visible) return
     glare.lookAt(camera.position)

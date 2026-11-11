@@ -24,7 +24,8 @@ import {
 import { simClock } from './simClock'
 import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
-import { ground, groundAltitude, groundLatLon } from './groundState'
+import { ground, groundAltitude, groundLatLon, shipShadow } from './groundState'
+import { sunVisibility } from './sunVisibility'
 
 /* ============================================================
    FLIGHT MODE
@@ -65,6 +66,125 @@ const _turn = new THREE.Quaternion()
 const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
 const _identity = new THREE.Quaternion()
+const _sunTint = new THREE.Color()
+const _sunBase = new THREE.Color('#fff0d0')
+const _shake = new THREE.Vector3()
+const _inverseCamera = new THREE.Quaternion()
+
+/* scale height of each planet's air (km), and how dense it is at the
+   surface relative to Earth's (Mars's thin air still glows on entry) */
+const AIR: Record<number, { height: number; density: number }> = {
+  1: { height: 15.9, density: 60 },
+  2: { height: 8.5, density: 1 },
+  3: { height: 11.1, density: 0.15 },
+  4: { height: 27, density: 1 },
+  5: { height: 59.5, density: 1 },
+  6: { height: 27.7, density: 1 },
+  7: { height: 19.7, density: 1 },
+}
+
+/* ============================================================
+   RE-ENTRY
+   Diving fast into air, the shock in front of the ship heats the gas to
+   a glowing plasma: a sheath of orange and pink light hugging the nose
+   and leading edges, and a trail behind. It grows with the air's density
+   and the cube of the speed, so it flares in the upper atmosphere and
+   fades as the ship slows. (Real Shuttles came in belly first; this one
+   meets the air nose first.)
+============================================================ */
+const PLASMA_VERTEX = /* glsl */ `
+varying vec3 vNormalView; varying vec3 vViewPos; varying vec3 vLocal; varying vec2 vUv;
+void main() {
+  vNormalView = normalize(normalMatrix * normal);
+  vLocal = position;
+  vUv = uv;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vViewPos = mv.xyz;
+  gl_Position = projectionMatrix * mv;
+}`
+const PLASMA_SHEATH = /* glsl */ `
+uniform float uHeat; uniform float uTime;
+varying vec3 vNormalView; varying vec3 vViewPos; varying vec3 vLocal;
+void main() {
+  float facing = abs(dot(normalize(vNormalView), normalize(-vViewPos)));
+  float rim = pow(1.0 - facing, 2.2);
+  // the shock stands at the nose and leading edges; nothing at the tail
+  float front = pow(smoothstep(0.35, -0.75, vLocal.z), 1.5);
+  float flicker = 0.8 + 0.12 * sin(uTime * 37.0 + vLocal.x * 21.0) + 0.08 * sin(uTime * 23.0 - vLocal.z * 17.0);
+  // orange-yellow against the hull, violet-pink at the outer edge
+  vec3 color = mix(vec3(1.0, 0.55, 0.18), vec3(0.85, 0.45, 1.0), rim);
+  float a = uHeat * (0.06 + rim * 0.75) * front * flicker;
+  gl_FragColor = vec4(color * a * 2.6, 1.0);
+}`
+const PLASMA_TRAIL = /* glsl */ `
+uniform float uHeat; uniform float uTime;
+varying vec2 vUv; varying vec3 vLocal; varying vec3 vViewPos;
+void main() {
+  // along the trail (v: 0 at the ship, 1 at the tail) and round it
+  float along = vUv.y;
+  float streak = 0.7 + 0.3 * sin(vUv.x * 40.0 + uTime * 9.0 + along * 13.0);
+  // fading out before it reaches a camera riding behind
+  float clear = smoothstep(0.6, 2.4, -vViewPos.z);
+  float a = uHeat * pow(1.0 - along, 3.0) * streak * 0.5 * clear;
+  vec3 color = mix(vec3(1.0, 0.5, 0.18), vec3(0.8, 0.18, 0.3), along);
+  gl_FragColor = vec4(color * a, 1.0);
+}`
+
+function Plasma({ heat }: { heat: { current: number } }) {
+  const parts = useMemo(() => {
+    const uniforms = { uHeat: { value: 0 }, uTime: { value: 0 } }
+    const sheath = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: PLASMA_VERTEX,
+      fragmentShader: PLASMA_SHEATH,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
+    const trail = new THREE.ShaderMaterial({
+      uniforms,
+      vertexShader: PLASMA_VERTEX,
+      fragmentShader: PLASMA_TRAIL,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
+    const sheathShape = new THREE.SphereGeometry(1, 48, 32).scale(0.31, 0.17, 0.64).translate(0, -0.03, -0.1)
+    // a cone opening backwards from the hull, uv.y running down it
+    const trailShape = new THREE.CylinderGeometry(0.12, 0.5, 3, 32, 8, true).rotateX(-Math.PI / 2).translate(0, 0, 1.8)
+    const uv = trailShape.attributes.uv as THREE.BufferAttribute
+    for (let i = 0; i < uv.count; i += 1) uv.setY(i, 1 - uv.getY(i))
+    return { uniforms, sheath, trail, sheathShape, trailShape }
+  }, [])
+  const group = useRef<THREE.Group>(null)
+  useEffect(
+    () => () => {
+      parts.sheath.dispose()
+      parts.trail.dispose()
+      parts.sheathShape.dispose()
+      parts.trailShape.dispose()
+    },
+    [parts],
+  )
+  useFrame((state) => {
+    parts.uniforms.uHeat.value = heat.current
+    parts.uniforms.uTime.value = state.clock.elapsedTime
+    if (group.current) group.current.visible = heat.current > 0.005
+  })
+  return (
+    <group ref={group} visible={false}>
+      <mesh geometry={parts.sheathShape} material={parts.sheath} />
+      <mesh geometry={parts.trailShape} material={parts.trail} />
+      <pointLight color="#ff8a4a" intensity={0} distance={0} decay={0} position={[0, -0.05, -0.45]} ref={(light) => {
+        if (light) light.userData.plasma = true
+      }} />
+    </group>
+  )
+}
+
 const _axisUp = new THREE.Vector3()
 const _groundUp = new THREE.Vector3()
 const _bodyQuat = new THREE.Quaternion()
@@ -625,6 +745,9 @@ export default function Pilot() {
   const landedAt = useRef(new THREE.Vector3())
   const landedTurn = useRef(new THREE.Quaternion())
   const liftTime = useRef(0)
+  const heat = useRef(0)
+  const orbitAngle = useRef(0)
+  const flyby = useRef<THREE.Vector3 | null>(null) // relative to the Sun
   const viewDistance = useRef(VIEW_NEAR)
   const beacon = useRef<THREE.Sprite>(null)
   const beaconMaterial = useMemo(() => {
@@ -1046,6 +1169,21 @@ export default function Pilot() {
       pilot.warpGlow += (0 - pilot.warpGlow) * (1 - Math.exp(-delta * 4))
     }
 
+    // ---- re-entry: dense air, high speed
+    {
+      const air = nearestIndex >= 0 ? AIR[nearestIndex] : undefined
+      let target = 0
+      if (air && !warp.current && pilot.altitudeKm >= 0) {
+        const density = air.density * Math.exp(-pilot.altitudeKm / air.height)
+        const v = pilot.kms
+        const load = density * v * v * v
+        target =
+          THREE.MathUtils.smoothstep(Math.log10(Math.max(load, 1e-9)), -0.6, 1.4) *
+          THREE.MathUtils.smoothstep(v, 2.5, 6.5)
+      }
+      heat.current += (target - heat.current) * (1 - Math.exp(-delta * (target > heat.current ? 3 : 1.5)))
+    }
+
     // ---- the chase camera: behind and above, swinging a little wide in
     // turns, looking slightly into them, and banking with the ship
     const bankTarget = THREE.MathUtils.clamp(yawRate * 0.42, -0.65, 0.65)
@@ -1065,6 +1203,43 @@ export default function Pilot() {
       .addScaledVector(_right, reach * yawRate * 0.35)
     camOffset.current.lerp(_camPos, 1 - Math.exp(-delta * 6))
     camera.position.copy(jet.position).add(camOffset.current)
+    // other views (V): a slow orbit round the ship, or a camera parked
+    // ahead that lets the ship sweep past, then moves on ahead again
+    const mode = pilot.cameraMode
+    if (mode === 'orbit') {
+      orbitAngle.current += delta * 0.14
+      const around = reach * 5
+      _camPos
+        .copy(_right)
+        .multiplyScalar(Math.cos(orbitAngle.current) * around)
+        .addScaledVector(_forward, Math.sin(orbitAngle.current) * around)
+        .addScaledVector(_levelUp, around * 0.3)
+      camera.position.copy(jet.position).add(_camPos)
+    } else if (mode === 'flyby') {
+      const span = reach * 16
+      const rel = flyby.current
+      const passed = rel
+        ? _camPos.copy(jet.position).sub(SYSTEM_OFFSET).sub(rel).dot(_forward) > span * 1.1 ||
+          _camPos.length() > span * 4
+        : true
+      if (!rel || passed) {
+        // a little to the side and above the line the ship is flying
+        flyby.current = (rel ?? new THREE.Vector3())
+          .copy(jet.position)
+          .sub(SYSTEM_OFFSET)
+          .addScaledVector(velocity.current.lengthSq() > 0 ? _camPos.copy(velocity.current).normalize() : _forward, span * 2.2)
+          .addScaledVector(_right, span * 0.45)
+          .addScaledVector(_levelUp, span * 0.18)
+      }
+      camera.position.copy(SYSTEM_OFFSET).add(flyby.current!)
+    }
+    if (mode !== 'flyby') flyby.current = null
+    // the air shakes the ship on entry
+    if (heat.current > 0.01) {
+      const t = performance.now() * 0.001
+      _shake.set(Math.sin(t * 41.3) + Math.sin(t * 17.9), Math.sin(t * 37.1) + Math.sin(t * 23.3), Math.sin(t * 29.7))
+      camera.position.addScaledVector(_shake, heat.current * reach * 0.025)
+    }
     // pulled far back, the camera stays above the ground
     _camTarget.copy(camera.position).sub(_bodyPos)
     if (!onGround && _camTarget.length() < nearestRadius * 1.004) {
@@ -1084,9 +1259,15 @@ export default function Pilot() {
       .addScaledVector(_forward, reach * 6)
       .addScaledVector(_right, -reach * yawRate * 0.9)
       .addScaledVector(_up, reach * pitchRate * 0.5)
-    camera.up.copy(_up)
-    camera.lookAt(_camTarget)
-    camera.rotateZ(-bank.current * 0.35)
+    if (mode === 'chase') {
+      camera.up.copy(_up)
+      camera.lookAt(_camTarget)
+      camera.rotateZ(-bank.current * 0.35)
+    } else {
+      // the other views keep the horizon level and watch the ship
+      camera.up.copy(_levelUp)
+      camera.lookAt(jet.position)
+    }
     camera.up.set(0, 1, 0)
 
     // ---- the ship's layer: the ship one unit long at the origin, seen by
@@ -1114,7 +1295,17 @@ export default function Pilot() {
     // sunlight, and light thrown up by the planet below (blue off Earth,
     // ochre off Mars) on its day side
     _toSun.copy(SYSTEM_OFFSET).sub(jet.position).normalize()
-    sunLight.current?.position.copy(_toSun).multiplyScalar(10)
+    // in a planet's shadow the ship goes dark; at orbital sunrise and
+    // sunset the light reaching it through the air is reddened
+    const sunSeen = sunVisibility(jet.position, _sunTint)
+    if (sunLight.current) {
+      sunLight.current.position.copy(_toSun).multiplyScalar(10)
+      sunLight.current.intensity = 2.4 * sunSeen
+      sunLight.current.color.copy(_sunBase).multiply(_sunTint)
+    }
+    visual.current?.traverse((object) => {
+      if (object.userData.plasma) (object as THREE.PointLight).intensity = heat.current * 3
+    })
     if (shine.current) {
       shine.current.position.copy(_axis).multiplyScalar(-10)
       const nearness = Math.min(1, (nearestRadius / Math.max(height, nearestRadius)) ** 2)
@@ -1139,6 +1330,15 @@ export default function Pilot() {
     shipCamera.fov = camera.fov
     shipCamera.aspect = camera.aspect
     shipCamera.updateProjectionMatrix()
+    // the ship's shadow, for the ground (view space)
+    shipShadow.uShipShadow.value = onGround && sunSeen > 0.05 && groundHere < SHIP_LENGTH * 400 ? 1 : 0
+    if (shipShadow.uShipShadow.value) {
+      _inverseCamera.copy(camera.quaternion).invert()
+      shipShadow.uShipView.value.copy(jet.position).sub(camera.position).applyQuaternion(_inverseCamera)
+      shipShadow.uShipFwd.value.set(0, 0, -1).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
+      shipShadow.uShipRight.value.set(1, 0, 0).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
+      shipShadow.uShipLen.value = SHIP_LENGTH
+    }
 
     // ---- where each world is on screen, for the HUD's markers
     camera.updateMatrixWorld()
@@ -1171,6 +1371,7 @@ export default function Pilot() {
         <>
           <group ref={visual}>
             <group>{shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : <Jet thrust={thrust} />}</group>
+            <Plasma heat={heat} />
           </group>
           <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
           <directionalLight ref={shine} intensity={0} />

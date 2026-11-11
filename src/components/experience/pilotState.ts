@@ -58,6 +58,10 @@ export const pilot = {
   canLand: false,
   /** where the ship stands, degrees */
   site: { lat: 0, lon: 0 },
+  /** 'chase', 'flyby' or 'orbit' (V cycles) */
+  cameraMode: 'chase' as 'chase' | 'flyby' | 'orbit',
+  /** photo mode: no HUD (P) */
+  photo: false,
 }
 
 export const VIEW_NEAR = 3.2

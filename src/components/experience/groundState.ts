@@ -94,6 +94,31 @@ uniform sampler2D uReliefMap; uniform float uHasRelief; uniform float uRelief;
 uniform sampler2D uSeaMap; uniform float uHasSea;
 uniform float uRough; uniform float uRidged; uniform float uDetailFreq;
 uniform float uGroundFade;
+/* Earth's real elevation (metres), streamed: fine and coarse patches in
+   Web Mercator; .r is height times coverage, .g the coverage */
+uniform sampler2D uElevFine; uniform vec4 uElevFineRect;
+uniform sampler2D uElevCoarse; uniform vec4 uElevCoarseRect;
+uniform float uEarthElev; uniform float uRadiusM;
+float gMercV(vec2 uv) {
+  float lat = clamp((uv.y - 0.5) * 3.14159265359, -1.4835, 1.4835);
+  return 0.5 + asinh(tan(lat)) / 6.28318530718;
+}
+vec2 gElevAt(sampler2D map, vec4 rect, vec2 mu) {
+  if (rect.z <= 0.0) return vec2(0.0);
+  vec2 local = vec2(fract(mu.x - rect.x) / rect.z, (mu.y - rect.y) / rect.w);
+  if (local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0) return vec2(0.0);
+  return texture2D(map, local).rg;
+}
+/* metres, and how much of it is known */
+float gElevation(vec2 uv, out float known) {
+  vec2 mu = vec2(uv.x, gMercV(uv));
+  vec2 c = gElevAt(uElevCoarse, uElevCoarseRect, mu);
+  vec2 f = gElevAt(uElevFine, uElevFineRect, mu);
+  known = max(c.y, f.y);
+  float hc = c.y > 0.0 ? c.x / c.y : 0.0;
+  float hf = f.y > 0.0 ? f.x / f.y : 0.0;
+  return mix(hc, hf, clamp(f.y, 0.0, 1.0));
+}
 /* land (1) or sea (0) */
 float gLand(vec2 uv) {
   return uHasSea > 0.5 ? smoothstep(0.42, 0.22, texture2D(uSeaMap, uv).r) : 1.0;
@@ -118,7 +143,25 @@ float gHeight(vec3 d, float spacing) {
   }
   // Earth: land rises gently from the shore; the sea is flat
   h += uHasSea > 0.5 ? land * (abs(detail) + uRough * 0.25) : detail;
+  // where Earth's real elevation has arrived, it takes over (with a
+  // little generated roughness below its ~30 m pixels)
+  if (uEarthElev > 0.5) {
+    float known;
+    float elevation = gElevation(uv, known);
+    float real = max(elevation, 0.0) / uRadiusM + (elevation > 0.0 ? detail * 0.02 : 0.0);
+    h = mix(h, real, known);
+  }
   return h * uGroundFade;
+}
+/* land (1) or sea (0), with the real coastline once it has arrived */
+float gLandAt(vec2 uv) {
+  float land = gLand(uv);
+  if (uEarthElev > 0.5) {
+    float known;
+    float elevation = gElevation(uv, known);
+    land = mix(land, smoothstep(-1.0, 2.0, elevation), known);
+  }
+  return land;
 }
 `
 
@@ -163,6 +206,8 @@ export function sphereUv(d: THREE.Vector3) {
 
 /* the ground of one planet, on the CPU */
 export class GroundModel {
+  /** Earth only: real elevation (metres) at (u, Mercator v), if streamed */
+  elevation: ((u: number, vm: number) => { height: number; known: number } | null) | null = null
   relief: Sampler | null = null
   sea: Sampler | null = null
   ready = false
@@ -206,6 +251,15 @@ export class GroundModel {
       f *= 2
     }
     h += this.config.seaMap ? this.land(u, v) * (Math.abs(detail) + this.roughRadii * 0.25) : detail
+    if (this.elevation) {
+      const lat = Math.min(Math.max((v - 0.5) * Math.PI, -1.4835), 1.4835)
+      const real = this.elevation(u, 0.5 + Math.asinh(Math.tan(lat)) / (2 * Math.PI))
+      if (real) {
+        const value =
+          Math.max(real.height, 0) / (this.config.radiusKm * 1000) + (real.height > 0 ? detail * 0.02 : 0)
+        h += (value - h) * real.known
+      }
+    }
     return h * fade
   }
 }
@@ -240,6 +294,16 @@ export function groundLatLon(world: THREE.Vector3) {
   _local.copy(world).applyMatrix4(ground.inverse).normalize()
   const [u, v] = sphereUv(_local)
   return { lat: v * 180 - 90, lon: u * 360 - 180 }
+}
+
+/* the ship's shadow on the ground (shared uniforms, view space: written by
+   the pilot, read by the terrain) */
+export const shipShadow = {
+  uShipView: { value: new THREE.Vector3() },
+  uShipFwd: { value: new THREE.Vector3(0, 0, -1) },
+  uShipRight: { value: new THREE.Vector3(1, 0, 0) },
+  uShipLen: { value: 1 },
+  uShipShadow: { value: 0 },
 }
 
 /* the cut in the planet's sphere under the patch (shared uniforms) */

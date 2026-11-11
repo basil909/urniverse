@@ -27,12 +27,20 @@ import { pilot } from './pilotState'
    nothing changes.
 ============================================================ */
 
-type Source = {
+export type Source = {
   url: (z: number, row: number, col: number) => string
   tile: number
   maxLevel: number
   /** degrees per tile at a level */
   degrees: (z: number) => number
+  /** web-map tiles (Web Mercator, 2^z a side) rather than latitude/longitude */
+  mercator?: boolean
+}
+
+/* Web Mercator: how far down the map a latitude is, 0 (north) to 1 */
+export function mercatorY(lat: number) {
+  const phi = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(lat, -85.05, 85.05))
+  return (1 - Math.asinh(Math.tan(phi)) / Math.PI) / 2
 }
 
 const gibs = (layer: string, ext: string): Source => ({
@@ -151,7 +159,7 @@ function remember(url: string, bitmap: ImageBitmap) {
 
 type Layout = { source: Source; z: number; c0: number; r0: number; n: number; cols: number; rows: number }
 
-class PatchLayer {
+export class PatchLayer {
   private canvas = document.createElement('canvas')
   private context: CanvasRenderingContext2D
   readonly texture: THREE.CanvasTexture
@@ -182,10 +190,11 @@ class PatchLayer {
   aim(source: Source, z: number, lon: number, lat: number) {
     const deg = source.degrees(z)
     const n = CANVAS / source.tile
-    const cols = Math.round(360 / deg)
-    const rows = Math.ceil(180 / deg)
-    const colF = (lon + 180) / deg
-    const rowF = (90 - lat) / deg
+    const count = 2 ** z
+    const cols = source.mercator ? count : Math.round(360 / deg)
+    const rows = source.mercator ? count : Math.ceil(180 / deg)
+    const colF = source.mercator ? ((lon + 180) / 360) * count : (lon + 180) / deg
+    const rowF = source.mercator ? mercatorY(lat) * count : (90 - lat) / deg
     const current = this.layout
     if (
       current &&
@@ -230,12 +239,17 @@ class PatchLayer {
         this.inFlight.delete(url)
       }
     })
-    this.rect.set(
-      (c0 * deg) / 360 - Math.floor((c0 * deg) / 360),
-      1 - ((r0 + n) * deg) / 180,
-      (n * deg) / 360,
-      (n * deg) / 180,
-    )
+    if (source.mercator) {
+      // in (longitude 0..1, 1 - Mercator y): the shader converts latitude
+      this.rect.set(c0 / count - Math.floor(c0 / count), 1 - (r0 + n) / count, n / count, n / count)
+    } else {
+      this.rect.set(
+        (c0 * deg) / 360 - Math.floor((c0 * deg) / 360),
+        1 - ((r0 + n) * deg) / 180,
+        (n * deg) / 360,
+        (n * deg) / 180,
+      )
+    }
     this.dirty = true
   }
 
