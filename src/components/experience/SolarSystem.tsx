@@ -40,6 +40,7 @@ import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
 import CloudVolume from './CloudVolume'
+import Aurora, { AURORA } from './Aurora'
 import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
@@ -82,6 +83,8 @@ const earthNight = {
   uCloudShift: { value: 0 },
   uTime: { value: 0 },
   uCloudHeight: { value: 0.012 },
+  /** the auroras drawn in 3D (up close): the painted ones step aside */
+  uAurora3D: { value: 0 },
 }
 const EARTH_CITY_LIGHTS = new THREE.Color('#ffc27a')
 const _earthWorld = new THREE.Vector3()
@@ -175,7 +178,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
   shader.fragmentShader = SURFACE_PATCH_GLSL + shader.fragmentShader
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
-uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight;
+uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight; uniform float uAurora3D;
 ` +
     shader.fragmentShader
       .replace(
@@ -230,7 +233,7 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; unifor
           + 0.25 * sin(x * 46.0 + uTime * 0.6 + 3.0 * sin(x * 7.0 - uTime * 0.15))
           + 0.15 * sin(x * 13.0 - uTime * 0.4);
         float dark = 1.0 - smoothstep(-0.3, 0.02, sunFacing);
-        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.36;
+        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.36 * (1.0 - uAurora3D);
       }
       #endif`,
       )
@@ -2500,6 +2503,11 @@ function Planet({
                 earth={planet.name === 'Earth'}
                 night={planet.name === 'Earth' ? () => sharpNight ?? earthLights : undefined}
               />
+            )}
+
+            {/* auroras, in 3D up close */}
+            {AURORA[planet.name] && (
+              <Aurora look={AURORA[planet.name]} sun={planetSun} near={planet.name === 'Earth' ? earthNight.uAurora3D : undefined} />
             )}
 
             {/* clouds ride on Earth and drift slowly over it */}
