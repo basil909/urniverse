@@ -25,6 +25,8 @@ import Galaxy, {
 import Starfield from './Starfield'
 import NightSky from './NightSky'
 import { lens } from './lens'
+import Pilot from './Pilot'
+import { pilot } from './pilotState'
 import {
   SYSTEM_OFFSET,
   getPlanetPosition,
@@ -385,7 +387,19 @@ function CinematicCamera({
     [],
   )
 
+  const piloting = useRef(false)
+
   useFrame((_, delta) => {
+    // flying the jet: the jet's camera has the controls
+    if (pilot.active) {
+      piloting.current = true
+      return
+    }
+    if (piloting.current) {
+      // landed: glide back to the journey from wherever the jet was
+      piloting.current = false
+      smoothPosition.current.copy(camera.position)
+    }
     const progress = progressRef.current
 
     const safeProgress = Number.isFinite(progress)
@@ -997,7 +1011,7 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
       return
     }
     // cinematic: the Pale Blue Dot (10) holds still, like a photograph
-    const wideView = chapter === 0 || chapter === 1 || chapter === 12
+    const wideView = (chapter === 0 || chapter === 1 || chapter === 12) && !pilot.active
     const target = reducedMotion ? 0 : wideView ? WIDE_VIEW_RATE : CLOSE_UP_RATE
     simClock.rate += (target - simClock.rate) * (1 - Math.exp(-delta * 1.5))
     simClock.jd += simClock.rate * step
@@ -1106,8 +1120,8 @@ void main() {
     + exp(-dot(cyg, cyg) / 0.006) * 0.6 + exp(-dot(car, car) / 0.006) * 0.6;
   /* clumpy, not a flat haze: star clouds stand out, gaps stay dark */
   float clumps = smoothstep(0.35, 0.8, clouds);
-  float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 1.2 + starClouds) * (1.0 - rift * 0.85);
-  sky = sky * (1.0 - rift * 0.6 * band) + tint * glow * 0.022;
+  float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 0.5 + starClouds * 0.6) * (1.0 - rift * 0.85);
+  sky = sky * (1.0 - rift * 0.6 * band) + tint * glow * 0.018;
 
   gl_FragColor = vec4(sky * uIntensity, 1.0);
 }`
@@ -1269,6 +1283,8 @@ function Scene({
       <Clock progressRef={progressRef} />
 
       <Lens progressRef={progressRef} glare={glare} />
+
+      <Pilot />
 
       <BacklitDriver progressRef={progressRef} />
 

@@ -22,6 +22,8 @@ export default function DetailPanel({
   onToggleInside,
   layers,
   worldIndex,
+  description,
+  scaleNote,
 }: {
   open: boolean
   name: string
@@ -31,6 +33,9 @@ export default function DetailPanel({
   inside?: boolean
   onToggleInside?: () => void
   layers?: Layer[]
+  /* the chapter's full description, and the scale-model sentence */
+  description?: string
+  scaleNote?: string
   /* orbit index for the drawings (-1: the Sun); none for other chapters */
   worldIndex?: number
 }) {
@@ -110,7 +115,10 @@ export default function DetailPanel({
             </ol>
           )}
 
+          {description && <p className="detail-lede">{description}</p>}
+
           {worldIndex !== undefined && <WorldGraphics index={worldIndex} name={name} />}
+          {scaleNote && <p className="detail-scale">{scaleNote}</p>}
 
           <dl className="detail-glance">
             {detail.glance.map((item) => (

@@ -9,12 +9,12 @@ import {
   simClock,
 } from '../experience/simClock'
 
-/* Top right: the "Real motion" switch, and the simulated date.
-   Off (the default), the scene moves calmly. On, one clock drives
-   everything at the chosen speed, from this very moment: the planets'
-   orbits, Earth's turning day side, the Moon's phase, the moons. */
+/* The clock button: "Real motion". Off (the default), the scene moves
+   calmly. On, one clock drives everything at the chosen speed, from this
+   very moment (orbits, Earth's day and night, the Moon's phase, the
+   moons); its speeds and the live date open beneath it. */
 
-function formatDate(jd: number, withTime: boolean) {
+function formatDate(jd: number) {
   const date = new Date((jd - 2440587.5) * 86400000)
   const day = date.toLocaleDateString('en-GB', {
     day: 'numeric',
@@ -22,7 +22,6 @@ function formatDate(jd: number, withTime: boolean) {
     year: 'numeric',
     timeZone: 'UTC',
   })
-  if (!withTime) return day
   const time = date.toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
@@ -31,17 +30,18 @@ function formatDate(jd: number, withTime: boolean) {
   return `${day}, ${time} UTC`
 }
 
-export default function MotionControl({ showDate }: { showDate: boolean }) {
+export default function MotionControl() {
   const [real, setReal] = useState(simClock.real)
   const [speed, setSpeed] = useState(() =>
     Math.max(0, REAL_SPEEDS.findIndex((option) => option.days === simClock.realRate)),
   )
-  const [label, setLabel] = useState(() => formatDate(simClock.jd, simClock.real))
+  const [label, setLabel] = useState('')
 
   useEffect(() => {
-    const update = () => setLabel(formatDate(simClock.jd, simClock.real))
+    if (!real) return
+    const update = () => setLabel(formatDate(simClock.jd))
     update()
-    const timer = window.setInterval(update, real ? 200 : 500)
+    const timer = window.setInterval(update, 200)
     return () => window.clearInterval(timer)
   }, [real])
 
@@ -60,36 +60,36 @@ export default function MotionControl({ showDate }: { showDate: boolean }) {
     <div className="motion-control">
       <button
         type="button"
-        className="motion-toggle"
+        className="tool-button"
         aria-pressed={real}
+        aria-label={real ? 'Real motion on: turn off' : 'Real motion: run everything on one true clock'}
+        title="Real motion: orbits, Earth's day and night, the Moon's phases and the moons on one true clock"
         onClick={toggle}
-        title="Run everything on one clock: orbits, Earth's day and night, the Moon's phases and the moons"
       >
-        <span className="motion-light" aria-hidden="true" />
-        Real motion
+        <svg viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="8" cy="8" r="6" />
+          <path d="M8 4.5V8l2.4 1.6" />
+        </svg>
       </button>
 
       {real && (
-        <div className="motion-speeds" role="group" aria-label="Speed of time">
-          {REAL_SPEEDS.map((option, index) => (
-            <button
-              key={option.label}
-              type="button"
-              aria-pressed={speed === index}
-              onClick={() => choose(index)}
-            >
-              {option.label}
+        <div className="motion-panel">
+          <div className="motion-speeds" role="group" aria-label="Speed of time">
+            {REAL_SPEEDS.map((option, index) => (
+              <button
+                key={option.label}
+                type="button"
+                aria-pressed={speed === index}
+                onClick={() => choose(index)}
+              >
+                {option.label}
+              </button>
+            ))}
+            <button type="button" className="motion-now" onClick={resetToNow}>
+              Now
             </button>
-          ))}
-          <button type="button" className="motion-now" onClick={resetToNow}>
-            Now
-          </button>
-        </div>
-      )}
-
-      {(real || showDate) && (
-        <div className="sim-date" aria-live="off">
-          <span className="sim-date-label">{real ? 'Live clock' : 'Simulated'}</span> {label}
+          </div>
+          <div className="sim-date">{label}</div>
         </div>
       )}
     </div>

@@ -37,7 +37,7 @@ export default function SoundToggle({ section }: { section: number }) {
   return (
     <button
       type="button"
-      className="sound-toggle"
+      className="tool-button sound-toggle"
       aria-pressed={on}
       aria-label={on ? 'Turn the soundtrack off' : 'Turn the soundtrack on'}
       title={on ? 'Sound on' : 'Sound off'}

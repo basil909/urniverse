@@ -2,7 +2,7 @@
 
 
 
-import { Fragment, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import Lenis from 'lenis'
@@ -16,6 +16,8 @@ import DetailPanel from './ui/DetailPanel'
 import CountUp from './ui/CountUp'
 import MotionControl from './ui/MotionControl'
 import SoundToggle from './ui/SoundToggle'
+import FlightHud from './ui/FlightHud'
+import { pilot } from './experience/pilotState'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
@@ -466,6 +468,18 @@ const formatDistance = (metres: number) =>
     ? `${Math.round(metres)} m`
     : `${(metres / 1000).toFixed(1).replace(/\.0$/, '')} km`
 
+/* the stage shows the opening of a description (a sentence or two); the
+   whole text is in the "More about" panel and the screen-reader transcript */
+function brief(text: string) {
+  const sentences = text.match(/[^.!?]+[.!?]+(\s|$)/g) ?? [text]
+  let out = ''
+  for (const sentence of sentences) {
+    if (out && (out + sentence).length > 150) break
+    out += sentence
+  }
+  return out.trim()
+}
+
 const titleCase = (label: string) =>
   label
     .toLowerCase()
@@ -608,6 +622,11 @@ export default function Journey() {
   const [today, setToday] = useState('')
   // deep-dive panel for the current world
   const [detailOpen, setDetailOpen] = useState(false)
+  // flight mode: the journey pauses while you fly the jet
+  const [flying, setFlying] = useState(false)
+  const flyingRef = useRef(false)
+  flyingRef.current = flying
+  const savedScroll = useRef(0)
   const [inside, setInside] = useState(false)
   const detailOpenRef = useRef(false)
   detailOpenRef.current = detailOpen
@@ -836,6 +855,26 @@ export default function Journey() {
 
   const chapterNo = (n: number) => String(n).padStart(2, '0')
 
+  /* take off from the journey: remember where we were, pause scrolling,
+     and put the scene in its wide view so every planet is full size */
+  const takeOff = () => {
+    const lenis = lenisRef.current
+    savedScroll.current = window.scrollY
+    setDetailOpen(false)
+    lenis?.scrollTo(0, { immediate: true, force: true })
+    lenis?.stop()
+    pilot.active = true
+    setFlying(true)
+  }
+
+  const land = useCallback(() => {
+    pilot.active = false
+    const lenis = lenisRef.current
+    lenis?.start()
+    lenis?.scrollTo(savedScroll.current, { immediate: true, force: true })
+    setFlying(false)
+  }, [])
+
   const goToSection = (target: number) => {
     const clamped = Math.max(0, Math.min(TOTAL_SECTIONS - 1, target))
     if (snapToRef.current) {
@@ -863,7 +902,7 @@ export default function Journey() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (detailOpenRef.current) return
+      if (detailOpenRef.current || flyingRef.current) return
       const forward = ['ArrowDown', 'ArrowRight', 'PageDown']
       const back = ['ArrowUp', 'ArrowLeft', 'PageUp']
       if (forward.includes(event.key)) {
@@ -912,7 +951,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${canSpin ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''}`}
+      className={`universe-page ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -925,11 +964,19 @@ export default function Journey() {
 
       <Loader />
 
+      {flying && <FlightHud onLand={land} />}
+
       <DetailPanel
         open={detailOpen}
         name={planetName}
         detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
         onClose={() => setDetailOpen(false)}
+        description={activeChapter?.description}
+        scaleNote={
+          scale
+            ? `If the Sun were a door 2 m tall, ${scale.name} would be ${scale.size} across (${scale.like}) and ${scale.distance} away.`
+            : undefined
+        }
         inside={inside}
         worldIndex={
           activeChapter?.id === 'sun'
@@ -976,9 +1023,23 @@ export default function Journey() {
           <span className="brand-name">You Are Here</span>
         </button>
 
-        {/* "Real motion", the simulated moment, and sound */}
-        <MotionControl showDate={section > 0} />
-        <SoundToggle section={section} />
+        {/* three small tools: fly, real motion, sound */}
+        <div className="hud-tools">
+          <button
+            type="button"
+            className="tool-button"
+            aria-pressed={flying}
+            aria-label={flying ? 'Land the jet' : 'Fly through space in a small jet'}
+            title={flying ? 'Land' : 'Fly'}
+            onClick={() => (flying ? land() : takeOff())}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 1.5l1.4 4.3 5.1 2.6-5.1 1.2L8 14.5l-1.4-4.9-5.1-1.2 5.1-2.6z" />
+            </svg>
+          </button>
+          <MotionControl />
+          <SoundToggle section={section} />
+        </div>
       </header>
 
       {/* LEFT CHAPTER RAIL */}
@@ -1158,7 +1219,7 @@ export default function Journey() {
                 </div>
 
                 <p className="story-description" aria-hidden="true">
-                  {activeChapter.description}
+                  {brief(activeChapter.description)}
                 </p>
 
                 <div className="inline-stats" aria-hidden="true">
@@ -1182,19 +1243,7 @@ export default function Journey() {
                   ))}
                 </div>
 
-                {scale && (
-                  <motion.p
-                    className="scale-line"
-                    aria-hidden="true"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.8, delay: 0.45 }}
-                  >
-                    If the Sun were a door 2 m tall, {scale.name} would be{' '}
-                    {scale.size} across ({scale.like}) and {scale.distance} away.
-                  </motion.p>
-                )}
-
+                <div className="story-actions">
                 {WORLD_DETAILS[activeChapter.id] && (
                   <button
                     type="button"
@@ -1216,6 +1265,7 @@ export default function Journey() {
                     : 'Continue'}
                   <span>→</span>
                 </button>
+                </div>
               </div>
             </motion.div>
           )}

@@ -1671,7 +1671,7 @@ function Planet({
     // almost invisible while a planet is in focus, so trails never streak across it
     const inPlanetChapter = safeProgress >= 2.1 && safeProgress < 10
     const trailOpacity = (orbitLine.material as THREE.ShaderMaterial).uniforms.uOpacity
-    const targetOpacity = inPlanetChapter ? 0.04 : 0.55
+    const targetOpacity = inPlanetChapter ? 0.012 : 0.5
     trailOpacity.value +=
       (targetOpacity - trailOpacity.value) * (1 - Math.exp(-delta * 4))
 

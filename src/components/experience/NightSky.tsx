@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
+import { pilot } from './pilotState'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 
@@ -202,7 +203,7 @@ void main() {
 }`
 
 /* a few names, for the brightest and best known */
-const NAMED = ['Sirius', 'Canopus', 'Arcturus', 'Vega', 'Betelgeuse', 'Rigel', 'Antares', 'Polaris', 'Deneb', 'Aldebaran']
+const NAMED = ['Sirius', 'Betelgeuse', 'Rigel', 'Vega', 'Polaris']
 
 const SKY_RADIUS = 860
 const EPS = 0.4090928 // obliquity of the ecliptic (J2000)
@@ -463,9 +464,9 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     // constellations only in the opening, wide view (and the return)
     const progress = progressRef.current ?? 0
     const chapter = Math.floor(progress)
-    const wide = chapter === 0 || chapter === 12
+    const wide = (chapter === 0 || chapter === 12) && !pilot.active
     linesOn.current += ((wide ? 1 : 0) - linesOn.current) * (1 - Math.exp(-delta * 1.5))
-    lineMaterial.uniforms.uOpacity.value = linesOn.current * 0.16
+    lineMaterial.uniforms.uOpacity.value = linesOn.current * 0.09
     // the nebulae glow fully in the wide views, softer behind close-ups,
     // and fade once we have left the galaxy (the finale)
     const deepTarget = chapter === 11 ? 0.05 : wide ? 0.2 : 0.13
@@ -473,7 +474,7 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     deepMaterial.uniforms.uOpacity.value = deepLevel.current
     const names = linesOn.current > 0.05
     if (names !== showNames) setShowNames(names)
-    const opacity = (linesOn.current * 0.55).toFixed(3)
+    const opacity = (linesOn.current * 0.38).toFixed(3)
     labels.current.forEach((label) => {
       if (label) label.style.opacity = opacity
     })
