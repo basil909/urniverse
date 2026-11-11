@@ -4,7 +4,7 @@ import { useEffect, useMemo } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
-import { orbitalDisplayDistance } from './orbit'
+import { AU_UNITS, layout, orbitalDisplayDistance } from './orbit'
 import { simClock } from './simClock'
 import { lens } from './lens'
 
@@ -13,7 +13,12 @@ import { lens } from './lens'
    Kuiper belt beyond Neptune. Every particle orbits at its real Kepler
    rate for its distance (inner ones overtake outer ones), on a slightly
    tilted orbit, so the wide views show a living, layered system. All the
-   motion is in the vertex shader: one draw call per belt. */
+   motion is in the vertex shader: one draw call per belt.
+   Flying, they stand at their true distances (2.1-3.3 AU, 5.2 AU, 30-50
+   AU) as bodies tens of km across: far apart, as the real belt is (you
+   could fly through it and pass nothing), shown as a faint dust of points
+   beyond a pixel. Far ones are drawn nearer along the same line, so they
+   fit the depth range. */
 
 const J2000 = 2451545.0
 const DEG = Math.PI / 180
@@ -46,10 +51,12 @@ type Particle = {
 function buildGeometry(particles: Particle[]) {
   const count = particles.length
   const orbit = new Float32Array(count * 3)
+  const au = new Float32Array(count)
   const tilt = new Float32Array(count * 2)
   const look = new Float32Array(count * 2)
   particles.forEach((p, i) => {
     orbit[i * 3] = orbitalDisplayDistance(p.a)
+    au[i] = p.a
     orbit[i * 3 + 1] = p.start
     orbit[i * 3 + 2] = p.rate
     tilt[i * 2] = p.tilt
@@ -61,6 +68,7 @@ function buildGeometry(particles: Particle[]) {
   // positions are computed in the shader; this only sizes the draw
   geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3))
   geometry.setAttribute('aOrbit', new THREE.BufferAttribute(orbit, 3))
+  geometry.setAttribute('aAU', new THREE.BufferAttribute(au, 1))
   geometry.setAttribute('aTilt', new THREE.BufferAttribute(tilt, 2))
   geometry.setAttribute('aLook', new THREE.BufferAttribute(look, 2))
   // the belts surround the whole system: never cull them
@@ -145,6 +153,10 @@ const BELT_VERTEX = /* glsl */ `
 attribute vec3 aOrbit;  // display radius, longitude at J2000, radians per day
 attribute vec2 aTilt;   // inclination, ascending node
 attribute vec2 aLook;   // size, shade
+attribute float aAU;    // true distance, AU
+uniform float uTrue;    // 1: true scale (flying)
+uniform float uAU;      // scene units per AU
+uniform float uTrueSize; // a typical body's size at true scale, scene units
 uniform float uDays;
 uniform float uScale;
 uniform float uSize;
@@ -154,11 +166,19 @@ varying float vAlpha;
 void main() {
   float theta = aOrbit.y + aOrbit.z * uDays;
   // ecliptic x -> scene X, ecliptic y -> scene -Z, north -> scene Y
-  vec3 p = vec3(cos(theta), sin(aTilt.x) * sin(theta - aTilt.y), -sin(theta)) * aOrbit.x;
+  vec3 p = vec3(cos(theta), sin(aTilt.x) * sin(theta - aTilt.y), -sin(theta)) * mix(aOrbit.x, aAU * uAU, uTrue);
   vec4 mv = modelViewMatrix * vec4(p, 1.0);
   float px = aLook.x * uSize * uScale / -mv.z;
   // below a pixel, fade instead of shrinking (no flicker, no hard dots)
   vAlpha = clamp(px / uPixelRatio, 0.0, 1.0);
+  if (uTrue > 0.5) {
+    float dist = length(mv.xyz);
+    px = aLook.x * uTrueSize * uScale / dist;
+    // a faint dust beyond a pixel, so the belt can still be seen
+    vAlpha = clamp(px / uPixelRatio, 0.22, 1.0);
+    float reach = 30.0 + 8.0 * log(max(dist, 1.0));
+    if (dist > reach) mv.xyz *= reach / dist;
+  }
   gl_PointSize = clamp(px, 1.0 * uPixelRatio, 3.0 * uPixelRatio);
   vShade = aLook.y;
   gl_Position = projectionMatrix * mv;
@@ -182,6 +202,9 @@ function useBeltMaterial(color: string, size: number, opacity: number) {
       new THREE.ShaderMaterial({
         uniforms: {
           uDays: { value: 0 },
+          uTrue: { value: 0 },
+          uAU: { value: AU_UNITS },
+          uTrueSize: { value: 30 / (6371 / 0.23) },
           uScale: { value: 400 },
           uSize: { value: size },
           uPixelRatio: { value: 1 },
@@ -200,11 +223,12 @@ function useBeltMaterial(color: string, size: number, opacity: number) {
 
   useFrame((state) => {
     material.uniforms.uDays.value = simClock.jd - J2000
+    material.uniforms.uTrue.value = layout.trueScale ? 1 : 0
     const ratio = gl.getPixelRatio()
     material.uniforms.uPixelRatio.value = ratio
     material.uniforms.uScale.value = state.size.height * ratio * 0.5
     // step back while a planet is the subject, so it never sits in a speckle
-    material.uniforms.uOpacity.value = opacity * (1 - 0.7 * lens.closeUp)
+    material.uniforms.uOpacity.value = layout.trueScale ? Math.min(1, opacity * 1.8) : opacity * (1 - 0.7 * lens.closeUp)
   })
   return material
 }

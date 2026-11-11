@@ -32,6 +32,11 @@ const WORLDS = [
   { index: 5, name: 'Saturn', key: '6' },
   { index: 6, name: 'Uranus', key: '7' },
   { index: 7, name: 'Neptune', key: '8' },
+  // the largest asteroids
+  { index: 8, name: 'Ceres', key: '9' },
+  { index: 9, name: 'Vesta', key: '' },
+  { index: 10, name: 'Pallas', key: '' },
+  { index: 11, name: 'Hygiea', key: '' },
 ]
 
 /* true speed, and past light speed, as a multiple of it */
@@ -65,6 +70,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const guideLine = useRef<SVGLineElement>(null)
   const markerRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [warping, setWarping] = useState('')
+  const [landState, setLandState] = useState('flying')
+  const [canLand, setCanLand] = useState(false)
+  const [site, setSite] = useState('')
 
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches
@@ -76,6 +84,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setAltitude(pilot.altitudeKm)
       setKms(pilot.kms)
       setWarping(pilot.warping)
+      setLandState(pilot.landState)
+      setCanLand(pilot.canLand)
+      const { lat, lon } = pilot.site
+      setSite(`${Math.abs(lat).toFixed(1)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lon).toFixed(1)}° ${lon < 0 ? 'W' : 'E'}`)
     }, 150)
 
     // markers follow the worlds every frame, without re-rendering
@@ -120,7 +132,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         element.dataset.edge = onScreen ? 'false' : 'true'
         element.dataset.side = x > width * 0.62 ? 'left' : 'right'
         // once the world itself is plainly visible, its marker steps aside
-        element.classList.toggle('is-hidden', onScreen && marker.radiusPx > 40)
+        element.classList.toggle('is-hidden', marker.radiusPx > 40)
         element.classList.toggle('is-target', pilot.warping !== '' && pilot.warping.endsWith(WORLDS[slot].name))
         const label = element.querySelector<HTMLElement>('.flight-marker-label')
         if (label) {
@@ -145,9 +157,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         onLand()
         return
       }
-      const world = WORLDS.find((entry) => entry.key === event.key)
+      const world = WORLDS.find((entry) => entry.key !== '' && entry.key === event.key)
       if (world && !event.repeat) {
         pilot.warpRequest = world.index
+        return
+      }
+      if (event.key.toLowerCase() === 'l' && !event.repeat) {
+        pilot.landRequest = true
         return
       }
       if (event.key.toLowerCase() === 'c' && !event.repeat) {
@@ -227,7 +243,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   }, [onLand])
 
   return (
-    <div className="flight-hud">
+    <div className={`flight-hud ${landState === 'landed' ? 'is-landed' : ''}`}>
       {!touch && (
         <svg ref={guide} className="flight-guide" aria-hidden="true">
           <circle cx="50%" cy="50%" r="18" />
@@ -241,7 +257,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
             type="button"
             className="flight-marker"
             data-edge="false"
-            aria-label={`Warp to ${world.name} (${world.key})`}
+            aria-label={world.key ? `Warp to ${world.name} (${world.key})` : `Warp to ${world.name}`}
             ref={(element) => {
               markerRefs.current[i] = element
             }}
@@ -257,7 +273,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         <span className="flight-near">
           {warping
             ? `Warping to ${warping} · ${formatSpeed(kms)} · S to stop`
-            : [altitude >= 0 ? `${nearest} · ${formatAltitude(altitude)}` : `Near ${nearest}`, formatSpeed(kms)]
+            : landState === 'landed'
+              ? `Landed on ${nearest} · ${site} · W to take off`
+              : landState === 'landing'
+                ? `Landing on ${nearest} · ${formatAltitude(altitude)}`
+                : [altitude >= 0 ? `${nearest} · ${formatAltitude(altitude)}` : `Near ${nearest}`, formatSpeed(kms)]
+                .concat(canLand ? ['L to land'] : [])
                 .filter(Boolean)
                 .join(' · ')}
         </span>

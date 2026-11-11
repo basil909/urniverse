@@ -428,3 +428,84 @@ export function getPlanetSunlight(index: number) {
   const tint = WARM_LIGHT.clone().lerp(COOL_LIGHT, t)
   return { strength, tint }
 }
+
+/* ============================================================
+   SMALL BODIES (shown while flying, at true scale)
+   The four largest asteroids, from JPL's Small-Body Database
+   (osculating elements at JD 2461200.5, heliocentric ecliptic J2000):
+   a (AU), e, i, node, perihelion argument, mean anomaly (degrees), daily
+   motion (degrees per day), mean diameter (km) and geometric albedo.
+============================================================ */
+export type SmallBody = {
+  name: string
+  a: number
+  e: number
+  i: number
+  node: number
+  peri: number
+  meanAnomaly: number
+  epoch: number
+  dailyMotion: number
+  diameterKm: number
+  albedo: number
+  color: string
+  /** how far from round: Ceres is nearly a ball, Pallas and Hygiea
+      lumpy, Vesta battered (the Rheasilvia basin) */
+  lumpiness: number
+}
+
+export const SMALL_BODIES: readonly SmallBody[] = [
+  { name: 'Ceres', a: 2.765552595034094, e: 0.07969229514816586, i: 10.58802780183462, node: 80.24862682043221, peri: 73.29421453021587, meanAnomaly: 274.4193463761342, epoch: 2461200.5, dailyMotion: 0.21430445064843, diameterKm: 939.4, albedo: 0.09, color: '#8d8a86', lumpiness: 0.02 },
+  { name: 'Vesta', a: 2.361365965127599, e: 0.09020374382834395, i: 7.143925545058711, node: 103.701293265032, peri: 151.4686478221564, meanAnomaly: 81.19015607686903, epoch: 2461200.5, dailyMotion: 0.2716183613599909, diameterKm: 522.77, albedo: 0.42, color: '#b9b0a2', lumpiness: 0.09 },
+  { name: 'Pallas', a: 2.769559010737709, e: 0.2307000995648547, i: 34.93279321851542, node: 172.8866193357694, peri: 310.9699161652136, meanAnomaly: 254.2496521742734, epoch: 2461200.5, dailyMotion: 0.2138396029251949, diameterKm: 513, albedo: 0.155, color: '#9a968f', lumpiness: 0.06 },
+  { name: 'Hygiea', a: 3.150974033963701, e: 0.1067092741240963, i: 3.829529946447122, node: 283.1198927508594, peri: 312.4242387344704, meanAnomaly: 252.0344242359649, epoch: 2461200.5, dailyMotion: 0.1762125505792448, diameterKm: 407.12, albedo: 0.0717, color: '#7a7672', lumpiness: 0.05 },
+]
+
+/** a small body's position relative to the Sun, in scene units */
+export function getSmallBodyOrbitPosition(index: number, jd: number, out: THREE.Vector3) {
+  const body = SMALL_BODIES[index]
+  if (!body) return out.set(0, 0, 0)
+  const rad = Math.PI / 180
+  const M = (body.meanAnomaly + body.dailyMotion * (jd - body.epoch)) * rad
+  const E = solveKepler(((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), body.e)
+  const xp = body.a * (Math.cos(E) - body.e)
+  const yp = body.a * Math.sqrt(1 - body.e * body.e) * Math.sin(E)
+  const w = body.peri * rad
+  const O = body.node * rad
+  const I = body.i * rad
+  const cw = Math.cos(w), sw = Math.sin(w), cO = Math.cos(O), sO = Math.sin(O), cI = Math.cos(I), sI = Math.sin(I)
+  const x = (cw * cO - sw * sO * cI) * xp + (-sw * cO - cw * sO * cI) * yp
+  const y = (cw * sO + sw * cO * cI) * xp + (-sw * sO + cw * cO * cI) * yp
+  const z = sw * sI * xp + cw * sI * yp
+  const r = Math.sqrt(x * x + y * y + z * z) || 1
+  const scale = layout.trueScale ? AU_UNITS : orbitalDisplayDistance(r) / r
+  // ecliptic -> scene: x -> X, north -> Y, y -> -Z
+  return out.set(x * scale, z * scale, -y * scale)
+}
+
+/* Every body you can fly to: 0-7 the planets, then the small bodies.
+   (The Sun is -1 wherever it appears.) */
+export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length
+
+export function getBodyOrbitPosition(id: number, jd: number, out: THREE.Vector3) {
+  if (id < 0) return out.set(0, 0, 0)
+  return id < PLANETS.length
+    ? getPlanetOrbitPosition(id, jd, out)
+    : getSmallBodyOrbitPosition(id - PLANETS.length, jd, out)
+}
+
+export function getBodyPosition(id: number, jd: number, out: THREE.Vector3) {
+  return getBodyOrbitPosition(id, jd, out).add(SYSTEM_OFFSET)
+}
+
+export function getBodyRadius(id: number) {
+  if (id < 0) return SUN_TRUE_RADIUS
+  if (id < PLANETS.length) return getPlanetVisualRadius(id)
+  const body = SMALL_BODIES[id - PLANETS.length]
+  return ((body?.diameterKm ?? 1) / 2 / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
+}
+
+export function getBodyName(id: number) {
+  if (id < 0) return 'the Sun'
+  return id < PLANETS.length ? PLANETS[id].name : SMALL_BODIES[id - PLANETS.length].name
+}

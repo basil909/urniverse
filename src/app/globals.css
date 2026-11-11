@@ -1542,6 +1542,9 @@ html.is-spinning * {
   transform: rotate(var(--angle, 0rad));
 }
 .flight-marker-label { transition: opacity 0.3s; }
+/* standing on a world, the markers step back to faint rings */
+.flight-hud.is-landed .flight-marker:not(:hover) { opacity: 0.3; }
+.flight-hud.is-landed .flight-marker:not(:hover) .flight-marker-label { opacity: 0; }
 .flight-marker-label.is-quiet { opacity: 0; }
 .flight-marker:hover .flight-marker-label.is-quiet { opacity: 1; }
 .flight-guide circle,

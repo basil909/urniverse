@@ -48,6 +48,16 @@ export const pilot = {
   warpGlow: 0,
   /** where the warp streaks are, as if flown through at a steady pace */
   warpOrigin: new THREE.Vector3(),
+  /** the ship's position (scene units), for the ground under it */
+  shipWorld: new THREE.Vector3(),
+  /** asked to land (L) */
+  landRequest: false,
+  /** 'flying', 'landing', 'landed' or 'lifting' */
+  landState: 'flying',
+  /** low enough over solid ground to land */
+  canLand: false,
+  /** where the ship stands, degrees */
+  site: { lat: 0, lon: 0 },
 }
 
 export const VIEW_NEAR = 3.2

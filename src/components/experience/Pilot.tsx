@@ -7,9 +7,14 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 
 import {
+  BODY_COUNT,
+  getBodyName,
+  getBodyOrbitPosition,
+  getBodyPosition,
+  getBodyRadius,
   getPlanetOrbitPosition,
   getPlanetPosition,
-  getPlanetVisualRadius,
+  SMALL_BODIES,
   layout,
   PLANETS,
   SUN_TRUE_RADIUS,
@@ -19,6 +24,7 @@ import {
 import { simClock } from './simClock'
 import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
+import { ground, groundAltitude, groundLatLon } from './groundState'
 
 /* ============================================================
    FLIGHT MODE
@@ -58,6 +64,14 @@ const _camPos = new THREE.Vector3()
 const _turn = new THREE.Quaternion()
 const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
+const _identity = new THREE.Quaternion()
+const _axisUp = new THREE.Vector3()
+const _groundUp = new THREE.Vector3()
+const _bodyQuat = new THREE.Quaternion()
+const _bodyPosDummy = new THREE.Vector3()
+const _bodyScaleDummy = new THREE.Vector3()
+const _align = new THREE.Quaternion()
+const _jetUp = new THREE.Vector3()
 const _markerDir = new THREE.Vector3()
 const _camForward = new THREE.Vector3()
 const _warpLook = new THREE.Matrix4()
@@ -90,7 +104,7 @@ type Warp = {
   eps: number
 }
 
-const BODY_NAMES = ['the Sun', ...PLANETS.map((planet) => planet.name)]
+const BODY_NAMES = Array.from({ length: BODY_COUNT + 1 }, (_, i) => getBodyName(i - 1))
 const _toSun = new THREE.Vector3()
 const _levelUp = new THREE.Vector3()
 const _targetRates = new THREE.Vector3()
@@ -607,6 +621,10 @@ export default function Pilot() {
   const shine = useRef<THREE.DirectionalLight>(null)
   const shineFor = useRef(-2)
   const warp = useRef<Warp | null>(null)
+  // landing: where the ship stands, in the planet's own frame (it turns)
+  const landedAt = useRef(new THREE.Vector3())
+  const landedTurn = useRef(new THREE.Quaternion())
+  const liftTime = useRef(0)
   const viewDistance = useRef(VIEW_NEAR)
   const beacon = useRef<THREE.Sprite>(null)
   const beaconMaterial = useMemo(() => {
@@ -652,6 +670,7 @@ export default function Pilot() {
         warp.current = null
         pilot.warping = ''
         pilot.warpGlow = 0
+        pilot.landState = 'flying'
         // back to the journey's compressed Solar System, and its camera
         layout.trueScale = false
         SYSTEM_OFFSET.copy(SYSTEM_BASE)
@@ -715,13 +734,13 @@ export default function Pilot() {
     let clearance = jet.position.distanceTo(SYSTEM_OFFSET) - SUN_TRUE_RADIUS
     _bodyPos.copy(SYSTEM_OFFSET)
     let nearestRadius = SUN_TRUE_RADIUS
-    for (let i = 0; i < PLANETS.length; i += 1) {
-      getPlanetPosition(i, simClock.jd, _bodyCenter)
-      const radius = getPlanetVisualRadius(i)
+    for (let i = 0; i < BODY_COUNT; i += 1) {
+      getBodyPosition(i, simClock.jd, _bodyCenter)
+      const radius = getBodyRadius(i)
       const gap = jet.position.distanceTo(_bodyCenter) - radius
       if (gap < clearance) {
         clearance = gap
-        nearest = PLANETS[i].name
+        nearest = getBodyName(i)
         nearestIndex = i
         nearestRadius = radius
         _bodyPos.copy(_bodyCenter)
@@ -732,12 +751,23 @@ export default function Pilot() {
     pilot.clearance = clearance
     // altitude in km, at the planets' scale (the Sun is not drawn to it)
     pilot.altitudeKm = nearestIndex >= 0 ? clearance * KM_PER_UNIT : -1
+    // over solid ground: measured from the ground itself
+    pilot.shipWorld.copy(jet.position)
+    const onGround = ground.body === nearestIndex && ground.model !== null
+    const groundHere = onGround ? groundAltitude(jet.position) : Infinity
+    if (onGround) {
+      clearance = Math.max(groundHere, 0)
+      pilot.clearance = clearance
+      pilot.altitudeKm = groundHere * KM_PER_UNIT
+    }
 
     // ---- controls: keys, mouse or touch, and a gamepad if one is in use
     const keys = pilot.keys
     const pad = readGamepad()
     const warping = warp.current !== null
-    const forwardKey = !warping && (keys.has('w') || pilot.touchThrust || pad.thrust > 0.2)
+    const grounded = pilot.landState === 'landed' || pilot.landState === 'landing'
+    const thrustHeld = keys.has('w') || pilot.touchThrust || pad.thrust > 0.2
+    const forwardKey = !warping && !grounded && thrustHeld
     const brakeKey = keys.has('s') || pad.brake > 0.2
     const boost = keys.has('shift') || pad.boost
     // stick-like input, -1..1: a soft centre for fine corrections, full
@@ -795,8 +825,10 @@ export default function Pilot() {
     const rollAngle = Math.atan2(_right.dot(_levelUp), _up.dot(_levelUp))
     const level = rollInput === 0 ? THREE.MathUtils.clamp(rollAngle * 2.2, -2.2, 2.2) * (1 - vertical) : 0
     // close to the ground, the nose is eased up rather than flown in
-    const minimum = nearestRadius * LOWEST
-    const soft = nearestRadius * 0.02
+    // over solid ground the floor is the ground itself (with the ship's
+    // own height to spare); elsewhere the edge of space
+    const minimum = onGround ? fromCentre - groundHere + SHIP_LENGTH * (pilot.landState === 'flying' ? 0.6 : 0.1) : nearestRadius * LOWEST
+    const soft = onGround ? SHIP_LENGTH * 12 : nearestRadius * 0.02
     const closeness = 1 - THREE.MathUtils.clamp((fromCentre - minimum) / soft, 0, 1)
     const diving = Math.max(0, -_forward.dot(_axis))
     const pullUp = closeness * diving * 2.5
@@ -841,13 +873,84 @@ export default function Pilot() {
     }
     if (height < minimum) jet.position.copy(_bodyPos).addScaledVector(_axis, minimum)
 
+    // ---- landing (L, low over solid ground), standing, and lifting off
+    pilot.canLand = onGround && groundHere < 8 / KM_PER_UNIT && pilot.landState === 'flying' && !warping
+    if (pilot.landRequest) {
+      pilot.landRequest = false
+      if (pilot.canLand) {
+        pilot.landState = 'landing'
+        // never start a landing from inside a hill
+        const below = groundAltitude(jet.position)
+        if (below < SHIP_LENGTH * 0.14) {
+          ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
+          _groundUp.copy(jet.position).applyMatrix4(ground.inverse).normalize().applyQuaternion(_bodyQuat)
+          jet.position.addScaledVector(_groundUp, SHIP_LENGTH * 0.6 - below)
+        }
+      }
+    }
+    if (pilot.landState !== 'flying' && (!onGround || warping || pilot.warpRequest !== null)) {
+      pilot.landState = 'flying'
+    }
+    if (pilot.landState !== 'flying' && onGround) {
+      ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
+      _groundUp.copy(jet.position).applyMatrix4(ground.inverse).normalize().applyQuaternion(_bodyQuat)
+      const rest = SHIP_LENGTH * 0.14 // the belly on the ground
+      if (pilot.landState === 'landing') {
+        // settle down onto the ground, wings level, coming to a stop
+        const altitude = groundAltitude(jet.position)
+        // eased down, but never slower than a few metres a second at the end
+        const next = Math.max(rest, Math.min(rest + (altitude - rest) * Math.exp(-delta * 1.3), altitude - (0.004 / KM_PER_UNIT) * delta))
+        jet.position.addScaledVector(_groundUp, next - altitude)
+        velocity.current.multiplyScalar(Math.exp(-delta * 2.5))
+        jet.position.addScaledVector(velocity.current, delta)
+        speed.current = 0
+        _jetUp.set(0, 1, 0).applyQuaternion(jet.quaternion)
+        _align.setFromUnitVectors(_jetUp, _groundUp)
+        jet.quaternion.premultiply(_align.slerp(_identity, Math.exp(-delta * 3))).normalize()
+        if (Math.abs(altitude - rest) < SHIP_LENGTH * 0.02 && velocity.current.length() < SHIP_LENGTH * 0.5) {
+          pilot.landState = 'landed'
+          landedAt.current.copy(jet.position).applyMatrix4(ground.inverse)
+          landedTurn.current.copy(_bodyQuat).invert().multiply(jet.quaternion)
+        }
+      } else if (pilot.landState === 'landed') {
+        // standing: carried round with the planet's turn; steering turns
+        // the ship where it stands
+        if (Math.abs(steerX) > 0) {
+          _turn.setFromAxisAngle(_axisUp.set(0, 1, 0), -steerX * 0.8 * delta)
+          landedTurn.current.multiply(_turn)
+        }
+        jet.position.copy(landedAt.current).applyMatrix4(ground.matrix)
+        jet.quaternion.copy(_bodyQuat).multiply(landedTurn.current)
+        speed.current = 0
+        velocity.current.set(0, 0, 0)
+        if (thrustHeld) {
+          pilot.landState = 'lifting'
+          liftTime.current = 0
+        }
+      } else if (pilot.landState === 'lifting') {
+        // straight up, gathering speed, then away
+        liftTime.current += delta
+        const climb = SHIP_LENGTH * (1 + liftTime.current * 6)
+        jet.position.addScaledVector(_groundUp, climb * delta)
+        if (liftTime.current > 2.2) {
+          pilot.landState = 'flying'
+          speed.current = SHIP_LENGTH * 4
+        }
+      }
+    }
+    if (onGround) {
+      const site = groundLatLon(jet.position)
+      pilot.site.lat = site.lat
+      pilot.site.lon = site.lon
+    }
+
     // ---- warp: asked for by the HUD; while it runs it flies the ship
     if (pilot.warpRequest !== null) {
       const target = pilot.warpRequest
       pilot.warpRequest = null
       const rel = jet.position.clone().sub(SYSTEM_OFFSET)
-      const goal = target < 0 ? new THREE.Vector3() : getPlanetOrbitPosition(target, simClock.jd, new THREE.Vector3())
-      const radius = target < 0 ? SUN_TRUE_RADIUS : getPlanetVisualRadius(target)
+      const goal = getBodyOrbitPosition(target, simClock.jd, new THREE.Vector3())
+      const radius = getBodyRadius(target)
       const standOff = target < 0 ? 6 : target === 5 ? 5.5 : 3.2
       // arrive on the near side, turned towards the Sun (the lit face)
       const fromGoal = rel.clone().sub(goal).normalize()
@@ -964,8 +1067,17 @@ export default function Pilot() {
     camera.position.copy(jet.position).add(camOffset.current)
     // pulled far back, the camera stays above the ground
     _camTarget.copy(camera.position).sub(_bodyPos)
-    if (_camTarget.length() < nearestRadius * 1.004) {
+    if (!onGround && _camTarget.length() < nearestRadius * 1.004) {
       camera.position.copy(_bodyPos).addScaledVector(_camTarget.normalize(), nearestRadius * 1.004)
+    }
+    if (onGround) {
+      const above = groundAltitude(camera.position)
+      if (above < SHIP_LENGTH * 0.3) {
+        _groundUp.copy(camera.position).applyMatrix4(ground.inverse).normalize()
+        ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
+        _groundUp.applyQuaternion(_bodyQuat)
+        camera.position.addScaledVector(_groundUp, SHIP_LENGTH * 0.3 - above)
+      }
     }
     _camTarget
       .copy(jet.position)
@@ -1010,7 +1122,11 @@ export default function Pilot() {
       shine.current.intensity = nearestIndex >= 0 ? 0.55 * nearness * daySide : 0
       if (nearestIndex >= 0 && shineFor.current !== nearestIndex) {
         shineFor.current = nearestIndex
-        shine.current.color.set(PLANETS[nearestIndex].atmosphereColor ?? PLANETS[nearestIndex].baseColor)
+        shine.current.color.set(
+          nearestIndex < PLANETS.length
+            ? (PLANETS[nearestIndex].atmosphereColor ?? PLANETS[nearestIndex].baseColor)
+            : SMALL_BODIES[nearestIndex - PLANETS.length].color,
+        )
       }
     }
 
@@ -1018,7 +1134,7 @@ export default function Pilot() {
     // is in its own layer, so nothing nearer needs drawing here)
     const fov = 52 + pilot.speed * (boost ? 16 : 8)
     camera.fov += (fov - camera.fov) * (1 - Math.exp(-delta * 3))
-    camera.near = THREE.MathUtils.clamp(clearance * 0.25, 1e-5, 0.01)
+    camera.near = THREE.MathUtils.clamp(clearance * 0.25, onGround ? 2e-7 : 1e-5, 0.01)
     camera.updateProjectionMatrix()
     shipCamera.fov = camera.fov
     shipCamera.aspect = camera.aspect
@@ -1029,13 +1145,12 @@ export default function Pilot() {
     camera.getWorldDirection(_camForward)
     const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2
     const halfHeight = size.height / 2
-    if (pilot.markers.length !== PLANETS.length + 1) {
+    if (pilot.markers.length !== BODY_COUNT + 1) {
       pilot.markers = BODY_NAMES.map((name, i) => ({ name, index: i - 1, x: 0, y: 0, ahead: false, km: 0, radiusPx: 0 }))
     }
     pilot.markers.forEach((marker) => {
-      if (marker.index < 0) _bodyCenter.copy(SYSTEM_OFFSET)
-      else getPlanetPosition(marker.index, simClock.jd, _bodyCenter)
-      const radius = marker.index < 0 ? SUN_TRUE_RADIUS : getPlanetVisualRadius(marker.index)
+      getBodyPosition(marker.index, simClock.jd, _bodyCenter)
+      const radius = getBodyRadius(marker.index)
       _markerDir.copy(_bodyCenter).sub(camera.position)
       const distance = _markerDir.length()
       _markerDir.divideScalar(distance)

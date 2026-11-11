@@ -19,9 +19,15 @@ import {
   SUN_TRUE_RADIUS,
   farScale,
   layout,
+  SMALL_BODIES,
+  getSmallBodyOrbitPosition,
+  getBodyRadius,
 } from './orbit'
 import { simClock } from './simClock'
 import { pilot } from './pilotState'
+import { CLOSE_DETAIL_GLSL } from './closeDetail'
+import Terrain from './Terrain'
+import { GROUND, groundHole } from './groundState'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
 import Belts from './Belts'
@@ -85,54 +91,6 @@ const _cloudCentre = new THREE.Vector3()
    nothing changes in the wide views, and nothing shimmers. It is texture,
    not data: the real features stay those of the maps.
 ============================================================ */
-const CLOSE_DETAIL_GLSL = /* glsl */ `
-float cdHash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-float cdNoise(vec3 p) {
-  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(cdHash(i), cdHash(i + vec3(1,0,0)), f.x), mix(cdHash(i + vec3(0,1,0)), cdHash(i + vec3(1,1,0)), f.x), f.y),
-             mix(mix(cdHash(i + vec3(0,0,1)), cdHash(i + vec3(1,0,1)), f.x), mix(cdHash(i + vec3(0,1,1)), cdHash(i + vec3(1,1,1)), f.x), f.y), f.z);
-}
-/* p: direction on the unit sphere. rugged: 1 for ridged rock, 0 for soft
-   cloud. stretch: streaks the pattern east-west (banded giants).
-   Returns (height in radii, tone -0.5..0.5, how much is shown 0..1). */
-vec3 closeDetail(vec3 p, float rugged, float stretch) {
-  float px = length(fwidth(p)); /* one pixel, in radii */
-  vec3 q = p * vec3(1.0, stretch, 1.0);
-  float h = 0.0; float tone = 0.0; float shown = 0.0;
-  float f = 300.0;
-  for (int i = 0; i < 4; i++) {
-    float a = 1.0 - smoothstep(0.22, 0.9, px * f);
-    if (a > 0.002) {
-      vec3 c = q * f + float(i) * 31.7;
-      /* a little warp, so the pattern never reads as a regular grain */
-      c += (vec3(cdNoise(c * 0.31), cdNoise(c * 0.31 + 5.2), cdNoise(c * 0.31 + 9.7)) - 0.5) * 1.8;
-      float n = cdNoise(c);
-      float ridge = 1.0 - abs(2.0 * n - 1.0);
-      float v = mix(n, ridge * ridge, rugged) - 0.5;
-      h += v * a / f;
-      tone += v * a * 0.6;
-      shown = max(shown, a);
-    }
-    f *= 4.0;
-  }
-  /* rough ground in some places, smooth plains in others */
-  float rough = shown > 0.0 ? mix(0.2, 1.0, smoothstep(0.3, 0.7, cdNoise(q * 45.0 + 3.3))) : 1.0;
-  return vec3(h * rough, clamp(tone * mix(0.5, 1.0, rough), -0.5, 0.5), shown);
-}
-/* tilt a normal by a height field, from its screen-space slope (pos and
-   n in the same space, h in its units) */
-vec3 closeBumpWith(vec3 n, vec3 dpdx, vec3 dpdy, float h) {
-  float dhdx = dFdx(h); float dhdy = dFdy(h);
-  vec3 r1 = cross(dpdy, n); vec3 r2 = cross(n, dpdx);
-  float det = dot(dpdx, r1);
-  if (abs(det) < 1e-30) return n;
-  vec3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
-  return normalize(abs(det) * n - grad);
-}
-vec3 closeBump(vec3 n, vec3 pos, float h) {
-  return closeBumpWith(n, dFdx(pos), dFdy(pos), h);
-}
-`
 
 /* for three.js's own materials: the vertex shader passes the point's
    direction on the sphere and the body's size */
@@ -191,8 +149,16 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
 }
 
 function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, earthNight, surfacePatch)
+  Object.assign(shader.uniforms, earthNight, surfacePatch, groundHole)
   withSurfaceVaryings(shader)
+  shader.fragmentShader =
+    'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
+    shader.fragmentShader.replace(
+      '#include <clipping_planes_fragment>',
+      `#include <clipping_planes_fragment>
+      // landed: the ground patch replaces the sphere here
+      if (uHolePlanet == 2 && dot(normalize(vSurfaceP), uHoleDir) > uHoleCos) discard;`,
+    )
   shader.fragmentShader = SURFACE_PATCH_GLSL + shader.fragmentShader
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
@@ -624,6 +590,7 @@ const ATMOSPHERE_FRAGMENT_SHADER = /* glsl */ `
 
 uniform vec3 uColor; uniform vec3 uDusk; uniform float uIntensity; uniform float uThickness;
 uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform float uAirglow;
+uniform float uGroundSky; /* 1 standing in the air near the ground, 0 above it */
 varying vec3 vNormal; varying vec3 vWorldPosition;
 varying vec3 vCenter; varying float vRadius;
 
@@ -638,6 +605,7 @@ void main() {
      the shell's outer edge. Over the disk it only brightens near the limb. */
   float pass;
   float column = 1.0;
+  float camHeight = 1.0;
   vec3 oc = vCenter - cameraPosition;
   bool inside = length(oc) < vRadius * uShell;
   if (inside) {
@@ -655,6 +623,7 @@ void main() {
     toSun = normalize(uSunPosition - vCenter);
     float up = dot(ray, normalize(-oc));
     column = 1.0 / (1.0 + max(up, 0.0) * sqrt(2.0 / max(uShell - 1.0, 0.01)) * 6.0);
+    camHeight = length(oc) / vRadius - 1.0;
   } else {
     if (!gl_FrontFacing) discard;
     float nv = clamp(dot(n, vd), 0.0, 1.0);
@@ -664,7 +633,13 @@ void main() {
   /* from far away the glow is drawn thicker than it is, so it shows; seen
      from inside, the air thins over its true few tens of km */
   if (inside) scale *= 0.4;
+  /* standing in the air, the whole sky is lit (blue on Earth, butterscotch
+     on Mars); it darkens to black as you climb out of it */
+  if (inside) column = mix(column, 1.0, max(exp(-camHeight / (scale * 0.6)), uGroundSky) * 0.9);
   float above = pass - 1.0;
+  /* standing on ground below the planet's mean radius (Mars's lowlands),
+     the air is measured from where you stand */
+  if (inside) above = max(pass - min(1.0, camHeight + 1.0), 0.0);
   float edge = above > 0.0
     ? exp(-above / scale) * (1.0 - smoothstep(mix(uShell, 1.0, 0.25), uShell, pass))
     : pow(clamp(pass, 0.0, 1.0), mix(14.0, 5.0, clamp(uThickness / 1.2, 0.0, 1.0)));
@@ -683,7 +658,11 @@ void main() {
   float backlit = forward * smoothstep(-0.75, 0.05, ndl) * 2.2;
 
   if (inside && above < 0.0) edge = 0.0; /* that ray ends on the ground */
+  if (inside) edge = mix(edge, 1.0, uGroundSky * 0.85);
   float a = edge * column * (day + backlit) * uIntensity * uLight;
+  /* the daytime sky seen from the ground is far brighter than the thin
+     limb seen from space */
+  if (inside) a = min(a * mix(1.0, 2.6, uGroundSky), mix(4.0, 0.95, uGroundSky));
   vec3 glow = color * a;
 
   /* Earth's airglow: on the night side, seen edge-on, a thin green line
@@ -734,6 +713,7 @@ uniform float uTime; uniform int uType; uniform int uPlanet; uniform vec3 uBaseC
 /* shadows (all in world space) */
 uniform vec3 uMoonPos[4]; uniform float uMoonRadius[4]; uniform int uMoonCount;
 uniform float uLight; uniform vec3 uLightTint; /* sunlight strength and colour at this distance */
+uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos; /* cut away under the landing ground */
 uniform float uHasRings; uniform sampler2D uRingMap; uniform vec3 uRingNormal; uniform vec3 uPlanetCenter; uniform float uRingInner; uniform float uRingOuter;
 uniform sampler2D uHeight; uniform float uHasHeight; uniform float uRelief; uniform vec2 uHeightTexel; /* surface relief */
 
@@ -980,6 +960,7 @@ void main() {
   vec3 surface;
   float streamedCover = 0.0;
 
+  if (uHolePlanet == uPlanet && dot(p, uHoleDir) > uHoleCos) discard;
   if (uPlanet == 0) surface = mercury(p);
   else if (uPlanet == 1) surface = venus(p);
   else if (uPlanet == 3) surface = mars(p);
@@ -1211,6 +1192,7 @@ export default function SolarSystem({
     system.current.scale.setScalar(scale)
     system.current.visible = scale > 0.002
     system.current.position.copy(SYSTEM_OFFSET)
+    // the comet is illustrative, drawn for the journey only
     if (smallBodies.current) smallBodies.current.visible = !layout.trueScale
   })
 
@@ -1229,11 +1211,107 @@ export default function SolarSystem({
         />
       ))}
 
-      <group ref={smallBodies} position={SYSTEM_BASE}>
+      <group position={SYSTEM_BASE}>
         <Belts />
+      </group>
+      <group ref={smallBodies} position={SYSTEM_BASE}>
         <Comet />
       </group>
+      <Asteroids />
       </group>
+    </group>
+  )
+}
+
+/* ============================================================
+   THE LARGEST ASTEROIDS (flying only)
+   Ceres, Vesta, Pallas and Hygiea at their real positions (JPL orbits)
+   and true sizes, turning at their real rates. No maps of them are
+   bundled, so each is a grey world shaped from noise: Ceres nearly round,
+   Vesta battered, with a great basin at its south pole (Rheasilvia).
+============================================================ */
+
+const ASTEROID_DAY_HOURS = [9.07, 5.34, 7.81, 13.83]
+const _asteroidWorld = new THREE.Vector3()
+
+function asteroidGeometry(lumpiness: number, seed: number, basin: boolean) {
+  const geometry = new THREE.IcosahedronGeometry(1, 6)
+  const position = geometry.attributes.position as THREE.BufferAttribute
+  const v = new THREE.Vector3()
+  const wave = (p: THREE.Vector3, f: number, k: number) =>
+    Math.sin(p.x * f + k) * Math.sin(p.y * f * 1.3 + k * 1.7) * Math.sin(p.z * f * 0.9 + k * 2.3)
+  for (let i = 0; i < position.count; i += 1) {
+    v.fromBufferAttribute(position, i).normalize()
+    let r = 1 + lumpiness * (wave(v, 2.1, seed) * 0.6 + wave(v, 4.7, seed * 1.9) * 0.3 + wave(v, 11, seed * 3.1) * 0.1)
+    // small craters, everywhere
+    r -= 0.012 * Math.max(0, wave(v, 23, seed * 0.7)) ** 3
+    if (basin) {
+      // Rheasilvia: a basin 500 km across, nearly the width of Vesta
+      const south = Math.max(0, -v.y - 0.45) / 0.55
+      r -= 0.12 * south * south * (1 - 0.6 * south)
+    }
+    position.setXYZ(i, v.x * r, v.y * r, v.z * r)
+  }
+  geometry.computeVertexNormals()
+  return geometry
+}
+
+function Asteroids() {
+  const camera = useThree((state) => state.camera)
+  const groups = useRef<(THREE.Group | null)[]>([])
+  const spins = useRef<(THREE.Mesh | null)[]>([])
+  const shapes = useMemo(
+    () => SMALL_BODIES.map((body, i) => asteroidGeometry(body.lumpiness, 1.3 + i * 2.7, body.name === 'Vesta')),
+    [],
+  )
+  const materials = useMemo(
+    () => SMALL_BODIES.map((body) => new THREE.MeshStandardMaterial({ color: body.color, roughness: 0.96, metalness: 0 })),
+    [],
+  )
+  useEffect(
+    () => () => {
+      shapes.forEach((shape) => shape.dispose())
+      materials.forEach((material) => material.dispose())
+    },
+    [shapes, materials],
+  )
+  useFrame(() => {
+    SMALL_BODIES.forEach((_, i) => {
+      const group = groups.current[i]
+      if (!group) return
+      group.visible = layout.trueScale
+      if (!group.visible) return
+      getSmallBodyOrbitPosition(i, simClock.jd, _scratchOrbitPos)
+      const radius = getBodyRadius(PLANETS.length + i)
+      // far away: drawn nearer and smaller, along the same line
+      _asteroidWorld.copy(_scratchOrbitPos).add(SYSTEM_OFFSET)
+      const far = farScale(_asteroidWorld.distanceTo(camera.position))
+      if (far < 1) _asteroidWorld.sub(camera.position).multiplyScalar(far).add(camera.position)
+      group.position.copy(_asteroidWorld).sub(SYSTEM_OFFSET)
+      group.scale.setScalar(radius * far)
+      const spin = spins.current[i]
+      if (spin) spin.rotation.y = ((simClock.bodyJd * 24) / ASTEROID_DAY_HOURS[i]) * Math.PI * 2
+    })
+  })
+  return (
+    <group position={SYSTEM_BASE}>
+      {SMALL_BODIES.map((body, i) => (
+        <group
+          key={body.name}
+          ref={(group) => {
+            groups.current[i] = group
+          }}
+          visible={false}
+        >
+          <mesh
+            ref={(mesh) => {
+              spins.current[i] = mesh
+            }}
+            geometry={shapes[i]}
+            material={materials[i]}
+          />
+        </group>
+      ))}
     </group>
   )
 }
@@ -1706,6 +1784,8 @@ function Planet({
       uHeightTexel: { value: new THREE.Vector2(1 / 1024, 1 / 512) },
       // streamed imagery while flying low (shared by all planets)
       ...surfacePatch,
+      // the cut under the landing ground
+      ...groundHole,
     }),
     [planet, planetType, index, sunlight],
   )
@@ -1742,6 +1822,7 @@ function Planet({
       uLight: { value: sunlight.strength },
       uShell: { value: ATMOSPHERE_SHELL[planet.name] ?? 1.055 },
       uAirglow: { value: planet.name === 'Earth' ? 1 : 0 },
+      uGroundSky: { value: 0 },
     }
   }, [planet, sunlight])
 
@@ -1994,7 +2075,15 @@ function Planet({
     }
     planetSun.copy(SYSTEM_OFFSET).add(orbit.current.position).sub(_scratchOrbitPos)
     if (atmosphereMesh.current) {
-      ;(atmosphereMesh.current.material as THREE.ShaderMaterial).uniforms.uSunPosition.value = planetSun
+      const atmosphere = (atmosphereMesh.current.material as THREE.ShaderMaterial).uniforms
+      atmosphere.uSunPosition.value = planetSun
+      // low over this world's ground, its sky lights up (fading out by
+      // 60 km up on Earth, 40 km on Mars)
+      const low = pilot.active && pilot.nearestIndex === index && pilot.altitudeKm >= 0
+      const top = planet.name === 'Earth' ? 60 : 40
+      if (atmosphere.uGroundSky) {
+        atmosphere.uGroundSky.value = low ? 1 - THREE.MathUtils.smoothstep(pilot.altitudeKm, top * 0.15, top) : 0
+      }
     }
 
     // Focus: while one planet is the subject, the others shrink to distant
@@ -2080,7 +2169,8 @@ function Planet({
     if (trueSpin !== null) lastTrueSpin.current = trueSpin
 
     if (!held) {
-      if (trueSpin === null) body.current.rotation.y += delta * rotationSpeed
+      // (flying, the worlds hold still: you can stand on them)
+      if (trueSpin === null && !pilot.active) body.current.rotation.y += delta * rotationSpeed
     } else if (spinState) {
       spinState.velocity = 0
     }
@@ -2116,6 +2206,18 @@ function Planet({
               />
             )}
             <sphereGeometry args={[1, 192, 192]} />
+
+            {/* the ground under the ship, for landing (rocky worlds) */}
+            {GROUND[index] && (
+              <Terrain
+                index={index}
+                map={() => (planet.name === 'Earth' ? (sharpDay ?? earthMap) : uniforms.uMap.value)}
+                sunPosition={planetSun}
+                light={sunlight.strength}
+                lightTint={sunlight.tint}
+                earth={planet.name === 'Earth'}
+              />
+            )}
 
             {/* clouds ride on Earth and drift slowly over it */}
             {planet.type === 'earth' && (
@@ -2279,6 +2381,7 @@ function EarthCloudLayer({
         opacity={0.85}
         depthWrite={false}
         shininess={0}
+        side={THREE.DoubleSide}
         onBeforeCompile={detailClouds}
       />
     </mesh>

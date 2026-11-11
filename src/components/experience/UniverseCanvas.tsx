@@ -1026,11 +1026,10 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
     // clamp delta so a backgrounded tab does not jump the planets
     const step = Math.min(delta, 0.1)
     if (pilot.active) {
-      // flying, at true scale: the orbits hold still (Earth alone covers
-      // 30 km a second, and would slip out from under the ship), while
-      // spins and moons run in real time
+      // flying, at true scale, the Solar System holds still: Earth alone
+      // covers 30 km a second and turns 465 m a second at the equator, and
+      // would slip out from under the ship (or a ship standing on it)
       simClock.rate = 0
-      simClock.bodyJd += step / 86400
       return
     }
     if (simClock.real) {
