@@ -75,6 +75,12 @@ export const pilot = {
       sunlit */
   mist: 0,
   mistLight: 1,
+  /** how far from the Sun: AU, and parsecs */
+  sunAU: 0,
+  awayPc: 0,
+  /** near the Sun: hull temperature (K), and how fierce the glare (0..1) */
+  hullK: 0,
+  sunHeat: 0,
   /** time in flight: 0 (held still), 1 (real time) or faster (T cycles) */
   timeScale: 0,
   /** orbiting the nearest world (O), and that orbit's period, minutes */

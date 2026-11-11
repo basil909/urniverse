@@ -18,6 +18,8 @@ const round2 = (value: number) => Number(value.toPrecision(2)).toLocaleString('e
 
 /* altitude above the nearest planet, readable at any distance */
 function formatAltitude(km: number) {
+  if (km >= 3e12) return `${(km / 9.4607e12).toFixed(2)} light-years away`
+  if (km >= 7.5e9) return `${Math.round(km / 1.496e8).toLocaleString('en-GB')} AU away`
   if (km >= 1e9) return `${(km / 1e9).toFixed(1)} billion km up`
   if (km >= 1e6) return `${(km / 1e6).toFixed(1)} million km up`
   return `${round2(km)} km up`
@@ -25,13 +27,20 @@ function formatAltitude(km: number) {
 
 /* a marker's distance, short: 8,400 km, 380,000 km, 225M km, 4.3B km */
 function formatShort(km: number) {
+  if (km >= 3e12) return `${(km / 9.4607e12).toFixed(km >= 9.4607e13 ? 0 : 1)} ly`
+  if (km >= 7.5e9) return `${Math.round(km / 1.496e8).toLocaleString('en-GB')} AU`
   if (km >= 1e9) return `${(km / 1e9).toFixed(1)}B km`
   if (km >= 1e6) return `${Math.round(km / 1e6).toLocaleString('en-GB')}M km`
   return `${round2(km)} km`
 }
 
 /* the worlds, as the markers list them (index -1: the Sun) */
-const WORLDS: { index: number; name: string; key: string; parent?: number }[] = [
+const nearAny = (...ids: number[]) => () => ids.includes(pilot.nearestIndex)
+const STAR_NAMES = [
+  'Proxima Centauri', 'Alpha Centauri A', "Barnard's Star", 'Sirius', 'Procyon', 'Altair', 'Vega', 'Fomalhaut', 'Arcturus',
+  'Capella', 'Aldebaran', 'Pollux', 'Regulus', 'Betelgeuse', 'Rigel', 'Polaris', 'Antares', 'Deneb', 'Spica', 'Canopus',
+]
+const WORLDS: { index: number; name: string; key: string; parent?: number; show?: () => boolean }[] = [
   { index: -1, name: 'Sun', key: '0' },
   { index: 0, name: 'Mercury', key: '1' },
   { index: 1, name: 'Venus', key: '2' },
@@ -55,6 +64,20 @@ const WORLDS: { index: number; name: string; key: string; parent?: number }[] = 
   { index: 17, name: 'Titan', key: '', parent: 5 },
   { index: 18, name: 'Phobos', key: '', parent: 3 },
   { index: 19, name: 'Deimos', key: '', parent: 3 },
+  // spacecraft: near Earth (or the Moon), out past the planets, on Mars
+  { index: 20, name: 'Space Station', key: '', show: nearAny(2, 12, 20, 21, 22) },
+  { index: 21, name: 'Hubble', key: '', show: nearAny(2, 12, 20, 21, 22) },
+  { index: 22, name: 'Webb', key: '', show: nearAny(2, 12, 20, 21, 22) },
+  { index: 23, name: 'Voyager 1', key: '', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 23 },
+  { index: 24, name: 'Voyager 2', key: '', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 24 },
+  { index: 25, name: 'Perseverance', key: '', show: nearAny(3, 25) },
+  // the stars: once you are out beyond the planets
+  ...STAR_NAMES.map((name, i) => ({
+    index: 26 + i,
+    name,
+    key: '',
+    show: () => pilot.sunAU > 60 || pilot.nearestIndex >= 26 || pilot.warping !== '',
+  })),
 ]
 
 const FEATURE_SLOTS = 12
@@ -117,12 +140,20 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [orbitMinutes, setOrbitMinutes] = useState(0)
   const [timeScale, setTimeScale] = useState(0)
   const mist = useRef<HTMLDivElement>(null)
+  const heatGlare = useRef<HTMLDivElement>(null)
+  const [hullK, setHullK] = useState(0)
 
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches
     setTouch(coarse)
     const hintTimer = window.setTimeout(() => setHint(false), 7000)
     let toastTimer = 0
+    let lastSunAU = pilot.sunAU
+    const showToast = (text: string) => {
+      setToast(text)
+      window.clearTimeout(toastTimer)
+      toastTimer = window.setTimeout(() => setToast(''), 3200)
+    }
     const hud = window.setInterval(() => {
       setNearest(pilot.nearest)
       setSpeed(pilot.speed)
@@ -134,6 +165,11 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       const { lat, lon } = pilot.site
       setSite(`${Math.abs(lat).toFixed(1)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lon).toFixed(1)}° ${lon < 0 ? 'W' : 'E'}`)
       setImmersion(pilot.immersion)
+      setHullK(pilot.hullK)
+      // crossing the heliopause, where the Sun's wind meets the galaxy's
+      if (lastSunAU < 120 && pilot.sunAU >= 120) showToast('Leaving the heliosphere: interstellar space begins')
+      else if (lastSunAU >= 120 && pilot.sunAU < 120 && pilot.active) showToast('Back inside the heliosphere')
+      lastSunAU = pilot.sunAU
       setOrbiting(pilot.orbiting)
       setOrbitMinutes(pilot.orbitMinutes)
       setTimeScale(pilot.timeScale)
@@ -188,6 +224,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         haze.current.style.opacity = deep > 0 ? String(0.35 + 0.6 * deep) : '0'
         haze.current.style.background = `radial-gradient(circle at 50% 40%, ${pilot.hazeColor} 0%, color-mix(in srgb, ${pilot.hazeColor} ${Math.round(100 - deep * 85)}%, #000) 100%)`
       }
+      // the Sun close by: its glare floods in
+      if (heatGlare.current) heatGlare.current.style.opacity = String(pilot.sunHeat * 0.7)
       // Earth's cloud deck: white mist by day, grey by night
       if (mist.current) {
         const light = Math.round(30 + pilot.mistLight * 205)
@@ -234,7 +272,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         // once the world itself is plainly visible, its marker steps aside;
         // a planet's moons only show near it
         const parent = WORLDS[slot].parent
-        const away = parent !== undefined && pilot.nearestIndex !== parent && pilot.nearestIndex !== marker.index
+        const show = WORLDS[slot].show
+        const away =
+          (parent !== undefined && pilot.nearestIndex !== parent && pilot.nearestIndex !== marker.index) ||
+          (show !== undefined && !show())
         element.classList.toggle('is-hidden', marker.radiusPx > 40 || away)
         element.classList.toggle('is-target', pilot.warping !== '' && pilot.warping.endsWith(WORLDS[slot].name))
         const label = element.querySelector<HTMLElement>('.flight-marker-label')
@@ -415,6 +456,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       {toast && <p className="flight-toast">{toast}</p>}
       <div ref={haze} className="flight-haze" aria-hidden="true" />
       <div ref={mist} className="flight-mist" aria-hidden="true" />
+      <div ref={heatGlare} className="flight-heat" aria-hidden="true" />
       {guideStep >= 0 && (
         <div className="flight-guide-card" role="status">
           <span className="flight-guide-step">{guideStep + 1} / 3</span>
@@ -472,7 +514,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <div className="flight-readout" aria-live="polite">
         <span className="flight-near">
           {warping
-            ? `Warping to ${warping} · ${formatSpeed(kms)} · S to stop`
+            ? [`Warping to ${warping}`, formatSpeed(kms), 'S to stop'].filter(Boolean).join(' · ')
+            : nearest === 'the Sun' && hullK > 600
+              ? `The Sun · hull ${Math.round(hullK - 273).toLocaleString('en-GB')} °C${hullK > 1500 ? ' · the heat holds you back' : ''}`
             : orbiting
               ? `Orbiting ${nearest} · ${formatSpeed(kms)} · once round every ${formatPeriod(orbitMinutes)}`
             : immersion > 0

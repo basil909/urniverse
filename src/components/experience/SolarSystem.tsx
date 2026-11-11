@@ -17,6 +17,7 @@ import {
   SYSTEM_OFFSET,
   SYSTEM_BASE,
   SUN_TRUE_RADIUS,
+  AU_UNITS,
   farScale,
   layout,
   SMALL_BODIES,
@@ -37,6 +38,7 @@ import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
+import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
 import Belts from './Belts'
@@ -543,10 +545,26 @@ void main() {
   vec3 base = mix(edge, middle, smoothstep(0.0, 0.6, mu));
   base = mix(base, core, smoothstep(0.6, 1.0, mu));
 
+  /* flying close: real granules are ~1,000 km across (a 700th of the
+     radius), bright cells of rising gas parted by dark lanes; they
+     resolve as you come in, finer cells within them below that */
+  float px = length(fwidth(p));
+  float near1 = 1.0 - smoothstep(0.25, 0.9, px * 700.0);
+  if (near1 > 0.0) {
+    float g = 1.0 - abs(noise(p * 700.0 + vec3(uTime * 0.05, 0.0, uTime * 0.04)) * 2.0 - 1.0);
+    float g2 = 1.0 - abs(noise(p * 2600.0 - vec3(0.0, uTime * 0.08, 0.0)) * 2.0 - 1.0);
+    float near2 = 1.0 - smoothstep(0.25, 0.9, px * 2600.0);
+    float granules = pow(g, 2.4) * (1.0 - 0.3 * near2) + pow(g2, 3.0) * 0.3 * near2;
+    cells = mix(cells, granules, near1 * 0.85);
+  }
+
   /* exposed so the cells read: dark lanes between bright granules */
   float tone = 0.6 + 0.42 * cells + 0.1 * churn + 0.2 * faculae;
   vec3 color = base * tone * limb;
-  color *= 1.0 - spots * 0.7;
+  /* a sunspot: a dark umbra inside a lighter, streaked penumbra */
+  float umbra = smoothstep(0.86, 0.9, fbm(p * 1.8 + vec3(3.1, 0.0, 1.4)));
+  float streaks = 0.75 + 0.25 * sin(atan(p.y, p.x) * 220.0 + fbm(p * 40.0) * 6.0);
+  color *= 1.0 - spots * 0.45 * streaks - umbra * 0.4;
 
   // only the hottest centre is bright enough to bloom; the rest stays
   // below the bloom threshold so the surface is visible, not a white disc
@@ -1358,6 +1376,7 @@ function Sun() {
 
       <Corona />
       <FlightGlare />
+      <Prominences />
 
       <pointLight
         color="#fff0d0"
@@ -1417,7 +1436,8 @@ function FlightGlare() {
     if (!glare) return
     // hidden behind a planet, breaking out in a burst at its limb
     const seen = layout.trueScale ? sunVisibility(camera.position) : 0
-    const target = layout.trueScale ? Math.max(seen, 0.0) : 0
+    const fromSunAU = SYSTEM_OFFSET.distanceTo(camera.position) / AU_UNITS
+    const target = layout.trueScale ? Math.max(seen, 0.0) * Math.min(1, 6 * Math.max(fromSunAU, 1e-3) ** -0.5) : 0
     material.uniforms.uOpacity.value += (target - material.uniforms.uOpacity.value) * (1 - Math.exp(-delta * 8))
     material.uniforms.uBurst.value = layout.trueScale ? Math.pow(Math.sin(Math.PI * Math.min(seen, 1)), 0.7) * (seen < 0.999 ? 1 : 0) : 0
     glare.visible = material.uniforms.uOpacity.value > 0.01
@@ -1426,12 +1446,85 @@ function FlightGlare() {
     // 12 degrees wide at the distance it is drawn, in the Sun group's units
     glare.parent?.getWorldPosition(_glareWorld)
     glare.parent?.getWorldScale(_glareScale)
-    const width = 2 * Math.tan(THREE.MathUtils.degToRad(6)) * _glareWorld.distanceTo(camera.position)
+    // from far out the Sun becomes a star: its glare shrinks and dims
+    const fromSun = SYSTEM_OFFSET.distanceTo(camera.position) / AU_UNITS
+    const shrink = THREE.MathUtils.clamp(Math.max(fromSun, 1e-3) ** -0.5, 0.004, 1)
+    const width = 2 * Math.tan(THREE.MathUtils.degToRad(6)) * _glareWorld.distanceTo(camera.position) * shrink
     glare.scale.setScalar(width / Math.max(_glareScale.x, 1e-9))
   })
   return (
     <mesh ref={mesh} material={material} renderOrder={-1} visible={false}>
       <planeGeometry args={[1, 1]} />
+    </mesh>
+  )
+}
+
+/* Prominences: seen at the Sun's edge, loops and flames of glowing gas
+   rising tens of thousands of km above the surface, red-pink in the light
+   of hydrogen. A shell a little larger than the Sun; for each line of
+   sight that grazes the limb, how high it passes decides the glow, and
+   twisting filaments of noise give the shapes. Flying only (the true-size
+   Sun), and brightest close up. */
+const PROMINENCE_VERTEX = /* glsl */ `
+varying vec3 vWorld; varying vec3 vCenter; varying float vRadius;
+void main() {
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vWorld = w.xyz;
+  vCenter = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vRadius = length(modelMatrix[0].xyz) / 1.18;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
+const PROMINENCE_FRAGMENT = /* glsl */ `
+uniform float uTime; uniform float uOpacity;
+varying vec3 vWorld; varying vec3 vCenter; varying float vRadius;
+float pHash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float pNoise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(mix(pHash(i), pHash(i + vec3(1,0,0)), f.x), mix(pHash(i + vec3(0,1,0)), pHash(i + vec3(1,1,0)), f.x), f.y), mix(mix(pHash(i + vec3(0,0,1)), pHash(i + vec3(1,0,1)), f.x), mix(pHash(i + vec3(0,1,1)), pHash(i + vec3(1,1,1)), f.x), f.y), f.z); }
+void main() {
+  vec3 ray = normalize(vWorld - cameraPosition);
+  vec3 oc = vCenter - cameraPosition;
+  float t = max(dot(oc, ray), 0.0);
+  vec3 closest = ray * t - oc;
+  float height = length(closest) / vRadius - 1.0;
+  if (height < 0.0) discard; // in front of the disc: the disc shows instead
+  vec3 d = normalize(closest);
+  // where prominences stand: a few regions round the limb
+  float region = smoothstep(0.55, 0.8, pNoise(d * 3.0 + 7.1));
+  // their height: tall arches in places, low spicule fringe everywhere
+  float tall = 0.02 + 0.12 * pNoise(d * 6.0 + 2.3) * region;
+  float shape = pNoise(vec3(d * 22.0) + vec3(0.0, height * 18.0, uTime * 0.02));
+  float threads = pow(1.0 - abs(2.0 * pNoise(d * 60.0 + vec3(height * 40.0, 0.0, uTime * 0.03)) - 1.0), 6.0);
+  float flame = smoothstep(0.45, 0.85, shape) * (0.4 + 0.6 * threads) * (1.0 - smoothstep(tall * 0.4, tall, height));
+  float fringe = (1.0 - smoothstep(0.0, 0.012, height)) * 0.8;
+  float glow = (flame * region * 1.6 + fringe) * uOpacity;
+  vec3 color = mix(vec3(1.0, 0.25, 0.32), vec3(1.0, 0.55, 0.45), threads);
+  gl_FragColor = vec4(color * glow, 1.0);
+}`
+
+function Prominences() {
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uOpacity: { value: 0 } },
+        vertexShader: PROMINENCE_VERTEX,
+        fragmentShader: PROMINENCE_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    [],
+  )
+  useEffect(() => () => material.dispose(), [material])
+  const mesh = useRef<THREE.Mesh>(null)
+  useFrame((_, delta) => {
+    material.uniforms.uTime.value += delta
+    const target = layout.trueScale ? 1 : 0
+    material.uniforms.uOpacity.value += (target - material.uniforms.uOpacity.value) * (1 - Math.exp(-delta * 2))
+    if (mesh.current) mesh.current.visible = material.uniforms.uOpacity.value > 0.01
+  })
+  return (
+    <mesh ref={mesh} scale={1.18} material={material} visible={false}>
+      <sphereGeometry args={[1, 96, 64]} />
     </mesh>
   )
 }
@@ -1703,6 +1796,10 @@ function Planet({
   // sharper maps once the camera has arrived (desktop only)
   const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
   useSurfacePatches(index, body, SYSTEM_OFFSET)
+  // Mars's turning frame, for the rover standing on it
+  useEffect(() => {
+    if (index === 3) bodyFrames[3] = body.current
+  })
   /* the Sun's position for this planet's shaders: the Sun itself, or,
      when the planet is drawn nearer than it is (far, at true scale), the
      Sun moved with it, so its light still falls from the true direction */
@@ -2687,6 +2784,7 @@ function MoonSystem({
     [system, sunlight],
   )
   const hazes = useRef<(THREE.Mesh | null)[]>([])
+  const bodyGetters = useMemo(() => system.moons.map((_, i) => () => bodies.current[i] ?? null), [system])
   const time = useRef(0)
 
   useFrame((_, delta) => {
@@ -2772,6 +2870,9 @@ function MoonSystem({
               onBeforeCompile={satelliteIdOf(moon.name) >= 0 ? satelliteHole(satelliteIdOf(moon.name)) : undefined}
               customProgramCacheKey={() => `satellite-${moon.name}-${moonMaps[i] ? 'mapped' : 'plain'}`}
             />
+            {satelliteIdOf(moon.name) >= 0 && (
+              <SatelliteStream id={satelliteIdOf(moon.name)} body={bodyGetters[i]} />
+            )}
             {/* landing ground (flying) */}
             {satelliteIdOf(moon.name) >= 0 && (
               <Terrain
@@ -2808,6 +2909,13 @@ function MoonSystem({
       ))}
     </>
   )
+}
+
+/* streams a moon's mosaic while flying low over it (a hook per moon) */
+function SatelliteStream({ id, body }: { id: number; body: () => THREE.Mesh | null }) {
+  const ref = useMemo(() => ({ get current() { return body() } }), [body])
+  useSurfacePatches(id, ref as RefObject<THREE.Mesh | null>, SYSTEM_OFFSET)
+  return null
 }
 
 function satelliteIdOf(name: string) {

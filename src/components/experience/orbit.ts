@@ -485,11 +485,24 @@ export function getSmallBodyOrbitPosition(index: number, jd: number, out: THREE.
 
 /* Every body you can fly to: 0-7 the planets, then the small bodies.
    (The Sun is -1 wherever it appears.) */
-export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1 + 7
+/* bodies 20 and up (spacecraft, named stars) live in spaceBodies.ts,
+   which registers itself here (it needs this module, not the reverse) */
+export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1 + 7 + 26
+type ExtraBodies = {
+  position: (id: number, jd: number, bodyJd: number, out: THREE.Vector3) => THREE.Vector3
+  radius: (id: number) => number
+  name: (id: number) => string
+}
+let extraBodies: ExtraBodies | null = null
+export function registerExtraBodies(bodies: ExtraBodies) {
+  extraBodies = bodies
+}
+const FIRST_EXTRA_ID = PLANETS.length + SMALL_BODIES.length + 1 + 7
 
 const _moonOffset = new THREE.Vector3()
 export function getBodyOrbitPosition(id: number, jd: number, out: THREE.Vector3) {
   if (id < 0) return out.set(0, 0, 0)
+  if (id >= FIRST_EXTRA_ID) return extraBodies ? extraBodies.position(id, simJdSource(), moonJdSource(), out) : out.set(0, 0, 0)
   if (id > PLANETS.length + SMALL_BODIES.length) return satelliteOrbitPosition(id - PLANETS.length - SMALL_BODIES.length - 1, out)
   if (id === PLANETS.length + SMALL_BODIES.length) {
     // the Moon: from Earth, at its true distance in flight
@@ -507,6 +520,7 @@ export function getBodyPosition(id: number, jd: number, out: THREE.Vector3) {
 
 export function getBodyRadius(id: number) {
   if (id < 0) return SUN_TRUE_RADIUS
+  if (id >= FIRST_EXTRA_ID) return extraBodies ? extraBodies.radius(id) : 1e-9
   if (id === PLANETS.length + SMALL_BODIES.length) return (MOON_RADIUS_KM / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
   if (id > PLANETS.length + SMALL_BODIES.length) {
     return (SATELLITES[id - PLANETS.length - SMALL_BODIES.length - 1].radiusKm / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
@@ -518,6 +532,7 @@ export function getBodyRadius(id: number) {
 
 export function getBodyName(id: number) {
   if (id < 0) return 'the Sun'
+  if (id >= FIRST_EXTRA_ID) return extraBodies ? extraBodies.name(id) : ''
   if (id === PLANETS.length + SMALL_BODIES.length) return 'the Moon'
   if (id > PLANETS.length + SMALL_BODIES.length) return SATELLITES[id - PLANETS.length - SMALL_BODIES.length - 1].name
   return id < PLANETS.length ? PLANETS[id].name : SMALL_BODIES[id - PLANETS.length].name

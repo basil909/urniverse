@@ -7,7 +7,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 
 import {
+  AU_UNITS,
   BODY_COUNT,
+  farScale,
   getBodyName,
   getBodyOrbitPosition,
   getBodyPosition,
@@ -26,6 +28,16 @@ import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
 import { cloudDeck, ground, groundAltitude, groundLatLon, ringState, shipShadow, sphereUv } from './groundState'
 import { FEATURES } from './features'
+import {
+  FIRST_CRAFT_ID,
+  FIRST_STAR_ID,
+  NAMED_STARS,
+  PC_UNITS,
+  roverGround,
+  SPACECRAFT,
+  starColor,
+  starTemperature,
+} from './spaceBodies'
 import { sunVisibility } from './sunVisibility'
 
 /* ============================================================
@@ -68,6 +80,216 @@ const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
 const _identity = new THREE.Quaternion()
 const _local = new THREE.Vector3()
+const _craft = new THREE.Vector3()
+const _craftUp = new THREE.Vector3()
+const _craftM = new THREE.Matrix4()
+const _starTint = new THREE.Color()
+const SHIP_M = 37.24
+
+/* ============================================================
+   SPACECRAFT, AT THEIR TRUE SIZES
+   NASA's models, drawn in the ship's layer (in ship lengths) when within
+   a couple of hundred km: the Space Station's 109 m truss, Hubble's 13 m
+   tube, Webb's 21 m sunshield, Voyager, Perseverance. Hidden when the
+   world below stands between them and the camera.
+============================================================ */
+const craftModels = new Map<string, Promise<THREE.Object3D>>()
+function loadModel(url: string) {
+  let pending = craftModels.get(url)
+  if (!pending) {
+    pending = new Promise((resolve, reject) => {
+      const draco = new DRACOLoader().setDecoderPath('/draco/')
+      new GLTFLoader().setDRACOLoader(draco).load(
+        url,
+        (gltf) => {
+          // centred, one unit across at its widest
+          const box = new THREE.Box3().setFromObject(gltf.scene)
+          const size = box.getSize(new THREE.Vector3())
+          const centre = box.getCenter(new THREE.Vector3())
+          const holder = new THREE.Group()
+          gltf.scene.position.sub(centre)
+          holder.add(gltf.scene)
+          holder.scale.setScalar(1 / Math.max(size.x, size.y, size.z))
+          const wrapper = new THREE.Group()
+          wrapper.add(holder)
+          resolve(wrapper)
+        },
+        undefined,
+        reject,
+      )
+    })
+    craftModels.set(url, pending)
+  }
+  return pending
+}
+
+function Spacecraft({ jetRef }: { jetRef: { current: THREE.Group | null } }) {
+  const [models, setModels] = useState<(THREE.Object3D | null)[]>(() => SPACECRAFT.map(() => null))
+  const holders = useRef<(THREE.Group | null)[]>([])
+  const wanted = useRef(false)
+  useFrame(() => {
+    const jet = jetRef.current
+    if (!jet || !pilot.active) return
+    if (!wanted.current) {
+      // load the models the first time we fly (the Voyager file serves both)
+      wanted.current = true
+      SPACECRAFT.forEach((craft, i) =>
+        loadModel(craft.model)
+          .then((model) => setModels((list) => list.map((m, j) => (j === i ? (craft.name === 'Voyager 2' ? model.clone() : model) : m))))
+          .catch(() => {}),
+      )
+    }
+    const L = SHIP_LENGTH
+    SPACECRAFT.forEach((craft, i) => {
+      const holder = holders.current[i]
+      if (!holder) return
+      getBodyPosition(FIRST_CRAFT_ID + i, simClock.jd, _craft)
+      _local.copy(_craft).sub(jet.position)
+      const away = _local.length()
+      let shown = away < L * 6000
+      // behind the nearest world? (a planet between the camera and it)
+      if (shown && pilot.nearestIndex >= 0 && pilot.nearestIndex < FIRST_CRAFT_ID) {
+        getBodyPosition(pilot.nearestIndex, simClock.jd, _craftUp)
+        const r = getBodyRadius(pilot.nearestIndex)
+        const along = THREE.MathUtils.clamp(_craftUp.clone().sub(jet.position).dot(_local) / (away * away), 0, 1)
+        const nearestPoint = jet.position.clone().addScaledVector(_local, along)
+        if (nearestPoint.distanceTo(_craftUp) < r * 0.999 && craft.kind !== 'rover') shown = false
+      }
+      holder.visible = shown
+      if (!shown) return
+      holder.position.copy(_local).divideScalar(L)
+      holder.scale.setScalar(craft.sizeM / SHIP_M)
+      // how each one faces
+      if (craft.kind === 'orbit' || craft.kind === 'rover') {
+        getBodyPosition(craft.kind === 'rover' ? 3 : 2, simClock.jd, _craftUp)
+        _craftUp.subVectors(_craft, _craftUp).normalize()
+        _craftM.lookAt(_camPos.set(0, 0, 0), _local.set(_craftUp.y, -_craftUp.x, 0.3).normalize(), _craftUp)
+      } else {
+        // Webb's shield and Voyager's dish towards the Sun
+        _craftUp.copy(SYSTEM_OFFSET).sub(_craft).normalize()
+        _craftM.lookAt(_camPos.set(0, 0, 0), _craftUp, _local.set(0, 1, 0))
+      }
+      holder.quaternion.setFromRotationMatrix(_craftM)
+    })
+  })
+  return (
+    <>
+      {SPACECRAFT.map((craft, i) => (
+        <group
+          key={craft.name}
+          ref={(group) => {
+            holders.current[i] = group
+          }}
+          visible={false}
+        >
+          {models[i] && <primitive object={models[i]!} />}
+        </group>
+      ))}
+    </>
+  )
+}
+
+/* ============================================================
+   A NEARBY STAR, UP CLOSE
+   Arriving at another star: a glowing ball at its true size, in its
+   colour (from its temperature), with a glare of fixed apparent size, all
+   drawn nearer and smaller along the line of sight when far (as the Sun).
+============================================================ */
+const STAR_GLARE_FRAGMENT = /* glsl */ `
+uniform vec3 uColor; uniform float uOpacity;
+varying vec2 vUv;
+void main() {
+  float r = length(vUv - 0.5) * 2.0;
+  float glow = pow(max(1.0 - r, 0.0), 4.0) * 0.6 + exp(-r * 20.0) * 3.0;
+  gl_FragColor = vec4(mix(uColor, vec3(1.0), exp(-r * 12.0)) * glow * uOpacity, 1.0);
+}`
+const STAR_GLARE_VERTEX = /* glsl */ `
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
+
+function NearStar() {
+  const camera = useThree((state) => state.camera)
+  const group = useRef<THREE.Group>(null)
+  const ball = useRef<THREE.Mesh>(null)
+  const glare = useRef<THREE.Mesh>(null)
+  const parts = useMemo(
+    () => ({
+      // its colour, dimmer and redder towards the limb (as the Sun's)
+      ballMaterial: new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color() } },
+        vertexShader: /* glsl */ `
+          varying vec3 vNormalView; varying vec3 vViewPos;
+          void main() {
+            vNormalView = normalize(normalMatrix * normal);
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vViewPos = mv.xyz;
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: /* glsl */ `
+          uniform vec3 uColor;
+          varying vec3 vNormalView; varying vec3 vViewPos;
+          void main() {
+            float mu = clamp(dot(normalize(vNormalView), normalize(-vViewPos)), 0.0, 1.0);
+            vec3 limb = mix(uColor * vec3(1.0, 0.7, 0.5), uColor, pow(mu, 0.45));
+            gl_FragColor = vec4(limb * (0.45 + 0.75 * pow(mu, 0.6)), 1.0);
+          }`,
+        toneMapped: false,
+      }),
+      glareMaterial: new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color() }, uOpacity: { value: 1 } },
+        vertexShader: STAR_GLARE_VERTEX,
+        fragmentShader: STAR_GLARE_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    }),
+    [],
+  )
+  useEffect(
+    () => () => {
+      parts.ballMaterial.dispose()
+      parts.glareMaterial.dispose()
+    },
+    [parts],
+  )
+  useFrame(() => {
+    const g = group.current
+    if (!g) return
+    const id = pilot.nearestIndex
+    const star = id >= FIRST_STAR_ID ? NAMED_STARS[id - FIRST_STAR_ID] : undefined
+    g.visible = !!star && pilot.active
+    if (!star) return
+    getBodyPosition(id, simClock.jd, _craft)
+    const radius = getBodyRadius(id)
+    const distance = _craft.distanceTo(camera.position)
+    const far = farScale(distance)
+    g.position.copy(_craft).sub(camera.position).multiplyScalar(far).add(camera.position)
+    starColor(starTemperature(star.ci), _starTint)
+    parts.ballMaterial.uniforms.uColor.value.copy(_starTint)
+    ball.current?.scale.setScalar(radius * far)
+    parts.glareMaterial.uniforms.uColor.value.copy(_starTint)
+    if (glare.current) {
+      glare.current.lookAt(camera.position)
+      const shown = distance * far
+      // a glare some 10 degrees across, fading as the star becomes a point
+      const fade = THREE.MathUtils.clamp((radius * 2000) / distance, 0.05, 1)
+      glare.current.scale.setScalar(2 * Math.tan(THREE.MathUtils.degToRad(5)) * shown * fade)
+      parts.glareMaterial.uniforms.uOpacity.value = fade
+    }
+  })
+  return (
+    <group ref={group} visible={false}>
+      <mesh ref={ball} material={parts.ballMaterial}>
+        <sphereGeometry args={[1, 64, 48]} />
+      </mesh>
+      <mesh ref={glare} material={parts.glareMaterial} renderOrder={-1}>
+        <planeGeometry args={[1, 1]} />
+      </mesh>
+    </group>
+  )
+}
 const _orbitM = new THREE.Matrix4()
 const _featureDir = new THREE.Vector3()
 
@@ -1157,6 +1379,14 @@ export default function Pilot() {
         pilot.hazeColor = PLANETS[nearestIndex].atmosphereColor ?? PLANETS[nearestIndex].baseColor
       }
     }
+    // near the Sun: the heat on the hull (a body in sunlight settles at
+    // about 278 K at 1 AU, warmer as the square root of nearness)
+    {
+      const sunDistance = jet.position.distanceTo(SYSTEM_OFFSET)
+      const au = sunDistance / AU_UNITS
+      pilot.hullK = 278 / Math.sqrt(Math.max(au, 1e-4))
+      pilot.sunHeat = THREE.MathUtils.smoothstep(SUN_TRUE_RADIUS * 6 - sunDistance, 0, SUN_TRUE_RADIUS * 4.6)
+    }
     // air here (Earth at sea level = 1), for wind, streaks and sound
     {
       const air = nearestIndex >= 0 ? AIR[nearestIndex] : undefined
@@ -1205,8 +1435,11 @@ export default function Pilot() {
     // The limit follows the distance to the nearest surface, and tops out
     // at the speed of light: even so, Mars is minutes away, Neptune hours,
     // which is the point. Shift is a warp of up to 40 times light speed.
+    // (between the stars, thousands of AU from anything, the warp has no
+    // ceiling: the nearest stars are light-years apart)
+    const interstellar = clearance > 2000 * AU_UNITS
     const limit = boost
-      ? THREE.MathUtils.clamp(clearance * 1.5, SHIP_LENGTH * 2, LIGHT * WARP)
+      ? THREE.MathUtils.clamp(clearance * 1.5, SHIP_LENGTH * 2, interstellar ? Infinity : LIGHT * WARP)
       : THREE.MathUtils.clamp(clearance * 0.5, SHIP_LENGTH * 0.8, LIGHT)
     const target = forwardKey ? limit : brakeKey ? 0 : Math.min(speed.current, limit)
     speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : brakeKey ? 2.2 : 3)))
@@ -1252,7 +1485,7 @@ export default function Pilot() {
     // own height to spare); elsewhere the edge of space
     const minimum = onGround
       ? fromCentre - groundHere + SHIP_LENGTH * (pilot.landState === 'flying' ? 0.6 : 0.1)
-      : nearestRadius * (deep ? 1 - deep.dive : LOWEST)
+      : nearestRadius * (deep ? 1 - deep.dive : nearestIndex < 0 ? 1.2 : LOWEST)
     const soft = onGround ? SHIP_LENGTH * 12 : nearestRadius * (deep ? 0.002 : 0.02)
     const closeness = 1 - THREE.MathUtils.clamp((fromCentre - minimum) / soft, 0, 1)
     const diving = Math.max(0, -_forward.dot(_axis))
@@ -1423,7 +1656,17 @@ export default function Pilot() {
       const sunward = goal.lengthSq() > 0 ? goal.clone().negate().normalize().multiplyScalar(1.2) : new THREE.Vector3()
       const arrive = fromGoal.add(sunward)
       if (arrive.lengthSq() < 1e-8) arrive.set(0, 1, 0)
-      const end = goal.clone().addScaledVector(arrive.normalize(), radius * standOff)
+      let end = goal.clone().addScaledVector(arrive.normalize(), radius * standOff)
+      if (target >= FIRST_CRAFT_ID && target < FIRST_STAR_ID) {
+        // a spacecraft: a few hundred metres off (the rover: from above)
+        const off = Math.max(radius * 8, 0.3 / KM_PER_UNIT)
+        if (target === FIRST_CRAFT_ID + 5) {
+          const mars = getBodyOrbitPosition(3, simClock.jd, new THREE.Vector3())
+          end = goal.clone().addScaledVector(goal.clone().sub(mars).normalize(), off)
+        } else {
+          end = goal.clone().addScaledVector(arrive.normalize(), off)
+        }
+      }
       // first climb clear of the world we are at, to its side
       let a1 = rel.clone()
       let climb = 0
@@ -1629,7 +1872,7 @@ export default function Pilot() {
     shipCamera.quaternion.copy(camera.quaternion)
     const shipAway = shipCamera.position.length()
     shipCamera.near = Math.max(0.05, shipAway * 0.05)
-    shipCamera.far = shipAway * 3 + 100
+    shipCamera.far = Math.max(shipAway * 3 + 100, 8000)
     // when the ship is too small to see, a soft beacon marks it
     if (beacon.current) {
       const shown = THREE.MathUtils.smoothstep(shipAway, 120, 900)
@@ -1645,8 +1888,20 @@ export default function Pilot() {
     const sunSeen = sunVisibility(jet.position, _sunTint)
     if (sunLight.current) {
       sunLight.current.position.copy(_toSun).multiplyScalar(10)
-      sunLight.current.intensity = 2.4 * sunSeen
+      // fainter with distance (as the fourth root: the eye adapts)
+      const sunAU = jet.position.distanceTo(SYSTEM_OFFSET) / AU_UNITS
+      sunLight.current.intensity = 2.4 * sunSeen * Math.min(1, Math.max(sunAU, 1e-3) ** -0.5)
       sunLight.current.color.copy(_sunBase).multiply(_sunTint)
+      // at another star, its light instead
+      if (nearestIndex >= FIRST_STAR_ID) {
+        const star = NAMED_STARS[nearestIndex - FIRST_STAR_ID]
+        getBodyPosition(nearestIndex, simClock.jd, _craft)
+        sunLight.current.position.copy(_craft).sub(jet.position).normalize().multiplyScalar(10)
+        const starAU = jet.position.distanceTo(_craft) / AU_UNITS
+        const luminosity = 10 ** ((4.83 - star.absmag) / 2.5)
+        sunLight.current.intensity = 2.4 * Math.min(1.5, (luminosity / Math.max(starAU * starAU, 1e-6)) ** 0.25)
+        starColor(starTemperature(star.ci), sunLight.current.color)
+      }
     }
     visual.current?.traverse((object) => {
       if (object.userData.plasma) (object as THREE.PointLight).intensity = heat.current * 3
@@ -1684,6 +1939,11 @@ export default function Pilot() {
       shipShadow.uShipRight.value.set(1, 0, 0).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
       shipShadow.uShipLen.value = SHIP_LENGTH
     }
+
+    // ---- how far from home
+    pilot.sunAU = jet.position.distanceTo(SYSTEM_OFFSET) / AU_UNITS
+    pilot.awayPc = pilot.sunAU / 206264.806
+    roverGround.height = (dir) => (ground.body === 3 && ground.model ? ground.model.height(dir, ground.fade) : 0)
 
     // ---- air streaks (in ship lengths per second), sound
     streaks.current.velocity.copy(velocity.current).divideScalar(SHIP_LENGTH)
@@ -1775,6 +2035,7 @@ export default function Pilot() {
     <>
       {/* where the ship is (the scene's own units); it is drawn below */}
       <group ref={ship} visible={false} />
+      <NearStar />
       {createPortal(
         <>
           <group ref={visual}>
@@ -1783,6 +2044,7 @@ export default function Pilot() {
           </group>
           <AirStreaks state={streaks.current} />
           <RingChunks jetRef={ship} />
+          <Spacecraft jetRef={ship} />
           <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
           <directionalLight ref={shine} intensity={0} />
           <ambientLight intensity={0.05} />

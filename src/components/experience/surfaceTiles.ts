@@ -35,6 +35,9 @@ export type Source = {
   degrees: (z: number) => number
   /** web-map tiles (Web Mercator, 2^z a side) rather than latitude/longitude */
   mercator?: boolean
+  /** the mosaic's longitudes run half a turn from the local map's (some
+      moons' maps are centred on 180 degrees): 0.5, else 0 */
+  uShift?: number
 }
 
 /* Web Mercator: how far down the map a latitude is, 0 (north) to 1 */
@@ -51,12 +54,13 @@ const gibs = (layer: string, ext: string): Source => ({
   degrees: (z) => 288 / 2 ** z,
 })
 
-const trek = (body: string, layer: string, maxLevel: number): Source => ({
+const trek = (body: string, layer: string, maxLevel: number, ext = 'jpg', uShift = 0): Source => ({
   url: (z, row, col) =>
-    `https://trek.nasa.gov/tiles/${body}/EQ/${layer}/1.0.0/default/default028mm/${z}/${row}/${col}.jpg`,
+    `https://trek.nasa.gov/tiles/${body}/EQ/${layer}/1.0.0/default/default028mm/${z}/${row}/${col}.${ext}`,
   tile: 256,
   maxLevel,
   degrees: (z) => 180 / 2 ** z,
+  uShift,
 })
 
 /* by orbit index; radius in km, mapWidth: the sharpest local map's width,
@@ -77,6 +81,33 @@ const SOURCES: Record<
     radiusKm: 6371,
     mapWidth: 4096,
     gain: [1, 1, 1],
+  },
+  // the large moons: Galileo and Voyager mosaics, Cassini's of Titan
+  // (the local maps are only 1024 pixels wide); gains match their colour
+  13: {
+    day: trek('Io', 'Io_GalileoSSI_Voyager_Global_Mosaic_ClrMerge_1km', 4, 'png'),
+    radiusKm: 1821.6,
+    mapWidth: 1024,
+    gain: [1, 1, 1],
+  },
+  14: {
+    day: trek('Europa', '20150218_europa_global_map_20000x10000', 5, 'png', 0.5),
+    radiusKm: 1560.8,
+    mapWidth: 1024,
+    gain: [1.99, 1.87, 1.83],
+  },
+  15: {
+    day: trek('Ganymede', 'Ganymede_global_equi_000_359m', 6, 'png', 0.5),
+    radiusKm: 2634.1,
+    mapWidth: 1024,
+    gain: [3.2, 2.65, 1.96],
+  },
+  17: {
+    // seen through the haze at 938 nm, grey: tinted to Titan's orange
+    day: trek('Titan', 'Titan_ISS_P19658_Mosaic_Global_4km', 4, 'png'),
+    radiusKm: 2574.7,
+    mapWidth: 1,
+    gain: [2.97, 1.58, 0.4],
   },
   // the Moon (body 12): LRO's wide-angle camera mosaic, ~100 m a pixel
   12: {
@@ -201,7 +232,9 @@ export class PatchLayer {
     const count = 2 ** z
     const cols = source.mercator ? count : Math.round(360 / deg)
     const rows = source.mercator ? count : Math.ceil(180 / deg)
-    const colF = source.mercator ? ((lon + 180) / 360) * count : (lon + 180) / deg
+    const shift = source.uShift ?? 0
+    const lonSource = ((((lon + 180 + shift * 360) % 360) + 360) % 360) - 180
+    const colF = source.mercator ? ((lonSource + 180) / 360) * count : (lonSource + 180) / deg
     const rowF = source.mercator ? mercatorY(lat) * count : (90 - lat) / deg
     const current = this.layout
     if (
@@ -251,8 +284,9 @@ export class PatchLayer {
       // in (longitude 0..1, 1 - Mercator y): the shader converts latitude
       this.rect.set(c0 / count - Math.floor(c0 / count), 1 - (r0 + n) / count, n / count, n / count)
     } else {
+      const x0 = (c0 * deg) / 360 - shift
       this.rect.set(
-        (c0 * deg) / 360 - Math.floor((c0 * deg) / 360),
+        x0 - Math.floor(x0),
         1 - ((r0 + n) * deg) / 180,
         (n * deg) / 360,
         (n * deg) / 180,
@@ -457,7 +491,7 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     surfacePatch.uPatchGain.value.fromArray(source.gain)
     const mapKm = (2 * Math.PI * source.radiusKm) / source.mapWidth
 
-    const space = index === 2 || index === 12 ? THREE.SRGBColorSpace : THREE.NoColorSpace
+    const space = index === 2 || index >= 12 ? THREE.SRGBColorSpace : THREE.NoColorSpace
     const aimPair = (src: Source, fine: PatchLayer, coarse: PatchLayer, wanted: boolean) => {
       fine.setColorSpace(space)
       coarse.setColorSpace(space)

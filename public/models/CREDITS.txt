@@ -5,3 +5,10 @@ NASA 3D Resources are free and without copyright; NASA does not endorse
 this use. The site shows only the orbiter (the external tank and solid
 rocket boosters in the file are left out at load time) and colours it
 white with a black heat-shield underside.
+
+iss.glb, hubble.glb, webb.glb, voyager.glb, perseverance.glb
+"International Space Station (ISS) (B)", "Hubble Space Telescope (A)",
+"James Webb Space Telescope (A)", "Voyager Probe (A)" and "Mars 2020
+Perseverance Rover", from NASA's 3D Resources (science.nasa.gov/3d-resources/),
+downloaded 2026-11-11. Free and without copyright; NASA does not endorse
+this use. Shown at their true sizes in flight mode.

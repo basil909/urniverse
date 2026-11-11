@@ -26,6 +26,7 @@ import Starfield from './Starfield'
 import NightSky from './NightSky'
 import { lens } from './lens'
 import Pilot, { GroundCarry } from './Pilot'
+import NearStars, { skyHandOver } from './NearStars'
 import { getShipPass } from './shipLayer'
 import { pilot } from './pilotState'
 import {
@@ -1013,6 +1014,17 @@ function WarmUp() {
 
 /* Advances the shared simulation date. Wide views run at a few days per
    second so the orbits are visible; close-ups almost stop the clock. */
+/* the sky as seen from the Sun (the Bright Star Catalogue, the named
+   stars and constellations): handed over to the 3D stars once you have
+   left the Solar System (see NearStars) */
+function SunSky({ children }: { children: React.ReactNode }) {
+  const group = useRef<THREE.Group>(null)
+  useFrame(() => {
+    if (group.current) group.current.visible = skyHandOver.value === 0
+  })
+  return <group ref={group}>{children}</group>
+}
+
 function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
   const reducedMotion = useMemo(
     () =>
@@ -1320,7 +1332,10 @@ function Scene({
 
       <MilkyWaySky progressRef={progressRef} />
 
-      <NightSky progressRef={progressRef} />
+      <SunSky>
+        <NightSky progressRef={progressRef} />
+      </SunSky>
+      <NearStars />
 
       <color attach="background" args={['#010207']} />
 
@@ -1338,7 +1353,9 @@ function Scene({
 
       <Suspense fallback={<LoadingUniverse />}>
 
-        <Starfield />
+        <SunSky>
+          <Starfield />
+        </SunSky>
 
       </Suspense>
 

@@ -1586,6 +1586,15 @@ html.is-spinning * {
   text-transform: uppercase;
   color: var(--planet-accent);
 }
+/* the Sun's glare, close in */
+.flight-heat {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 45%, rgba(255, 252, 235, 0.95) 0%, rgba(255, 196, 120, 0.55) 45%, rgba(255, 120, 40, 0.25) 100%);
+  mix-blend-mode: screen;
+}
 /* inside a giant's clouds, and in Earth's cloud deck */
 .flight-haze,
 .flight-mist {
