@@ -17,6 +17,7 @@ import {
   SYSTEM_OFFSET,
 } from './orbit'
 import { simClock } from './simClock'
+import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
 import Belts from './Belts'
 import Comet from './Comet'
@@ -138,26 +139,67 @@ function withSurfaceVaryings(shader: THREE.WebGLProgramParametersWithUniforms) {
 
 /* Earth's clouds: fine wisps that break up the soft edges up close */
 function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
+  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime })
   withSurfaceVaryings(shader)
-  shader.fragmentShader = shader.fragmentShader.replace(
-    '#include <alphamap_fragment>',
-    `#include <alphamap_fragment>
+  shader.fragmentShader =
+    'uniform vec3 uSunDirView; uniform float uTime;\n' +
+    shader.fragmentShader
+      .replace(
+        '#include <alphamap_fragment>',
+        `#include <alphamap_fragment>
+      float cloudCover = diffuseColor.a;
       {
         vec3 cd = closeDetail(normalize(vSurfaceP), 0.0, 1.0);
         diffuseColor.a *= clamp(1.0 + cd.y * 1.5, 0.0, 1.6);
         diffuseColor.rgb *= 1.0 + cd.y * 0.3;
       }`,
-  )
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+      {
+        /* lightning: on the night side, storm cells in the thickest cloud
+           light up now and then, a flicker of a few strokes */
+        float night = 1.0 - smoothstep(-0.2, 0.0, dot(normalize(normal), normalize(uSunDirView)));
+        float thick = smoothstep(0.45, 0.8, cloudCover);
+        if (night * thick > 0.0) {
+          vec3 sp = normalize(vSurfaceP) * 55.0;
+          vec3 cell = floor(sp);
+          float id = cdHash(cell);
+          float t = uTime * (0.5 + id * 0.7) + id * 40.0;
+          float strike = step(0.965, cdHash(cell + floor(t) * 1.37));
+          float beat = fract(t);
+          float flicker = exp(-beat * 9.0) * (0.55 + 0.45 * sin(beat * 120.0 + id * 9.0));
+          vec3 at = (cdHash(cell + 3.1) - 0.5) * vec3(0.5) + 0.5;
+          float blob = 1.0 - smoothstep(0.0, 0.42, length(fract(sp) - at));
+          totalEmissiveRadiance += vec3(0.78, 0.85, 1.0) * strike * max(flicker, 0.0) * blob * thick * night * 2.2;
+        }
+      }`,
+      )
 }
 
 function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, earthNight)
+  Object.assign(shader.uniforms, earthNight, surfacePatch)
   withSurfaceVaryings(shader)
+  shader.fragmentShader = SURFACE_PATCH_GLSL + shader.fragmentShader
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
 uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
 ` +
     shader.fragmentShader
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+      /* flying low: NASA's imagery of the ground below, streamed in */
+      float earthStreamed = 0.0;
+      #ifdef USE_MAP
+      if (uPatchPlanet == 2) {
+        vec4 earthPatch = patched(diffuseColor.rgb, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, vMapUv, uPatchGain);
+        diffuseColor.rgb = earthPatch.rgb;
+        earthStreamed = earthPatch.a;
+      }
+      #endif`,
+      )
       .replace(
         '#include <specularmap_fragment>',
         `#include <specularmap_fragment>
@@ -168,7 +210,8 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
       #else
       float closeSea = smoothstep(0.02, 0.08, diffuseColor.b - diffuseColor.r);
       #endif
-      diffuseColor.rgb *= 1.0 + closeEarth.y * mix(0.3, 0.04, closeSea);`,
+      /* real imagery carries its own detail: the made-up grain steps back */
+      diffuseColor.rgb *= 1.0 + closeEarth.y * mix(0.3, 0.04, closeSea) * (1.0 - 0.7 * earthStreamed);`,
       )
       .replace(
         '#include <normal_fragment_maps>',
@@ -178,6 +221,11 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
+      #ifdef USE_EMISSIVEMAP
+      if (uPatchPlanet == 2) {
+        totalEmissiveRadiance = emissive * patched(emissiveColor.rgb, uNightFine, uNightFineRect, uNightCoarse, uNightCoarseRect, vEmissiveMapUv, vec3(1.0)).rgb;
+      }
+      #endif
       float sunFacing = dot(normalize(normal), normalize(uSunDirView));
       totalEmissiveRadiance *= 1.0 - smoothstep(-0.2, 0.12, sunFacing);
       #ifdef USE_MAP
@@ -552,7 +600,7 @@ void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPosition = wp.x
 const ATMOSPHERE_FRAGMENT_SHADER = /* glsl */ `
 
 uniform vec3 uColor; uniform vec3 uDusk; uniform float uIntensity; uniform float uThickness;
-uniform vec3 uSunPosition; uniform float uLight; uniform float uShell;
+uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform float uAirglow;
 varying vec3 vNormal; varying vec3 vWorldPosition;
 
 void main() {
@@ -586,7 +634,21 @@ void main() {
   float backlit = forward * smoothstep(-0.75, 0.05, ndl) * 2.2;
 
   float a = edge * (day + backlit) * uIntensity * uLight;
-  gl_FragColor = vec4(color * a, a);
+  vec3 glow = color * a;
+
+  /* Earth's airglow: on the night side, seen edge-on, a thin green line
+     about 95 km up (oxygen, glowing as it recombines) under a fainter red
+     layer near 250 km, as in photographs from the Space Station. Thinner
+     than a pixel from afar; it appears only as you come close. */
+  if (uAirglow > 0.5 && above > 0.0) {
+    float night = 1.0 - smoothstep(-0.2, 0.05, ndl);
+    float green = exp(-pow((above - 0.0149) / 0.0014, 2.0));
+    float red = exp(-pow((above - 0.036) / 0.006, 2.0));
+    vec3 airglow = (vec3(0.32, 1.0, 0.45) * green * 0.3 + vec3(1.0, 0.35, 0.25) * red * 0.04) * night;
+    glow += airglow;
+    a += dot(airglow, vec3(0.33));
+  }
+  gl_FragColor = vec4(glow, a);
 }`
 
 
@@ -859,11 +921,13 @@ vec3 flowingClouds(vec2 uv) {
 }
 
 ${CLOSE_DETAIL_GLSL}
+${SURFACE_PATCH_GLSL}
 void main() {
 
   vec3 normal = normalize(vNormal);
   vec3 p = normalize(vLocalPosition);
   vec3 surface;
+  float streamedCover = 0.0;
 
   if (uPlanet == 0) surface = mercury(p);
   else if (uPlanet == 1) surface = venus(p);
@@ -875,9 +939,37 @@ void main() {
 
   /* real surface map when loaded; procedural surface above is the fallback */
   if (uHasMap > 0.5) {
+    /* giants, close up (flying): the bands break into eddies and
+       filaments, as in Juno's and Cassini's close views. The map's own
+       colours are swirled by turbulence, strongest along the bands, and
+       their contrast lifted. Off in every view of the journey itself. */
+    vec2 mapUv = vUv;
+    float swirl = 0.0;
+    if (uType == 2 || uType == 3) {
+      swirl = 1.0 - smoothstep(0.0008, 0.0025, length(fwidth(p)));
+      if (swirl > 0.0) {
+        vec3 q = p * vec3(1.0, 3.2, 1.0);
+        vec2 eddy = vec2(fbm(q * 34.0 + vec3(0.0, 0.0, uTime * 0.004)), fbm(q * 34.0 + 7.3)) - 0.5;
+        vec2 fine = vec2(noise(q * 260.0), noise(q * 260.0 + 3.7)) - 0.5;
+        mapUv += (eddy * vec2(0.012, 0.007) + fine * vec2(0.0016, 0.0011)) * swirl;
+      }
+    }
     surface = (uPlanet == 4 || uPlanet == 5 || uPlanet == 1)
-      ? flowingClouds(vUv)
-      : texture2D(uMap, vUv).rgb;
+      ? flowingClouds(mapUv)
+      : texture2D(uMap, mapUv).rgb;
+    if (swirl > 0.0) {
+      vec3 broad = texture2D(uMap, mapUv, 4.0).rgb;
+      surface = max(broad + (surface - broad) * (1.0 + 1.3 * swirl), vec3(0.0));
+      /* and their colour deepened, the way close views are seen */
+      float grey = dot(surface, vec3(0.299, 0.587, 0.114));
+      surface = max(mix(vec3(grey), surface, 1.0 + 0.6 * swirl) * (1.0 - 0.1 * swirl), vec3(0.0));
+    }
+    /* flying low: NASA's imagery of the ground below, streamed in */
+    if (uPatchPlanet == uPlanet) {
+      vec4 streamed = patched(surface, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, vUv, uPatchGain);
+      surface = streamed.rgb;
+      streamedCover = streamed.a;
+    }
     /* Venus: the faint dark chevrons seen in ultraviolet, sweeping round */
     if (uPlanet == 1) {
       float lat = (vUv.y - 0.5) * 3.14159;
@@ -918,7 +1010,7 @@ void main() {
      rugged rock on Mercury and Mars, soft streaky cloud on the others */
   bool rocky = uPlanet == 0 || uPlanet == 3;
   vec3 close = closeDetail(p, rocky ? 0.6 : 0.0, rocky ? 1.0 : 5.0);
-  surface *= 1.0 + close.y * (rocky ? 0.28 : 0.14);
+  surface *= 1.0 + close.y * (rocky ? 0.28 : 0.14) * (1.0 - 0.7 * streamedCover);
   lit = closeBump(lit, vWorldPosition, close.x * vScale * (rocky ? 0.16 : 0.04));
   float ndlLit = dot(lit, toSun);
 
@@ -1405,6 +1497,7 @@ function Planet({
   const { gl } = useThree()
   // sharper maps once the camera has arrived (desktop only)
   const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
+  useSurfacePatches(index, body, SYSTEM_OFFSET)
   const sharpMap = useSharpTexture(SHARP_PLANET_MAPS[index], sharp, {
     colorSpace: THREE.NoColorSpace,
   })
@@ -1476,6 +1569,8 @@ function Planet({
       uHasHeight: { value: 0 },
       uRelief: { value: RELIEF[index]?.strength ?? 0 },
       uHeightTexel: { value: new THREE.Vector2(1 / 1024, 1 / 512) },
+      // streamed imagery while flying low (shared by all planets)
+      ...surfacePatch,
     }),
     [planet, planetType, index, sunlight],
   )
@@ -1511,6 +1606,7 @@ function Planet({
       uSunPosition: { value: SYSTEM_OFFSET },
       uLight: { value: sunlight.strength },
       uShell: { value: ATMOSPHERE_SHELL[planet.name] ?? 1.055 },
+      uAirglow: { value: planet.name === 'Earth' ? 1 : 0 },
     }
   }, [planet, sunlight])
 
@@ -2353,6 +2449,10 @@ varying vec3 vRingNormal;
 varying vec2 vLocal;
 
 float ringHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float ringNoise(float x, float seed) {
+  float i = floor(x); float f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(ringHash(vec2(i, seed)), ringHash(vec2(i + 1.0, seed)), f);
+}
 
 void main() {
   /* distance from Saturn's centre in planet radii; the texture covers the
@@ -2366,6 +2466,19 @@ void main() {
     ring = vec4(vec3(0.62, 0.56, 0.48), 0.05 * bands * fade);
   } else {
     ring = texture2D(uMap, vec2(u, 0.5));
+    /* close up: the rings resolve into ever finer ringlets (Cassini saw
+       structure down to a few hundred metres). Each scale appears only
+       once it is wider than a pixel. */
+    float px = fwidth(rr);
+    float ringlets = 0.0;
+    float f = 500.0;
+    for (int i = 0; i < 4; i++) {
+      float shown = 1.0 - smoothstep(0.15, 0.8, px * f);
+      ringlets += (ringNoise(rr * f, float(i) * 7.0) - 0.5) * shown;
+      f *= 3.6;
+    }
+    ring.a = clamp(ring.a * (1.0 + ringlets * 1.1), 0.0, 1.0);
+    ring.rgb *= 1.0 + ringlets * 0.35;
   }
   vec3 toSun = normalize(uSunPosition - vWorld);
   vec3 toPlanet = uPlanetCenter - vWorld;
