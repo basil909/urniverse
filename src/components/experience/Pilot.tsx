@@ -31,6 +31,7 @@ import { FEATURES } from './features'
 import { CLOUD_BASE_KM, CLOUD_TOP_KM } from './clouds'
 import {
   FIRST_CRAFT_ID,
+  COMET_ID,
   FIRST_STAR_ID,
   NAMED_STARS,
   PC_UNITS,
@@ -40,6 +41,7 @@ import {
   starTemperature,
 } from './spaceBodies'
 import { sunVisibility } from './sunVisibility'
+import CometEncke from './CometEncke'
 
 /* ============================================================
    FLIGHT MODE
@@ -1765,6 +1767,10 @@ export default function Pilot() {
       const arrive = fromGoal.add(sunward)
       if (arrive.lengthSq() < 1e-8) arrive.set(0, 1, 0)
       let end = goal.clone().addScaledVector(arrive.normalize(), radius * standOff)
+      if (target === COMET_ID) {
+        // the comet: inside its coma, 1,500 km from the nucleus, sunward
+        end = goal.clone().addScaledVector(arrive.normalize(), 1500 / KM_PER_UNIT)
+      }
       if (target >= FIRST_CRAFT_ID && target < FIRST_STAR_ID) {
         // a spacecraft: a few hundred metres off (the rover: from above)
         const off = Math.max(radius * 8, 0.3 / KM_PER_UNIT)
@@ -2001,7 +2007,7 @@ export default function Pilot() {
       sunLight.current.intensity = 2.4 * sunSeen * Math.min(1, Math.max(sunAU, 1e-3) ** -0.5)
       sunLight.current.color.copy(_sunBase).multiply(_sunTint)
       // at another star, its light instead
-      if (nearestIndex >= FIRST_STAR_ID) {
+      if (nearestIndex >= FIRST_STAR_ID && nearestIndex < COMET_ID) {
         const star = NAMED_STARS[nearestIndex - FIRST_STAR_ID]
         getBodyPosition(nearestIndex, simClock.jd, _craft)
         sunLight.current.position.copy(_craft).sub(jet.position).normalize().multiplyScalar(10)
@@ -2147,6 +2153,7 @@ export default function Pilot() {
       {/* where the ship is (the scene's own units); it is drawn below */}
       <group ref={ship} visible={false} />
       <NearStar />
+      <CometEncke />
       {createPortal(
         <>
           <group ref={visual}>

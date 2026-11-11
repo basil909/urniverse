@@ -487,7 +487,7 @@ export function getSmallBodyOrbitPosition(index: number, jd: number, out: THREE.
    (The Sun is -1 wherever it appears.) */
 /* bodies 20 and up (spacecraft, named stars) live in spaceBodies.ts,
    which registers itself here (it needs this module, not the reverse) */
-export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1 + 7 + 26
+export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1 + 7 + 27
 type ExtraBodies = {
   position: (id: number, jd: number, bodyJd: number, out: THREE.Vector3) => THREE.Vector3
   radius: (id: number) => number

@@ -8,6 +8,7 @@ import {
   getPlanetPoleQuaternion,
   getPlanetVisualRadius,
   registerExtraBodies,
+  solveKepler,
   SYSTEM_OFFSET,
 } from './orbit'
 
@@ -80,7 +81,48 @@ export const NAMED_STARS: readonly NamedStar[] = [
   { name: 'Canopus', pc: [-5.992679, -91.900392, -22.426768], absmag: -5.504, ci: 0.164 },
 ]
 
-export const SPACE_BODY_COUNT = SPACECRAFT.length + NAMED_STARS.length
+/* ============================================================
+   A REAL COMET: 2P/ENCKE
+   The comet with the shortest known period, 3.3 years, round the Sun
+   from inside Mercury's orbit to out by Jupiter's. Its orbit as JPL's
+   Small-Body Database gives it (solution of November 2026); its last
+   perihelion was on 22 October 2023, the next falls in February 2027,
+   so in November 2026 it is on its way in, some 1.7 AU from the Sun and
+   waking. Its nucleus is about 4.8 km across, dark as soot.
+============================================================ */
+export const COMET = {
+  name: 'Comet Encke',
+  e: 0.847,
+  q: 0.339, // AU
+  inclination: 11.3,
+  node: 334,
+  perihelionArg: 187,
+  perihelionJd: 2460240.035,
+  periodDays: 1210,
+  radiusKm: 2.4,
+}
+export const COMET_ID = FIRST_STAR_ID + NAMED_STARS.length
+
+/** heliocentric position in AU, in scene axes (ecliptic x, north, -y) */
+export function cometHelioAU(jd: number, out: THREE.Vector3) {
+  const a = COMET.q / (1 - COMET.e)
+  let mean = ((jd - COMET.perihelionJd) / COMET.periodDays) * 2 * Math.PI
+  mean = Math.atan2(Math.sin(mean), Math.cos(mean))
+  const E = solveKepler(mean, COMET.e)
+  const xv = a * (Math.cos(E) - COMET.e)
+  const yv = a * Math.sqrt(1 - COMET.e * COMET.e) * Math.sin(E)
+  const v = Math.atan2(yv, xv)
+  const r = Math.hypot(xv, yv)
+  const u = v + COMET.perihelionArg * DEG
+  const N = COMET.node * DEG
+  const i = COMET.inclination * DEG
+  const x = r * (Math.cos(N) * Math.cos(u) - Math.sin(N) * Math.sin(u) * Math.cos(i))
+  const y = r * (Math.sin(N) * Math.cos(u) + Math.cos(N) * Math.sin(u) * Math.cos(i))
+  const z = r * Math.sin(u) * Math.sin(i)
+  return out.set(x, z, -y)
+}
+
+export const SPACE_BODY_COUNT = SPACECRAFT.length + NAMED_STARS.length + 1
 
 /* a star's surface temperature from its colour (Ballesteros 2012) */
 export function starTemperature(ci: number) {
@@ -134,6 +176,7 @@ const ecliptic = (raDeg: number, decDeg: number, out: THREE.Vector3) => {
 /** position relative to the Sun (scene units) of body `id` (20 and up) */
 export function spaceBodyOrbitPosition(id: number, jd: number, bodyJd: number, out: THREE.Vector3) {
   const index = id - FIRST_CRAFT_ID
+  if (id === COMET_ID) return cometHelioAU(jd, out).multiplyScalar(AU_UNITS)
   if (index >= SPACECRAFT.length) {
     const star = NAMED_STARS[index - SPACECRAFT.length]
     return out.set(star.pc[0], star.pc[1], star.pc[2]).multiplyScalar(PC_UNITS)
@@ -182,12 +225,14 @@ export function spaceBodyOrbitPosition(id: number, jd: number, bodyJd: number, o
 
 export function spaceBodyRadius(id: number) {
   const index = id - FIRST_CRAFT_ID
+  if (id === COMET_ID) return COMET.radiusKm / KM_PER_UNIT
   if (index >= SPACECRAFT.length) return starRadiusSolar(NAMED_STARS[index - SPACECRAFT.length]) * SUN_RADIUS_UNITS
   return SPACECRAFT[index].sizeM / 2 / 1000 / KM_PER_UNIT
 }
 
 export function spaceBodyName(id: number) {
   const index = id - FIRST_CRAFT_ID
+  if (id === COMET_ID) return COMET.name
   if (index >= SPACECRAFT.length) return NAMED_STARS[index - SPACECRAFT.length].name
   return SPACECRAFT[index].name
 }

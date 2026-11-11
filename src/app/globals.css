@@ -1530,6 +1530,7 @@ html.is-spinning * {
 [data-kind='moon'] { --kind: rgba(190, 204, 222, 0.82); }
 [data-kind='craft'] { --kind: rgba(132, 228, 196, 0.9); }
 [data-kind='star'] { --kind: rgba(184, 198, 255, 0.92); }
+[data-kind='comet'] { --kind: rgba(150, 236, 226, 0.92); }
 .flight-marker.is-target { opacity: 1; color: var(--planet-accent); }
 .flight-marker.is-hidden { opacity: 0; pointer-events: none; }
 .flight-marker[data-side='left'] { flex-direction: row-reverse; }

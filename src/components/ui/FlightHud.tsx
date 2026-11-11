@@ -38,7 +38,7 @@ function formatShort(km: number) {
 /* the worlds, as the markers list them (index -1: the Sun). Each is of
    a kind, and each kind has its own mark and tint, so a glance tells a
    planet from a moon, a spacecraft or a star; hovering says what it is */
-type Kind = 'sun' | 'planet' | 'dwarf' | 'moon' | 'craft' | 'star'
+type Kind = 'sun' | 'planet' | 'dwarf' | 'moon' | 'comet' | 'craft' | 'star'
 type World = { index: number; name: string; key: string; kind: Kind; what: string; parent?: number; show?: () => boolean }
 const nearAny = (...ids: number[]) => () => ids.includes(pilot.nearestIndex)
 const STARS: [string, string][] = [
@@ -87,6 +87,8 @@ const WORLDS: World[] = [
   { index: 17, name: 'Titan', key: '', kind: 'moon', what: 'Moon of Saturn · thick orange haze', parent: 5 },
   { index: 18, name: 'Phobos', key: '', kind: 'moon', what: 'Moon of Mars', parent: 3 },
   { index: 19, name: 'Deimos', key: '', kind: 'moon', what: 'Moon of Mars', parent: 3 },
+  // a real comet, on its true orbit
+  { index: 46, name: 'Comet Encke', key: '', kind: 'comet', what: 'Comet · nearing the Sun, tails growing' },
   // spacecraft: near Earth (or the Moon), out past the planets, on Mars
   { index: 20, name: 'Space Station', key: '', kind: 'craft', what: 'Spacecraft · crewed, 420 km up', show: nearAny(2, 12, 20, 21, 22) },
   { index: 21, name: 'Hubble', key: '', kind: 'craft', what: 'Space telescope · 530 km up', show: nearAny(2, 12, 20, 21, 22) },
@@ -114,6 +116,7 @@ const GROUPS: { kind: Kind; title: string }[][] = [
   ],
   [
     { kind: 'moon', title: 'Moons' },
+    { kind: 'comet', title: 'Comet' },
     { kind: 'craft', title: 'Spacecraft' },
   ],
   [{ kind: 'star', title: 'Other stars' }],
@@ -130,12 +133,13 @@ function warpLine(name: string) {
   if (world?.index === 25) return `Heading down to ${name}`
   if (world?.kind === 'craft') return `Rendezvous with ${name}`
   if (world?.kind === 'star') return `Crossing to ${name}`
+  if (world?.kind === 'comet') return `Chasing ${name}`
   return `Warping to ${name}`
 }
 
 /* each kind's mark: the Sun rayed, a planet a ring, an asteroid a
-   diamond, a moon a crescent, a spacecraft a tracking bracket, a star a
-   four-pointed glint */
+   diamond, a moon a crescent, the comet a head and tail, a spacecraft a
+   tracking bracket, a star a four-pointed glint */
 function Glyph({ kind }: { kind: Kind }) {
   return (
     <svg className="flight-glyph" viewBox="0 0 12 12" aria-hidden="true">
@@ -155,6 +159,12 @@ function Glyph({ kind }: { kind: Kind }) {
         </>
       )}
       {kind === 'star' && <path className="is-filled" d="M6 0.4L7 5L11.6 6L7 7L6 11.6L5 7L0.4 6L5 5Z" />}
+      {kind === 'comet' && (
+        <>
+          <circle cx="8.6" cy="3.4" r="2" className="is-filled" />
+          <path d="M7.2 4.8L1 11M6.4 3.6L2.2 7.4M7.8 5.8L5 9.8" />
+        </>
+      )}
     </svg>
   )
 }
