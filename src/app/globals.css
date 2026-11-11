@@ -1386,3 +1386,50 @@ html.is-spinning * {
   .motion-control { top: 14px; }
   .motion-speeds button { padding: 0.3rem 0.45rem; font-size: 10px; }
 }
+
+/* sound: three small bars, beside the brand */
+.sound-toggle {
+  position: absolute;
+  top: 18px;
+  left: calc(var(--pad) + 120px);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  background: rgba(6, 8, 14, 0.35);
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: border-color 0.2s;
+}
+.sound-toggle:hover,
+.sound-toggle[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--planet-accent) 55%, transparent);
+}
+.sound-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 10px;
+}
+.sound-bars span {
+  width: 2px;
+  height: 3px;
+  border-radius: 1px;
+  background: var(--text-2);
+}
+.sound-toggle[aria-pressed='true'] .sound-bars span {
+  background: var(--planet-accent);
+  animation: sound-bar 1.6s ease-in-out infinite;
+}
+.sound-toggle[aria-pressed='true'] .sound-bars span:nth-child(2) { animation-delay: -0.5s; }
+.sound-toggle[aria-pressed='true'] .sound-bars span:nth-child(3) { animation-delay: -1s; }
+@keyframes sound-bar {
+  0%, 100% { height: 3px; }
+  50% { height: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sound-toggle[aria-pressed='true'] .sound-bars span { animation: none; height: 7px; }
+}

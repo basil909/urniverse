@@ -5,4 +5,6 @@ export const lens = {
   closeUp: 0,
   /* 0..1 as the camera drifts round into a backlit hero shot */
   backlit: 0,
+  /* true once the loading screen starts to lift: the opening sweep waits for it */
+  revealed: false,
 }

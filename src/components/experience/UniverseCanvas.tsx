@@ -176,6 +176,10 @@ const _backDir = new THREE.Vector3()
 
 const BLEND = 0.18
 
+/* the opening sweep into the Solar System */
+const ENTRANCE_SECONDS = 5.5
+const _driftOffset = new THREE.Vector3()
+
 const isPlanetChapter = (chapter: number) =>
   chapter >= 2 && chapter <= 9
 
@@ -365,6 +369,9 @@ function CinematicCamera({
     camera.updateProjectionMatrix()
   }, [camera, size.width, size.height])
   const initialized = useRef(false)
+  // the opening entrance: starts as the loading screen lifts
+  const entranceClock = useRef(-1)
+  const entranceDone = useRef(false)
   const bank = useRef(0)
   const heroChapter = useRef(-1)
   const heroTime = useRef(0)
@@ -474,6 +481,59 @@ function CinematicCamera({
     } else {
       _scratchPos.copy(_currPos)
       _scratchTarget.copy(_currTarget)
+    }
+
+    /* Close-ups breathe: once arrived, the camera slowly swings a little
+       way round the planet and back (moons, rings and stars shift with
+       real depth), then settles before the next flight. The backlit shots
+       have their own drift. */
+    if (planet && local >= BLEND && !reducedMotion && !HERO_BACKLIT.has(chapter - 2)) {
+      const settle = ease((heroTime.current - 0.8) / 3)
+      const leave = 1 - THREE.MathUtils.smoothstep(local, 0.86, 0.99)
+      const swing = Math.sin(heroTime.current * 0.09) * 0.2 * settle * leave
+      const breathe = 1 + Math.sin(heroTime.current * 0.06 + 1.3) * 0.035 * settle * leave
+      _driftOffset
+        .copy(_scratchPos)
+        .sub(_scratchTarget)
+        .applyAxisAngle(_worldUp, swing)
+        .multiplyScalar(breathe)
+      _scratchPos.copy(_scratchTarget).add(_driftOffset)
+    }
+
+    /* The opening: on first load the camera starts far out above the
+       planets' plane, then sweeps down and round into the opening view as
+       the title appears. Skipped for reduced motion or if the page opens
+       mid-journey; scrolling during it finishes it at once. */
+    if (!entranceDone.current) {
+      if (reducedMotion || chapter !== 0) {
+        entranceDone.current = true
+      } else if (lens.revealed || entranceClock.current >= 0) {
+        // starts as the loading screen lifts; once begun it runs to the end
+        // (later loads don't restart it), in steady steps even if a frame
+        // is slow
+        if (entranceClock.current < 0) entranceClock.current = 0
+        entranceClock.current += Math.min(delta, 0.05)
+        const t = THREE.MathUtils.clamp((entranceClock.current - 0.2) / ENTRANCE_SECONDS, 0, 1)
+        const e = 1 - Math.pow(1 - t, 3) // ease out: fast at first, then gliding in
+        const away = 1 - e
+        _driftOffset
+          .copy(_scratchPos)
+          .sub(_scratchTarget)
+          .applyAxisAngle(_worldUp, -1.1 * away)
+          .multiplyScalar(1 + 5 * away)
+        _driftOffset.y += _driftOffset.length() * 0.55 * away
+        _scratchPos.copy(_scratchTarget).add(_driftOffset)
+        if (t >= 1) entranceDone.current = true
+      } else {
+        // still loading: wait, already far out
+        _driftOffset.copy(_scratchPos).sub(_scratchTarget).applyAxisAngle(_worldUp, -1.1).multiplyScalar(6)
+        _driftOffset.y += _driftOffset.length() * 0.55
+        _scratchPos.copy(_scratchTarget).add(_driftOffset)
+      }
+      if (entranceDone.current === false && entranceClock.current >= 0) {
+        // let the smoothing follow the sweep closely
+        smoothPosition.current.copy(_scratchPos)
+      }
     }
 
     if (!initialized.current) {

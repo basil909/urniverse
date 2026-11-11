@@ -15,6 +15,7 @@ import Loader from './ui/Loader'
 import DetailPanel from './ui/DetailPanel'
 import CountUp from './ui/CountUp'
 import MotionControl from './ui/MotionControl'
+import SoundToggle from './ui/SoundToggle'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
@@ -975,8 +976,9 @@ export default function Journey() {
           <span className="brand-name">You Are Here</span>
         </button>
 
-        {/* "Real motion", and the simulated moment */}
+        {/* "Real motion", the simulated moment, and sound */}
         <MotionControl showDate={section > 0} />
+        <SoundToggle section={section} />
       </header>
 
       {/* LEFT CHAPTER RAIL */}

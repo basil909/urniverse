@@ -6,7 +6,10 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 
 ## Features
 
+- **An opening entrance.** As the loading screen lifts, the camera sweeps in from far above the planets' plane, past the Milky Way, into the opening view.
+- **A generative soundtrack (off by default).** The small button beside the title turns on a quiet ambient score made live in the browser (Web Audio, no audio files): a soft chord that glides to a new one in every chapter, a breath of space wind and distant bells.
 - **Cinematic camera journey.** Thirteen sections (intro, the Sun, eight planets, the Pale Blue Dot, the Milky Way, return), with the camera flying between them as you scroll.
+- **Living close-ups.** While you read, the camera slowly swings a little way round the planet and back, so moons, rings and stars shift with real depth.
 - **Text that waits for the camera.** Each chapter's text appears only once the camera has arrived, and stays pinned while you read.
 - **Real positions and motion.** Planets sit where they actually are on the visitor's date, on correctly oriented and tilted orbits (JPL orbital elements, Kepler's laws). In the wide views time runs at a few days per second so you can watch the orbits; Venus and Uranus spin backwards, as they really do.
 - **A real sky.** The Milky Way panorama surrounds the scene, turned to its true ~60° angle to the planets' plane, with the brightest stars at their true positions and colours; constellations and a few star names show faintly in the opening view.

@@ -3,6 +3,8 @@
 import { useProgress } from '@react-three/drei'
 import { useEffect, useState } from 'react'
 
+import { lens } from '../experience/lens'
+
 /* Full-screen loader that tracks every texture three.js loads.
    It finishes when nothing is loading, with a safety timeout so a slow
    or failed file can never trap the visitor on this screen. */
@@ -46,6 +48,8 @@ export default function Loader() {
 
   useEffect(() => {
     if (!done) return
+    // the scene's opening sweep starts as the loader lifts
+    lens.revealed = true
     const timer = window.setTimeout(() => setGone(true), 900)
     return () => window.clearTimeout(timer)
   }, [done])
