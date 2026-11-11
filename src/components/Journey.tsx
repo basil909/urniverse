@@ -943,6 +943,8 @@ export default function Journey() {
   // planets only (not the Sun): these can be dragged to spin
   const canSpin = textOn && active >= 1 && active <= 8
   const planetName = activeChapter ? titleCase(activeChapter.label) : ''
+  // this chapter's world, if it is a planet you can fly to
+  const flyTarget = activeChapter ? PLANET_INDEX[activeChapter.id] : undefined
   const scale = activeChapter ? scaleSentence(activeChapter.id, planetName) : null
   const stageKind =
     section === 0 ? 'intro' : section === TOTAL_SECTIONS - 1 ? 'return' : 'chapter'
@@ -1253,6 +1255,21 @@ export default function Journey() {
                   >
                     More about {planetName}
                     <span aria-hidden="true">+</span>
+                  </button>
+                )}
+
+                {flyTarget !== undefined && (
+                  <button
+                    type="button"
+                    className="detail-open fly-there"
+                    onClick={() => {
+                      // take the ship and warp straight there
+                      pilot.warpRequest = flyTarget
+                      takeOff()
+                    }}
+                  >
+                    Fly there
+                    <span aria-hidden="true">↗</span>
                   </button>
                 )}
 

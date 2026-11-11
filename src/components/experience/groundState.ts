@@ -18,6 +18,8 @@ import * as THREE from 'three'
 export type GroundConfig = {
   /** relief map, or none (Earth) */
   heightMap?: string
+  /** cloud map (Earth), for flying through the deck */
+  cloudMap?: string
   /** land/sea map (Earth's specular map: sea is bright) */
   seaMap?: string
   radiusKm: number
@@ -31,7 +33,9 @@ export type GroundConfig = {
 
 export const GROUND: Record<number, GroundConfig> = {
   0: { heightMap: '/textures/relief/mercury-height.webp', radiusKm: 2439.7, reliefKm: 9, roughKm: 1.4, ridged: 0.4 },
-  2: { seaMap: '/textures/earth-specular.webp', radiusKm: 6371, reliefKm: 0, roughKm: 1.6, ridged: 0.7 },
+  2: { seaMap: '/textures/earth-specular.webp', cloudMap: '/textures/earth-clouds.webp', radiusKm: 6371, reliefKm: 0, roughKm: 1.6, ridged: 0.7 },
+  // the Moon (body 12): LRO's elevation
+  12: { heightMap: '/textures/moon-height.webp', radiusKm: 1737.4, reliefKm: 18, roughKm: 1.1, ridged: 0.3 },
   3: { heightMap: '/textures/relief/mars-height.webp', radiusKm: 3389.5, reliefKm: 26, roughKm: 1.8, ridged: 0.55 },
 }
 
@@ -210,6 +214,7 @@ export class GroundModel {
   elevation: ((u: number, vm: number) => { height: number; known: number } | null) | null = null
   relief: Sampler | null = null
   sea: Sampler | null = null
+  clouds: Sampler | null = null
   ready = false
   readonly reliefRadii: number
   readonly roughRadii: number
@@ -222,11 +227,18 @@ export class GroundModel {
     Promise.all([
       config.heightMap ? loadSampler(config.heightMap) : Promise.resolve(null),
       config.seaMap ? loadSampler(config.seaMap) : Promise.resolve(null),
-    ]).then(([relief, sea]) => {
+      config.cloudMap ? loadSampler(config.cloudMap) : Promise.resolve(null),
+    ]).then(([relief, sea, clouds]) => {
       this.relief = relief
       this.sea = sea
+      this.clouds = clouds
       this.ready = (!config.heightMap || !!relief) && (!config.seaMap || !!sea)
     })
+  }
+
+  /** cloud cover 0..1 at a map position */
+  cloudCover(u: number, v: number) {
+    return this.clouds ? sample(this.clouds, u, v) : 0
   }
 
   land(u: number, v: number) {
@@ -305,6 +317,10 @@ export const shipShadow = {
   uShipLen: { value: 1 },
   uShipShadow: { value: 0 },
 }
+
+/* Earth's cloud deck: its drift over the ground (fraction of a turn) and
+   height, written by the cloud layer */
+export const cloudDeck = { shift: 0, height: 0.012 }
 
 /* the cut in the planet's sphere under the patch (shared uniforms) */
 export const groundHole = {

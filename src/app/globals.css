@@ -1554,8 +1554,51 @@ html.is-spinning * {
   color: var(--text-3);
   opacity: 0.7;
 }
+/* inside a giant's clouds, and in Earth's cloud deck */
+.flight-haze,
+.flight-mist {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s linear;
+}
+.flight-haze { mix-blend-mode: normal; }
+/* the first flight's guide */
+.flight-guide-card {
+  position: absolute;
+  left: 50%;
+  top: 76px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0.6rem 0.9rem 0.6rem 1rem;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: rgba(6, 8, 14, 0.5);
+  backdrop-filter: blur(6px);
+  color: var(--text-1);
+  font: 400 12px / 1.2 var(--sans);
+  letter-spacing: 0.02em;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.flight-guide-step { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.flight-guide-card button {
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.flight-guide-card button:hover { color: var(--text-1); }
+@media (max-width: 640px) {
+  .flight-guide-card { white-space: normal; width: 88%; border-radius: 14px; }
+}
 /* photo mode (P): nothing but the view */
-.flight-hud.is-photo > *:not(.flight-toast):not(.flight-credit) { opacity: 0 !important; pointer-events: none !important; }
+.flight-hud.is-photo > *:not(.flight-toast):not(.flight-credit):not(.flight-haze):not(.flight-mist) { opacity: 0 !important; pointer-events: none !important; }
 html.is-photo .hud-tools,
 html.is-photo .brand,
 html.is-photo .flight-land { opacity: 0; pointer-events: none; }

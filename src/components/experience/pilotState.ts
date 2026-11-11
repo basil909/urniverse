@@ -62,6 +62,19 @@ export const pilot = {
   cameraMode: 'chase' as 'chase' | 'flyby' | 'orbit',
   /** photo mode: no HUD (P) */
   photo: false,
+  /** for sound and the HUD: thrust, re-entry heat, air density (0..1) */
+  thrust: 0,
+  heat: 0,
+  air: 0,
+  /** inside a giant's (or Venus's) clouds: how deep, 0..1, the pressure
+      (bar) and the haze colour */
+  immersion: 0,
+  pressureBar: 0,
+  hazeColor: '#000000',
+  /** flying through Earth's cloud deck: how thick the mist is, and how
+      sunlit */
+  mist: 0,
+  mistLight: 1,
 }
 
 export const VIEW_NEAR = 3.2

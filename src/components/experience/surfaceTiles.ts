@@ -78,6 +78,14 @@ const SOURCES: Record<
     mapWidth: 4096,
     gain: [1, 1, 1],
   },
+  // the Moon (body 12): LRO's wide-angle camera mosaic, ~100 m a pixel
+  12: {
+    day: trek('Moon', 'LRO_WAC_Mosaic_Global_303ppd_v02', 8),
+    radiusKm: 1737.4,
+    mapWidth: 4096,
+    // the mosaic is darker than the map (gain in linear light: sRGB)
+    gain: [3.6, 3.5, 3.4],
+  },
   3: {
     day: trek('Mars', 'Mars_Viking_MDIM21_ClrMosaic_global_232m', 7),
     radiusKm: 3389.5,
@@ -449,7 +457,7 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     surfacePatch.uPatchGain.value.fromArray(source.gain)
     const mapKm = (2 * Math.PI * source.radiusKm) / source.mapWidth
 
-    const space = index === 2 ? THREE.SRGBColorSpace : THREE.NoColorSpace
+    const space = index === 2 || index === 12 ? THREE.SRGBColorSpace : THREE.NoColorSpace
     const aimPair = (src: Source, fine: PatchLayer, coarse: PatchLayer, wanted: boolean) => {
       fine.setColorSpace(space)
       coarse.setColorSpace(space)

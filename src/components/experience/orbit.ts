@@ -485,10 +485,16 @@ export function getSmallBodyOrbitPosition(index: number, jd: number, out: THREE.
 
 /* Every body you can fly to: 0-7 the planets, then the small bodies.
    (The Sun is -1 wherever it appears.) */
-export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length
+export const BODY_COUNT = PLANETS.length + SMALL_BODIES.length + 1
 
+const _moonOffset = new THREE.Vector3()
 export function getBodyOrbitPosition(id: number, jd: number, out: THREE.Vector3) {
   if (id < 0) return out.set(0, 0, 0)
+  if (id === PLANETS.length + SMALL_BODIES.length) {
+    // the Moon: from Earth, at its true distance in flight
+    getPlanetOrbitPosition(2, jd, out)
+    return out.add(moonDirection(simMoonJd(), _moonOffset).multiplyScalar(MOON_TRUE_DISTANCE))
+  }
   return id < PLANETS.length
     ? getPlanetOrbitPosition(id, jd, out)
     : getSmallBodyOrbitPosition(id - PLANETS.length, jd, out)
@@ -500,6 +506,7 @@ export function getBodyPosition(id: number, jd: number, out: THREE.Vector3) {
 
 export function getBodyRadius(id: number) {
   if (id < 0) return SUN_TRUE_RADIUS
+  if (id === PLANETS.length + SMALL_BODIES.length) return (MOON_RADIUS_KM / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
   if (id < PLANETS.length) return getPlanetVisualRadius(id)
   const body = SMALL_BODIES[id - PLANETS.length]
   return ((body?.diameterKm ?? 1) / 2 / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
@@ -507,5 +514,42 @@ export function getBodyRadius(id: number) {
 
 export function getBodyName(id: number) {
   if (id < 0) return 'the Sun'
+  if (id === PLANETS.length + SMALL_BODIES.length) return 'the Moon'
   return id < PLANETS.length ? PLANETS[id].name : SMALL_BODIES[id - PLANETS.length].name
+}
+
+/* ============================================================
+   THE MOON, AS A BODY TO FLY TO (flying only)
+   Its direction from Earth is a short lunar series (good to about a
+   degree); at true scale it stands 60.27 Earth radii out, 1,737 km in
+   radius. Body id 12, after the planets and the four asteroids.
+============================================================ */
+export const MOON_ID = PLANETS.length + 4
+export const MOON_RADIUS_KM = 1737.4
+/** the Moon's distance from Earth at true scale, scene units */
+export const MOON_TRUE_DISTANCE = 60.27 * EARTH_RENDER_RADIUS
+
+export function moonDirection(jd: number, out: THREE.Vector3) {
+  const d = jd - 2451545.0
+  const rad = Math.PI / 180
+  const L = 218.316 + 13.176396 * d // mean longitude
+  const M = (134.963 + 13.064993 * d) * rad // mean anomaly
+  const F = (93.272 + 13.22935 * d) * rad // argument of latitude
+  const D = (297.85 + 12.190749 * d) * rad // mean elongation from the Sun
+  const Ms = (357.529 + 0.98560028 * d) * rad // the Sun's mean anomaly
+  const lambda =
+    (L + 6.289 * Math.sin(M) + 1.274 * Math.sin(2 * D - M) + 0.658 * Math.sin(2 * D) - 0.186 * Math.sin(Ms)) * rad
+  const beta = 5.128 * Math.sin(F) * rad
+  // ecliptic -> scene (x -> X, north -> Y, y -> -Z)
+  return out.set(Math.cos(beta) * Math.cos(lambda), Math.sin(beta), -Math.cos(beta) * Math.sin(lambda))
+}
+
+/* the clock the Moon's position follows (set by simClock, which imports
+   this module, so it is passed in rather than imported) */
+let moonJdSource: () => number = () => 2451545.0
+export function setMoonClock(source: () => number) {
+  moonJdSource = source
+}
+function simMoonJd() {
+  return moonJdSource()
 }

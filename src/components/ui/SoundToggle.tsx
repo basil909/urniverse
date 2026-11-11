@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { Soundscape } from './soundscape'
+import { SOUND_EVENT, soundSwitch } from './flightAudio'
 
 /* The sound switch: off by default. On, a quiet generative score fades
    in and follows the journey's chapters. */
@@ -21,6 +22,8 @@ export default function SoundToggle({ section }: { section: number }) {
       engine.current?.stop()
       engine.current = null
       setOn(false)
+      soundSwitch.on = false
+      window.dispatchEvent(new Event(SOUND_EVENT))
       return
     }
     try {
@@ -29,6 +32,8 @@ export default function SoundToggle({ section }: { section: number }) {
       await soundscape.start()
       engine.current = soundscape
       setOn(true)
+      soundSwitch.on = true
+      window.dispatchEvent(new Event(SOUND_EVENT))
     } catch {
       // no Web Audio: leave the switch off
     }

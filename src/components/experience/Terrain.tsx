@@ -66,7 +66,8 @@ const TERRAIN_FRAGMENT = /* glsl */ `
 uniform sampler2D uMap; uniform int uPlanetId;
 uniform vec3 uSunL; uniform float uLight; uniform vec3 uLightTint;
 uniform vec3 uSky; uniform float uSkyLight; uniform vec3 uHaze; uniform float uHazeK; uniform float uWorldRadius;
-uniform float uEarth;
+uniform float uEarth; uniform float uAlbedo;
+uniform sampler2D uNight; uniform float uHasNight;
 uniform sampler2D uImgFine; uniform vec4 uImgFineRect; uniform sampler2D uImgCoarse; uniform vec4 uImgCoarseRect;
 uniform vec3 uShipView; uniform vec3 uShipFwd; uniform vec3 uShipRight; uniform float uShipLen; uniform float uShipShadow;
 /* the Shuttle's shadow: is the way to the Sun blocked by its body or wings
@@ -104,6 +105,7 @@ void main() {
   if (uPatchPlanet == uPlanetId) base = patched(base, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, uv, uPatchGain).rgb;
   // Earth, low down: Sentinel-2 imagery, about 10 m a pixel
   if (uEarth > 0.5) base = patched(base, uImgFine, uImgFineRect, uImgCoarse, uImgCoarseRect, vec2(uv.x, gMercV(uv)), vec3(1.0)).rgb;
+  base *= uAlbedo;
   float land = gLandAt(uv);
   vec3 n = normalize(vNormalL);
   // fine tone below the maps, and bare rock on steep slopes
@@ -125,6 +127,13 @@ void main() {
     float glint = pow(max(dot(reflect(-sunView, nView), viewDir), 0.0), 220.0) * 3.0 + pow(max(dot(reflect(-sunView, nView), viewDir), 0.0), 18.0) * 0.12;
     vec3 sea = base * 0.85 * (0.05 + lit * uLight) + vec3(1.0, 0.93, 0.8) * glint * lit;
     color = mix(sea, color, land);
+  }
+  // Earth at night: its cities, from the ground as from orbit
+  if (uEarth > 0.5 && uHasNight > 0.5) {
+    vec3 lights = texture2D(uNight, uv).rgb;
+    if (uPatchPlanet == uPlanetId) lights = patched(lights, uNightFine, uNightFineRect, uNightCoarse, uNightCoarseRect, uv, vec3(1.0)).rgb;
+    float dark = 1.0 - smoothstep(-0.15, 0.05, sunUp);
+    color += lights * vec3(1.0, 0.74, 0.46) * 1.4 * dark * land;
   }
   // air between here and the ground far off (aerial perspective)
   float dist = length(vViewPos) / uWorldRadius;
@@ -161,10 +170,12 @@ function terrainGeometry() {
 }
 
 /* sky colour and how thick the air looks over distance, per planet */
-const LOOK: Record<number, { sky: string; skyLight: number; hazeK: number }> = {
+const LOOK: Record<number, { sky: string; skyLight: number; hazeK: number; albedo?: number }> = {
   0: { sky: '#000000', skyLight: 0, hazeK: 0 },
   2: { sky: '#7fb0ff', skyLight: 0.28, hazeK: 60 },
   3: { sky: '#d9a07a', skyLight: 0.22, hazeK: 22 },
+  // the Moon's map is brightened; the real ground is as dark as asphalt
+  12: { sky: '#000000', skyLight: 0, hazeK: 0, albedo: 0.42 },
 }
 
 const _ship = new THREE.Vector3()
@@ -181,6 +192,8 @@ export default function Terrain({
   light,
   lightTint,
   earth = false,
+  srgb = false,
+  night,
 }: {
   index: number
   map: () => THREE.Texture | null
@@ -188,6 +201,10 @@ export default function Terrain({
   light: number
   lightTint: THREE.Color
   earth?: boolean
+  /** the map is sRGB (lit like three.js's own materials) */
+  srgb?: boolean
+  /** Earth's city lights */
+  night?: () => THREE.Texture | null
 }) {
   const mesh = useRef<THREE.Mesh>(null)
   const config = GROUND[index]
@@ -244,6 +261,9 @@ export default function Terrain({
           uHazeK: { value: look.hazeK },
           uWorldRadius: { value: 1 },
           uEarth: { value: earth ? 1 : 0 },
+          uAlbedo: { value: look.albedo ?? 1 },
+          uNight: { value: null as THREE.Texture | null },
+          uHasNight: { value: 0 },
           ...surfacePatch,
           ...shipShadow,
           ...earthGround,
@@ -252,9 +272,9 @@ export default function Terrain({
         },
         vertexShader: TERRAIN_VERTEX,
         fragmentShader: TERRAIN_FRAGMENT,
-        toneMapped: earth,
+        toneMapped: earth || srgb,
       }),
-    [config, model, reliefTexture, index, light, lightTint, look, earth],
+    [config, model, reliefTexture, index, light, lightTint, look, earth, srgb],
   )
   useEffect(
     () => () => {
@@ -316,6 +336,9 @@ export default function Terrain({
     u.uSmax.value = reach
     u.uGroundFade.value = fade
     u.uMap.value = map()
+    const lights = night?.() ?? null
+    u.uNight.value = lights
+    u.uHasNight.value = lights ? 1 : 0
     body.getWorldScale(_scale)
     u.uWorldRadius.value = _scale.x
     _sun.copy(sunPosition).applyMatrix4(ground.inverse).normalize()

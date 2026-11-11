@@ -22,13 +22,19 @@ import {
   SMALL_BODIES,
   getSmallBodyOrbitPosition,
   getBodyRadius,
+  moonDirection,
+  MOON_ID,
+  MOON_TRUE_DISTANCE,
+  MOON_RADIUS_KM,
+  EARTH_RADIUS_KM,
+  EARTH_RENDER_RADIUS,
 } from './orbit'
 import { simClock } from './simClock'
 import { pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
-import { GROUND, groundHole } from './groundState'
+import { cloudDeck, GROUND, groundHole } from './groundState'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
 import Belts from './Belts'
@@ -299,29 +305,6 @@ function angleInFrame(direction: THREE.Vector3, tilt: THREE.Quaternion) {
   return Math.atan2(-_ref.z, _ref.x)
 }
 const VERNAL_EQUINOX = new THREE.Vector3(1, 0, 0) // ecliptic x in the scene
-function moonDirection(jd: number, out: THREE.Vector3) {
-  const d = jd - 2451545.0
-  const rad = Math.PI / 180
-  const L = 218.316 + 13.176396 * d // mean longitude
-  const M = (134.963 + 13.064993 * d) * rad // mean anomaly
-  const F = (93.272 + 13.22935 * d) * rad // argument of latitude
-  const D = (297.85 + 12.190749 * d) * rad // mean elongation from the Sun
-  const Ms = (357.529 + 0.98560028 * d) * rad // the Sun's mean anomaly
-  const lambda =
-    (L +
-      6.289 * Math.sin(M) +
-      1.274 * Math.sin(2 * D - M) +
-      0.658 * Math.sin(2 * D) -
-      0.186 * Math.sin(Ms)) *
-    rad
-  const beta = 5.128 * Math.sin(F) * rad
-  // ecliptic -> scene (x -> X, north -> Y, y -> -Z)
-  return out.set(
-    Math.cos(beta) * Math.cos(lambda),
-    Math.sin(beta),
-    -Math.cos(beta) * Math.sin(lambda),
-  )
-}
 
 
 const EARTH_SPECULAR = new THREE.Color('#2b4766')
@@ -2226,6 +2209,7 @@ function Planet({
                 light={sunlight.strength}
                 lightTint={sunlight.tint}
                 earth={planet.name === 'Earth'}
+                night={planet.name === 'Earth' ? () => sharpNight ?? earthLights : undefined}
               />
             )}
 
@@ -2375,8 +2359,10 @@ function EarthCloudLayer({
       const height = THREE.MathUtils.lerp(CLOUD_HEIGHT_NEAR, CLOUD_HEIGHT_FAR, THREE.MathUtils.smoothstep(away, 1.25, 3))
       cloud.current.scale.setScalar(radius * (1 + height))
       earthNight.uCloudHeight.value = height
+      cloudDeck.height = height
     }
     earthNight.uCloudShift.value = drift.current / (Math.PI * 2)
+    cloudDeck.shift = earthNight.uCloudShift.value
   })
 
   if (!texture) return null
@@ -2398,6 +2384,33 @@ function EarthCloudLayer({
   )
 }
 
+/* the Moon's material: cut away under the landing ground, and NASA's
+   lunar mosaic streamed in when flying low */
+function moonGround(shader: THREE.WebGLProgramParametersWithUniforms) {
+  Object.assign(shader.uniforms, surfacePatch, groundHole)
+  withSurfaceVaryings(shader)
+  shader.fragmentShader =
+    'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
+    SURFACE_PATCH_GLSL +
+    shader.fragmentShader
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+      if (uHolePlanet == ${MOON_ID} && dot(normalize(vSurfaceP), uHoleDir) > uHoleCos) discard;`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+      #ifdef USE_MAP
+      if (uPatchPlanet == ${MOON_ID}) {
+        diffuseColor.rgb = patched(diffuseColor.rgb, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, vMapUv, uPatchGain).rgb;
+      }
+      #endif`,
+      )
+}
+
+const MOON_LIGHT_TINT = new THREE.Color(1, 1, 1)
+
 function Moon({ sharp }: { sharp: boolean }) {
   const { gl } = useThree()
   const sharpMap = useSharpTexture(SHARP_EARTH_MAPS.moon, sharp, {
@@ -2408,6 +2421,7 @@ function Moon({ sharp }: { sharp: boolean }) {
   const body = useRef<THREE.Mesh>(null)
   const timeRef = useRef(0)
   const [map, setMap] = useState<THREE.Texture | null>(null)
+  useSurfacePatches(MOON_ID, body, SYSTEM_OFFSET)
   const [height, setHeight] =
     useState<THREE.Texture | null>(null)
 
@@ -2462,8 +2476,9 @@ function Moon({ sharp }: { sharp: boolean }) {
     if (moon) {
       // where the Moon really is, seen from Earth (distance compressed in
       // the journey; flying, its true 60 Earth radii and true size)
-      moonDirection(simClock.bodyJd, moon.position).multiplyScalar(layout.trueScale ? 60.27 : MOON_ORBIT_RADIUS)
-      moon.scale.setScalar(layout.trueScale ? 0.2727 : MOON_RENDER_RADIUS)
+      // (scene units: Earth's radius is 0.23)
+      moonDirection(simClock.bodyJd, moon.position).multiplyScalar(layout.trueScale ? MOON_TRUE_DISTANCE : MOON_ORBIT_RADIUS)
+      moon.scale.setScalar(layout.trueScale ? (MOON_RADIUS_KM / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS : MOON_RENDER_RADIUS)
       // tidally locked: the near side (longitude 0) always faces Earth
       moon.parent?.getWorldPosition(_moonEarth)
       moon.lookAt(_moonEarth)
@@ -2477,7 +2492,7 @@ function Moon({ sharp }: { sharp: boolean }) {
     <group>
       <group ref={orbit}>
         <mesh ref={body} scale={MOON_RENDER_RADIUS}>
-          <sphereGeometry args={[1, 96, 96]} />
+          <sphereGeometry args={[1, 192, 192]} />
           <meshPhongMaterial
             map={sharpMap ?? map}
             bumpMap={height ?? undefined}
@@ -2485,6 +2500,16 @@ function Moon({ sharp }: { sharp: boolean }) {
             color="#ffffff"
             shininess={3}
             specular={MOON_SPECULAR}
+            onBeforeCompile={moonGround}
+          />
+          {/* landing ground (flying) */}
+          <Terrain
+            index={MOON_ID}
+            map={() => sharpMap ?? map}
+            sunPosition={SYSTEM_OFFSET}
+            light={1}
+            lightTint={MOON_LIGHT_TINT}
+            srgb
           />
         </mesh>
       </group>

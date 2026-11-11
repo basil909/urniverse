@@ -24,7 +24,7 @@ import {
 import { simClock } from './simClock'
 import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
-import { ground, groundAltitude, groundLatLon, shipShadow } from './groundState'
+import { cloudDeck, ground, groundAltitude, groundLatLon, shipShadow, sphereUv } from './groundState'
 import { sunVisibility } from './sunVisibility'
 
 /* ============================================================
@@ -66,6 +66,79 @@ const _turn = new THREE.Quaternion()
 const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
 const _identity = new THREE.Quaternion()
+const _local = new THREE.Vector3()
+
+/* diving into clouds (the giants, and Venus): how deep you may go (a
+   fraction of the radius), the pressure (bar) and temperature (K) at the
+   cloud tops, and how fast it warms with depth (K per km). Below the
+   tops the air is close to adiabatic, so pressure grows as temperature
+   to the power 3.5: some 16 bar 100 km into Jupiter, 500 at 400 km. */
+const DEEP: Record<number, { dive: number; top: number; t0: number; lapse: number }> = {
+  1: { dive: 0.008, top: 0.1, t0: 240, lapse: 8 },
+  4: { dive: 0.012, top: 0.7, t0: 165, lapse: 2 },
+  5: { dive: 0.012, top: 0.7, t0: 134, lapse: 0.85 },
+  6: { dive: 0.012, top: 1, t0: 76, lapse: 0.7 },
+  7: { dive: 0.012, top: 1, t0: 72, lapse: 0.85 },
+}
+
+/* ============================================================
+   AIR RUSHING PAST
+   Low in an atmosphere, faint streaks of air and dust race past the ship
+   at its true speed, so speed near the ground can be felt. They live in
+   the ship's own layer, in a box of space a couple of km across that
+   travels with it; none in space, where there is nothing to see.
+============================================================ */
+const STREAKS = 160
+const STREAK_BOX = 60 // ship lengths
+
+function AirStreaks({ state }: { state: { velocity: THREE.Vector3; amount: number } }) {
+  const parts = useMemo(() => {
+    const seeds = new Float32Array(STREAKS * 3)
+    for (let i = 0; i < STREAKS * 3; i += 1) seeds[i] = (Math.random() - 0.5) * STREAK_BOX
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(STREAKS * 6)
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), STREAK_BOX)
+    const material = new THREE.LineBasicMaterial({
+      color: '#dfe8f5',
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    return { seeds, geometry, positions, material, offset: new THREE.Vector3() }
+  }, [])
+  useEffect(
+    () => () => {
+      parts.geometry.dispose()
+      parts.material.dispose()
+    },
+    [parts],
+  )
+  const lines = useRef<THREE.LineSegments>(null)
+  useFrame((_, rawDelta) => {
+    const delta = Math.min(rawDelta, 0.05)
+    const amount = state.amount
+    if (lines.current) lines.current.visible = amount > 0.01
+    if (amount <= 0.01) return
+    // the air stands still; the ship moves through it
+    parts.offset.addScaledVector(state.velocity, -delta)
+    const speed = state.velocity.length()
+    const tail = Math.min(speed * 0.045, 22)
+    const half = STREAK_BOX / 2
+    const dir = state.velocity.lengthSq() > 0 ? state.velocity.clone().normalize() : new THREE.Vector3(0, 0, 1)
+    for (let i = 0; i < STREAKS; i += 1) {
+      const wrap = (value: number) => ((((value + half) % STREAK_BOX) + STREAK_BOX) % STREAK_BOX) - half
+      const x = wrap(parts.seeds[i * 3] + parts.offset.x)
+      const y = wrap(parts.seeds[i * 3 + 1] + parts.offset.y)
+      const z = wrap(parts.seeds[i * 3 + 2] + parts.offset.z)
+      parts.positions.set([x, y, z, x + dir.x * tail, y + dir.y * tail, z + dir.z * tail], i * 6)
+    }
+    parts.geometry.attributes.position.needsUpdate = true
+    parts.material.opacity = amount * 0.35
+  })
+  return <lineSegments ref={lines} geometry={parts.geometry} material={parts.material} frustumCulled={false} />
+}
 const _sunTint = new THREE.Color()
 const _sunBase = new THREE.Color('#fff0d0')
 const _shake = new THREE.Vector3()
@@ -748,6 +821,11 @@ export default function Pilot() {
   const heat = useRef(0)
   const orbitAngle = useRef(0)
   const flyby = useRef<THREE.Vector3 | null>(null) // relative to the Sun
+  const streaks = useRef({ velocity: new THREE.Vector3(), amount: 0 })
+  // automatic quality: the pixel ratio steps down when frames run long
+  const setDpr = useThree((state) => state.setDpr)
+  const startDpr = useRef(0)
+  const quality = useRef({ level: 2, frameTime: 1 / 60, since: 0 })
   const viewDistance = useRef(VIEW_NEAR)
   const beacon = useRef<THREE.Sprite>(null)
   const beaconMaterial = useMemo(() => {
@@ -794,6 +872,8 @@ export default function Pilot() {
         pilot.warping = ''
         pilot.warpGlow = 0
         pilot.landState = 'flying'
+        if (startDpr.current) setDpr(startDpr.current)
+        quality.current.level = 2
         // back to the journey's compressed Solar System, and its camera
         layout.trueScale = false
         SYSTEM_OFFSET.copy(SYSTEM_BASE)
@@ -883,6 +963,24 @@ export default function Pilot() {
       pilot.clearance = clearance
       pilot.altitudeKm = groundHere * KM_PER_UNIT
     }
+    // the giants (and Venus) have no ground: you can sink into their clouds
+    const deep = DEEP[nearestIndex]
+    const depth = deep ? Math.max(0, nearestRadius - jet.position.distanceTo(_bodyPos)) : 0
+    pilot.immersion = deep ? THREE.MathUtils.clamp(depth / (nearestRadius * deep.dive), 0, 1) : 0
+    if (deep && depth > 0) {
+      clearance = nearestRadius * 0.004
+      pilot.clearance = clearance
+      pilot.altitudeKm = -depth * KM_PER_UNIT
+      pilot.pressureBar = deep.top * Math.pow(1 + (deep.lapse * depth * KM_PER_UNIT) / deep.t0, 3.5)
+      if (pilot.hazeColor === '#000000' || pilot.immersion < 0.001) {
+        pilot.hazeColor = PLANETS[nearestIndex].atmosphereColor ?? PLANETS[nearestIndex].baseColor
+      }
+    }
+    // air here (Earth at sea level = 1), for wind, streaks and sound
+    {
+      const air = nearestIndex >= 0 ? AIR[nearestIndex] : undefined
+      pilot.air = air ? Math.min(1, air.density * Math.exp(-pilot.altitudeKm / air.height)) : 0
+    }
 
     // ---- controls: keys, mouse or touch, and a gamepad if one is in use
     const keys = pilot.keys
@@ -950,8 +1048,10 @@ export default function Pilot() {
     // close to the ground, the nose is eased up rather than flown in
     // over solid ground the floor is the ground itself (with the ship's
     // own height to spare); elsewhere the edge of space
-    const minimum = onGround ? fromCentre - groundHere + SHIP_LENGTH * (pilot.landState === 'flying' ? 0.6 : 0.1) : nearestRadius * LOWEST
-    const soft = onGround ? SHIP_LENGTH * 12 : nearestRadius * 0.02
+    const minimum = onGround
+      ? fromCentre - groundHere + SHIP_LENGTH * (pilot.landState === 'flying' ? 0.6 : 0.1)
+      : nearestRadius * (deep ? 1 - deep.dive : LOWEST)
+    const soft = onGround ? SHIP_LENGTH * 12 : nearestRadius * (deep ? 0.002 : 0.02)
     const closeness = 1 - THREE.MathUtils.clamp((fromCentre - minimum) / soft, 0, 1)
     const diving = Math.max(0, -_forward.dot(_axis))
     const pullUp = closeness * diving * 2.5
@@ -1234,15 +1334,17 @@ export default function Pilot() {
       camera.position.copy(SYSTEM_OFFSET).add(flyby.current!)
     }
     if (mode !== 'flyby') flyby.current = null
-    // the air shakes the ship on entry
-    if (heat.current > 0.01) {
+    // the air shakes the ship on entry, and buffets it low and fast
+    const buffet =
+      heat.current + (pilot.altitudeKm < 30 ? pilot.air * Math.min(1, pilot.kms / 0.4) * 0.3 : 0) + pilot.immersion * 0.25
+    if (buffet > 0.01) {
       const t = performance.now() * 0.001
       _shake.set(Math.sin(t * 41.3) + Math.sin(t * 17.9), Math.sin(t * 37.1) + Math.sin(t * 23.3), Math.sin(t * 29.7))
-      camera.position.addScaledVector(_shake, heat.current * reach * 0.025)
+      camera.position.addScaledVector(_shake, buffet * reach * 0.025)
     }
     // pulled far back, the camera stays above the ground
     _camTarget.copy(camera.position).sub(_bodyPos)
-    if (!onGround && _camTarget.length() < nearestRadius * 1.004) {
+    if (!onGround && !deep && _camTarget.length() < nearestRadius * 1.004) {
       camera.position.copy(_bodyPos).addScaledVector(_camTarget.normalize(), nearestRadius * 1.004)
     }
     if (onGround) {
@@ -1316,7 +1418,7 @@ export default function Pilot() {
         shine.current.color.set(
           nearestIndex < PLANETS.length
             ? (PLANETS[nearestIndex].atmosphereColor ?? PLANETS[nearestIndex].baseColor)
-            : SMALL_BODIES[nearestIndex - PLANETS.length].color,
+            : (SMALL_BODIES[nearestIndex - PLANETS.length]?.color ?? '#9a9690'),
         )
       }
     }
@@ -1338,6 +1440,44 @@ export default function Pilot() {
       shipShadow.uShipFwd.value.set(0, 0, -1).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
       shipShadow.uShipRight.value.set(1, 0, 0).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
       shipShadow.uShipLen.value = SHIP_LENGTH
+    }
+
+    // ---- air streaks (in ship lengths per second), sound
+    streaks.current.velocity.copy(velocity.current).divideScalar(SHIP_LENGTH)
+    streaks.current.amount =
+      pilot.altitudeKm < 40 && !warp.current ? pilot.air * THREE.MathUtils.smoothstep(pilot.kms, 0.02, 0.15) : 0
+    pilot.thrust = thrust.current
+    pilot.heat = heat.current
+
+    // ---- Earth's cloud deck: flying through it, a mist
+    pilot.mist = 0
+    if (onGround && nearestIndex === 2 && ground.model) {
+      _local.copy(camera.position).applyMatrix4(ground.inverse)
+      const heightKm = (_local.length() - 1) * 6371
+      const deckKm = cloudDeck.height * 6371
+      const near = 1 - THREE.MathUtils.smoothstep(Math.abs(heightKm - deckKm), 0.35, 1.6)
+      if (near > 0) {
+        _local.normalize()
+        const [u, v] = sphereUv(_local)
+        const cover = ground.model.cloudCover((((u - cloudDeck.shift) % 1) + 1) % 1, v)
+        pilot.mist = near * THREE.MathUtils.smoothstep(cover, 0.25, 0.75)
+        pilot.mistLight = THREE.MathUtils.smoothstep(_axis.dot(_toSun), -0.1, 0.25)
+      }
+    }
+
+    // ---- quality: lower the pixel ratio if frames run long, raise it back
+    {
+      const q = quality.current
+      q.frameTime += (rawDelta - q.frameTime) * 0.05
+      q.since += rawDelta
+      if (!startDpr.current) startDpr.current = Math.min(window.devicePixelRatio || 1, 2)
+      const slow = q.frameTime > 1 / 38
+      const fast = q.frameTime < 1 / 57
+      if ((slow && q.since > 2 && q.level > 0) || (fast && q.since > 6 && q.level < 2)) {
+        q.level += slow ? -1 : 1
+        q.since = 0
+        setDpr([0.75, 1, startDpr.current][q.level])
+      }
     }
 
     // ---- where each world is on screen, for the HUD's markers
@@ -1373,6 +1513,7 @@ export default function Pilot() {
             <group>{shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : <Jet thrust={thrust} />}</group>
             <Plasma heat={heat} />
           </group>
+          <AirStreaks state={streaks.current} />
           <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
           <directionalLight ref={shine} intensity={0} />
           <ambientLight intensity={0.05} />
