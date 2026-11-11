@@ -52,7 +52,8 @@ export const pilot = {
   shipWorld: new THREE.Vector3(),
   /** asked to land (L) */
   landRequest: false,
-  /** 'flying', 'landing', 'landed' or 'lifting' */
+  /** 'flying', 'descending' (L from high up), 'landing' (the glide),
+      'rolling' (touched down), 'landed' or 'lifting' (taking off) */
   landState: 'flying',
   /** low enough over solid ground to land */
   canLand: false,

@@ -10,7 +10,7 @@ const GUIDE_KEY = 'urniverse-flight-guide'
 const GUIDE = [
   'Move the mouse to steer · hold W (or click) to fly',
   'Press 3, or click a world’s marker, to warp there',
-  'Below 8 km, press L to land · W lifts off again',
+  'Near a solid world, press L: the ship lands itself · hold W to take off',
 ]
 
 /* round to two significant figures: 3,200, 48,000, 450 */
@@ -22,6 +22,7 @@ function formatAltitude(km: number) {
   if (km >= 7.5e9) return `${Math.round(km / 1.496e8).toLocaleString('en-GB')} AU away`
   if (km >= 1e9) return `${(km / 1e9).toFixed(1)} billion km up`
   if (km >= 1e6) return `${(km / 1e6).toFixed(1)} million km up`
+  if (km < 1) return `${round2(Math.max(km, 0) * 1000)} m up`
   return `${round2(km)} km up`
 }
 
@@ -170,6 +171,9 @@ function formatPeriod(minutes: number) {
 const timeLabel = (scale: number) =>
   scale === 0 ? 'Time held still' : scale === 1 ? 'Real time' : `Time ×${scale.toLocaleString('en-GB')}`
 
+/* on and near the ground: km/h */
+const groundSpeed = (kms: number) => (kms < 0.0003 ? '' : `${Math.round(kms * 3600).toLocaleString('en-GB')} km/h`)
+
 /* true speed, and past light speed, as a multiple of it */
 const LIGHT_KMS = 299792.458
 function formatSpeed(kms: number) {
@@ -310,7 +314,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     const place = () => {
       frame = requestAnimationFrame(place)
       audio?.update({ thrust: pilot.thrust, air: pilot.air, kms: pilot.kms, heat: pilot.heat, warp: pilot.warpGlow })
-      if (pilot.landState === 'landed' && lastLand !== 'landed') audio?.touchdown()
+      if (pilot.landState === 'rolling' && lastLand !== 'rolling') audio?.touchdown()
       lastLand = pilot.landState
       // inside a giant's clouds: its haze, darkening with depth
       if (haze.current) {
@@ -627,10 +631,20 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
               ? `Orbiting ${nearest} · ${formatSpeed(kms)} · once round every ${formatPeriod(orbitMinutes)}`
             : immersion > 0
               ? `Inside ${nearest}’s clouds · ${pressure < 10 ? pressure.toFixed(1) : Math.round(pressure)} bar${immersion > 0.9 ? ' · the pressure turns you back' : ''}`
+            : landState === 'descending'
+              ? [`Coming down to ${nearest}`, formatAltitude(altitude), formatSpeed(kms), 'W aborts'].filter(Boolean).join(' · ')
+            : landState === 'landing'
+              ? altitude < 0.06
+                ? ['Flare', groundSpeed(kms)].filter(Boolean).join(' · ')
+                : [`Final approach`, formatAltitude(altitude), formatSpeed(kms), 'W goes round'].filter(Boolean).join(' · ')
+            : landState === 'rolling'
+              ? ['Touchdown · rolling out', groundSpeed(kms), 'W takes off again'].filter(Boolean).join(' · ')
+            : landState === 'lifting'
+              ? altitude < 0.015
+                ? ['Takeoff roll', groundSpeed(kms)].filter(Boolean).join(' · ')
+                : ['Climbing out', formatAltitude(altitude), groundSpeed(kms)].filter(Boolean).join(' · ')
             : landState === 'landed'
-              ? `Landed on ${nearest} · ${site} · W to take off`
-              : landState === 'landing'
-                ? `Landing on ${nearest} · ${formatAltitude(altitude)}`
+              ? `Landed on ${nearest} · ${site} · hold W to take off`
                 : [altitude >= 0 ? `${capital(nearest)} · ${formatAltitude(altitude)}` : `Near ${nearest}`, formatSpeed(kms)]
                 .concat(canLand ? ['L to land'] : [])
                 .filter(Boolean)
