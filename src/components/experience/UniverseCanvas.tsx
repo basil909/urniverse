@@ -1157,6 +1157,14 @@ const mat3 EQ_TO_GAL = mat3(
   -0.4838350155, 0.7469822445, 0.4559837762
 ); // column-major: the J2000 equatorial -> galactic rotation
 
+float skyHash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float skyNoise(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(skyHash(i), skyHash(i + vec3(1,0,0)), f.x), mix(skyHash(i + vec3(0,1,0)), skyHash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(skyHash(i + vec3(0,0,1)), skyHash(i + vec3(1,0,1)), f.x), mix(skyHash(i + vec3(0,1,1)), skyHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float skyFbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += skyNoise(p) * a; p = p * 2.07 + 1.3; a *= 0.5; } return v; }
+
 void main() {
   // scene -> ecliptic (inverse of X=x, Y=z, Z=-y)
   vec3 d = normalize(vDirection);
@@ -1182,6 +1190,25 @@ void main() {
   // linear, so decode first (otherwise the dark sky is lifted and its
   // compression blocks show)
   vec3 sky = pow(texture2D(uMap, uv).rgb, vec3(2.2));
+
+  /* the luminous band of the Milky Way, drawn smooth on top of the photo:
+     thicker and golden around the centre (Sagittarius, l = 0), thinner and
+     bluer out along the plane, cut by dark dust rifts along its middle */
+  float fromCentre = abs(l);
+  float width = mix(0.2, 0.075, smoothstep(0.0, 1.3, fromCentre));
+  float band = exp(-pow(b / width, 2.0));
+  float along = 0.28 + 0.72 * exp(-pow(fromCentre / 1.25, 2.0));
+  float bulge = exp(-pow(l / 0.42, 2.0) - pow(b / 0.16, 2.0));
+  float clouds = skyFbm(gal * 7.0);
+  float rift = smoothstep(0.42, 0.68, skyFbm(gal * vec3(11.0, 11.0, 26.0) + 4.0))
+    * exp(-pow((b + 0.012) / 0.038, 2.0))
+    * (1.0 - smoothstep(0.6, 2.4, fromCentre));
+  vec3 tint = mix(vec3(0.6, 0.68, 0.92), vec3(1.0, 0.83, 0.62), exp(-pow(fromCentre / 0.9, 2.0)));
+  /* clumpy, not a flat haze: star clouds stand out, gaps stay dark */
+  float clumps = smoothstep(0.35, 0.8, clouds);
+  float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 1.2) * (1.0 - rift * 0.85);
+  sky = sky * (1.0 - rift * 0.6 * band) + tint * glow * 0.022;
+
   gl_FragColor = vec4(sky * uIntensity, 1.0);
 }`
 

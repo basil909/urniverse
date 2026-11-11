@@ -98,6 +98,100 @@ const LINES: [string, string][] = [
   ['Sirius', 'Mirzam'], ['Sirius', 'Adhara'], ['Adhara', 'Wezen'], ['Sirius', 'Wezen'],
 ]
 
+/* Deep-sky objects at their true positions (J2000). Shown brighter and a
+   little larger than the naked eye sees them, as in long-exposure photos.
+   kind: 0 emission nebula, 1 spiral galaxy, 2 ring nebula, 3 irregular galaxy.
+   [name, RA h, Dec deg, radius deg, axis ratio, position angle deg,
+    kind, inner colour, outer colour, brightness] */
+type DeepSkyObject = [string, number, number, number, number, number, number, string, string, number]
+
+const DEEP_SKY: DeepSkyObject[] = [
+  ['Orion Nebula', 5.588, -5.39, 1.3, 0.85, 20, 0, '#b8e4ff', '#e8708f', 0.75],
+  ['Carina Nebula', 10.752, -59.87, 3.0, 0.8, 70, 0, '#ffd8a8', '#e8607a', 0.75],
+  ['Lagoon Nebula', 18.06, -24.38, 1.4, 0.6, 80, 0, '#ffe0ec', '#e86c8c', 0.7],
+  ['Eagle Nebula', 18.313, -13.79, 1.1, 0.9, 0, 0, '#9fe0d0', '#e07a8a', 0.5],
+  ['Rosette Nebula', 6.53, 4.95, 1.2, 1.0, 0, 2, '#f39aa6', '#d9566e', 0.42],
+  ['North America Nebula', 20.98, 44.33, 2.0, 0.8, 30, 0, '#ffb0b8', '#d95670', 0.5],
+  ['Andromeda Galaxy', 0.712, 41.27, 3.4, 0.32, 35, 1, '#fff0d8', '#aab8ff', 0.9],
+  ['Large Magellanic Cloud', 5.392, -69.76, 6.5, 0.75, 170, 3, '#ecefff', '#b9c3ff', 0.8],
+  ['Tarantula Nebula', 5.645, -69.1, 1.0, 1.0, 0, 0, '#ffe2ec', '#ff5f8a', 0.9],
+  ['Small Magellanic Cloud', 0.877, -72.83, 3.5, 0.55, 45, 3, '#eef0ff', '#b8c2ff', 0.65],
+]
+
+const DEEP_VERTEX = /* glsl */ `
+attribute vec2 aCorner;
+attribute vec4 aShape;   // axis ratio, position angle, kind, brightness
+attribute vec3 aInner;
+attribute vec3 aOuter;
+attribute float aSeed;
+varying vec2 vCorner;
+varying vec4 vShape;
+varying vec3 vInner;
+varying vec3 vOuter;
+varying float vSeed;
+void main() {
+  vCorner = aCorner; vShape = aShape; vInner = aInner; vOuter = aOuter; vSeed = aSeed;
+  vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  p.z = p.w * 0.99999;
+  gl_Position = p;
+}`
+
+const DEEP_FRAGMENT = /* glsl */ `
+uniform float uOpacity;
+varying vec2 vCorner;
+varying vec4 vShape;
+varying vec3 vInner;
+varying vec3 vOuter;
+varying float vSeed;
+float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float n(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h(i), h(i + vec2(1.0, 0.0)), f.x), mix(h(i + vec2(0.0, 1.0)), h(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += n(p) * a; p = p * 2.03 + 1.7; a *= 0.5; } return v; }
+void main() {
+  /* rotate to the object's position angle and squash to its shape */
+  float pa = vShape.y;
+  vec2 q = mat2(cos(pa), -sin(pa), sin(pa), cos(pa)) * vCorner;
+  q.x /= max(vShape.x, 0.05);
+  float r = length(q);
+  float kind = vShape.z;
+  vec2 w = vCorner * 2.6 + vSeed * 17.0;
+  float cloud = fbm(w + fbm(w * 1.7) * 1.4);
+  vec3 color;
+  float a;
+  if (kind < 0.5) {
+    /* emission nebula: glowing, filamentary gas, brightest at the core */
+    /* mostly wisps and filaments, a small bright heart: not a ball */
+    float body = exp(-r * r * 4.5) * (0.12 + 1.3 * cloud * cloud);
+    float wisps = smoothstep(0.5, 0.85, cloud) * exp(-r * 2.2) * 0.7;
+    float heart = exp(-r * r * 40.0) * 0.5;
+    body += heart;
+    a = body + wisps;
+    color = mix(vOuter, vInner, exp(-r * 4.5));
+  } else if (kind < 1.5) {
+    /* spiral galaxy seen at a slant: bright core, soft disc, a dust lane */
+    float core = exp(-r * r * 60.0) * 1.6;
+    float disc = exp(-r * 3.2) * (0.6 + 0.5 * cloud);
+    float lane = 1.0 - 0.45 * exp(-pow((q.y - 0.05) * 9.0, 2.0)) * smoothstep(0.08, 0.3, r);
+    a = (core + disc) * lane;
+    color = mix(vOuter, vInner, exp(-r * 6.0));
+  } else if (kind < 2.5) {
+    /* ring nebula (the Rosette): a glowing shell around a dark centre */
+    float ring = exp(-pow((r - 0.45) / 0.22, 2.0)) * (0.5 + 0.9 * cloud);
+    a = ring;
+    color = mix(vOuter, vInner, cloud);
+  } else {
+    /* irregular galaxy: a clumpy, starry cloud */
+    float body = exp(-r * r * 2.6) * smoothstep(0.25, 0.75, cloud + 0.25);
+    float stars = step(0.985, h(floor(vCorner * 140.0) + vSeed)) * exp(-r * r * 2.0);
+    a = body * 0.9 + stars * 0.8;
+    color = mix(vOuter, vInner, cloud);
+  }
+  a *= (1.0 - smoothstep(0.75, 1.0, length(vCorner))) * vShape.w * uOpacity;
+  gl_FragColor = vec4(color * a, 1.0);
+}`
+
 /* a few names, for the brightest and best known */
 const NAMED = ['Sirius', 'Canopus', 'Arcturus', 'Vega', 'Betelgeuse', 'Rigel', 'Antares', 'Polaris', 'Deneb', 'Aldebaran']
 
@@ -142,13 +236,17 @@ const STAR_VERTEX = /* glsl */ `
 attribute float aSize;
 attribute vec3 aColor;
 attribute float aBright;
+attribute float aSpike;
 uniform float uPixelRatio;
 varying vec3 vColor;
 varying float vBright;
+varying float vSpike;
 void main() {
   vColor = aColor;
   vBright = aBright;
-  gl_PointSize = aSize * uPixelRatio;
+  vSpike = aSpike;
+  // spiked stars get a larger sprite to hold their spikes
+  gl_PointSize = aSize * uPixelRatio * (1.0 + aSpike * 3.5);
   vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   p.z = p.w * 0.99999; // on the far sky, behind everything
   gl_Position = p;
@@ -157,12 +255,18 @@ void main() {
 const STAR_FRAGMENT = /* glsl */ `
 varying vec3 vColor;
 varying float vBright;
+varying float vSpike;
 void main() {
   vec2 c = gl_PointCoord - 0.5;
-  float d = length(c);
+  /* the star itself stays the same size inside a larger sprite */
+  vec2 s = c * (1.0 + vSpike * 3.5);
+  float d = length(s);
   float core = exp(-d * d * 60.0);
   float halo = exp(-d * 9.0) * 0.35;
-  gl_FragColor = vec4(vColor * (core + halo) * vBright, 1.0);
+  /* four soft diffraction spikes, as in telescope photographs */
+  float spikes = (exp(-abs(c.y) * 160.0) * exp(-abs(c.x) * 9.0)
+    + exp(-abs(c.x) * 160.0) * exp(-abs(c.y) * 9.0)) * vSpike * 0.55;
+  gl_FragColor = vec4(vColor * (core + halo + spikes) * vBright, 1.0);
 }`
 
 const LINE_VERTEX = /* glsl */ `
@@ -199,20 +303,89 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     const size = new Float32Array(STARS.length)
     const color = new Float32Array(STARS.length * 3)
     const bright = new Float32Array(STARS.length)
+    const spike = new Float32Array(STARS.length)
     STARS.forEach(([name, , , mag, bv], i) => {
       const p = positions.get(name)!
       pos.set([p.x, p.y, p.z], i * 3)
       size[i] = THREE.MathUtils.clamp(9 - 1.9 * (mag + 1.46), 3, 9)
       color.set(starColor(bv), i * 3)
       bright[i] = THREE.MathUtils.clamp(Math.pow(10, -0.4 * mag) * 0.9, 0.25, 1.6)
+      // the brightest (Sirius, Canopus, Arcturus, Vega...) get spikes
+      spike[i] = THREE.MathUtils.clamp((1.0 - mag) / 1.6, 0, 1)
     })
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     g.setAttribute('aSize', new THREE.BufferAttribute(size, 1))
     g.setAttribute('aColor', new THREE.BufferAttribute(color, 3))
     g.setAttribute('aBright', new THREE.BufferAttribute(bright, 1))
+    g.setAttribute('aSpike', new THREE.BufferAttribute(spike, 1))
     return g
   }, [positions])
+
+  const deepGeometry = useMemo(() => {
+    const count = DEEP_SKY.length
+    const position = new Float32Array(count * 4 * 3)
+    const corner = new Float32Array(count * 4 * 2)
+    const shape = new Float32Array(count * 4 * 4)
+    const inner = new Float32Array(count * 4 * 3)
+    const outer = new Float32Array(count * 4 * 3)
+    const seed = new Float32Array(count * 4)
+    const index: number[] = []
+    const pole = skyDirection(0, 90, new THREE.Vector3())
+    const center = new THREE.Vector3()
+    const east = new THREE.Vector3()
+    const north = new THREE.Vector3()
+    const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+    DEEP_SKY.forEach(([, ra, dec, radius, ratio, pa, kind, a, b, bright], i) => {
+      skyDirection(ra, dec, center)
+      east.crossVectors(pole, center).normalize()
+      north.crossVectors(center, east).normalize()
+      const half = Math.tan((radius * Math.PI) / 180) * SKY_RADIUS * 0.99
+      const ci = new THREE.Color(a)
+      const co = new THREE.Color(b)
+      corners.forEach(([x, y], k) => {
+        const v = i * 4 + k
+        // east is to the left on the sky as seen from inside
+        const p = center
+          .clone()
+          .multiplyScalar(SKY_RADIUS * 0.99)
+          .addScaledVector(east, -x * half)
+          .addScaledVector(north, y * half)
+        position.set([p.x, p.y, p.z], v * 3)
+        corner.set([x, y], v * 2)
+        shape.set([ratio, (pa * Math.PI) / 180, kind, bright], v * 4)
+        inner.set([ci.r, ci.g, ci.b], v * 3)
+        outer.set([co.r, co.g, co.b], v * 3)
+        seed[v] = i * 1.37 + 0.3
+      })
+      index.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3)
+    })
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(position, 3))
+    g.setAttribute('aCorner', new THREE.BufferAttribute(corner, 2))
+    g.setAttribute('aShape', new THREE.BufferAttribute(shape, 4))
+    g.setAttribute('aInner', new THREE.BufferAttribute(inner, 3))
+    g.setAttribute('aOuter', new THREE.BufferAttribute(outer, 3))
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1))
+    g.setIndex(index)
+    return g
+  }, [])
+
+  const deepMaterial = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { uOpacity: { value: 0.22 } },
+        vertexShader: DEEP_VERTEX,
+        fragmentShader: DEEP_FRAGMENT,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    [],
+  )
+  const deepLevel = useRef(0.22)
 
   const lineGeometry = useMemo(() => {
     const pos = new Float32Array(LINES.length * 6)
@@ -260,10 +433,12 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     () => () => {
       starGeometry.dispose()
       lineGeometry.dispose()
+      deepGeometry.dispose()
+      deepMaterial.dispose()
       starMaterial.dispose()
       lineMaterial.dispose()
     },
-    [starGeometry, lineGeometry, starMaterial, lineMaterial],
+    [starGeometry, lineGeometry, starMaterial, lineMaterial, deepGeometry, deepMaterial],
   )
 
   useFrame((_, delta) => {
@@ -278,6 +453,11 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     const wide = chapter === 0 || chapter === 12
     linesOn.current += ((wide ? 1 : 0) - linesOn.current) * (1 - Math.exp(-delta * 1.5))
     lineMaterial.uniforms.uOpacity.value = linesOn.current * 0.16
+    // the nebulae glow fully in the wide views, softer behind close-ups,
+    // and fade once we have left the galaxy (the finale)
+    const deepTarget = chapter === 11 ? 0.05 : wide ? 0.2 : 0.13
+    deepLevel.current += (deepTarget - deepLevel.current) * (1 - Math.exp(-delta * 1.5))
+    deepMaterial.uniforms.uOpacity.value = deepLevel.current
     const names = linesOn.current > 0.05
     if (names !== showNames) setShowNames(names)
     const opacity = (linesOn.current * 0.55).toFixed(3)
@@ -288,6 +468,7 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
 
   return (
     <group ref={group}>
+      <mesh geometry={deepGeometry} material={deepMaterial} renderOrder={-9} frustumCulled={false} />
       <lineSegments geometry={lineGeometry} material={lineMaterial} renderOrder={-9} frustumCulled={false} />
       <points geometry={starGeometry} material={starMaterial} renderOrder={-9} frustumCulled={false} />
       {showNames &&
