@@ -42,10 +42,11 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - Figures and facts in the text and panels (NASA fact sheets; dated where they change).
 
 **Simplified**
-- Distances are compressed so everything fits on screen; the Sun is drawn much smaller than its true 109 Earth-widths; moons are enlarged and drawn closer to their planets. The text gives the true scale model.
+- In the journey, distances are compressed so everything fits on screen (in flight they are true: see below); the Sun is drawn much smaller than its true 109 Earth-widths; moons are enlarged and drawn closer to their planets. The text gives the true scale model.
 - By default the motion is calm: the planets drift along their real orbits from today's positions (faster in the wide views, slowly in close-ups), while spins and moons turn at a gentle pace of their own. The **Real motion** button (top right) puts everything on one clock from this moment, at 1 hour, 1 day or 1 week per second, so orbits, Earth's day and night, the Moon's phases and the moons all keep true time together; the clock is shown beside it.
 - The comet is illustrative, not a real comet. Saturn's, Mars's and Uranus's moons have real periods but not real positions. The Milky Way model is a stylised barred spiral, shown only in the finale (from inside the galaxy it can never appear as a spiral in our sky). 
 - Weather details (Jupiter's flowing bands, Neptune's dark spot, Mars's dust storm) are artistic, based on what spacecraft have seen.
+- In flight, everything is at true scale: the 37 m Shuttle, the planets' sizes, their distances (1 AU is 150 million km; Neptune is 4.5 billion km out) and the Sun, 109 Earths wide and half a degree across seen from Earth. The orbits hold still while you fly (Earth alone moves 30 km a second); spins and the Moon run in real time. The asteroid belts and the comet, drawn for the journey's compressed layout, are hidden in flight. Speed scales with the distance to the nearest world, so the planets are seconds apart.
 - In flight, low over Earth, Mars or Mercury, the ground beneath you is NASA's own imagery, streamed tile by tile while you fly (Blue Marble and the VIIRS city lights at about 500 m a pixel, Viking's Mars mosaic, MESSENGER's Mercury basemap); Mars and Mercury are colour-matched to the maps. Detail finer than any data, the eddies on the giants and the finest ringlets are generated texture. Lightning in Earth's night-side clouds and the airglow line on its night limb are real phenomena, drawn illustratively.
 
 ## Tech stack

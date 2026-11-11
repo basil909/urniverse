@@ -6,7 +6,16 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 
-import { getPlanetPosition, getPlanetVisualRadius, PLANETS, SYSTEM_OFFSET } from './orbit'
+import {
+  getPlanetOrbitPosition,
+  getPlanetPosition,
+  getPlanetVisualRadius,
+  layout,
+  PLANETS,
+  SUN_TRUE_RADIUS,
+  SYSTEM_BASE,
+  SYSTEM_OFFSET,
+} from './orbit'
 import { simClock } from './simClock'
 import { pilot } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
@@ -27,7 +36,6 @@ import { getShipPass, shipCamera, shipScene } from './shipLayer'
    are solid.
 ============================================================ */
 
-const SUN_RADIUS = 1
 /** km per scene unit at the planets' scale (Earth: 6,371 km = 0.23) */
 const KM_PER_UNIT = 6371 / 0.23
 /** the Shuttle orbiter's true length, 37.24 m, in scene units: Earth is
@@ -543,6 +551,9 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
 export default function Pilot() {
   const shuttle = useShuttle()
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
+  const scene = useThree((state) => state.scene)
+  const savedCamera = useRef({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() })
+  const savedFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null)
   const ship = useRef<THREE.Group>(null)
   const wasActive = useRef(false)
   const speed = useRef(0)
@@ -572,6 +583,12 @@ export default function Pilot() {
         camera.updateProjectionMatrix()
         pilot.nearestIndex = -2
         getShipPass().enabled = false
+        // back to the journey's compressed Solar System, and its camera
+        layout.trueScale = false
+        SYSTEM_OFFSET.copy(SYSTEM_BASE)
+        camera.position.copy(savedCamera.current.position)
+        camera.quaternion.copy(savedCamera.current.quaternion)
+        scene.fog = savedFog.current
       }
       return
     }
@@ -581,6 +598,28 @@ export default function Pilot() {
       wasActive.current = true
       savedFov.current = camera.fov
       savedNear.current = camera.near
+      savedCamera.current.position.copy(camera.position)
+      savedCamera.current.quaternion.copy(camera.quaternion)
+      // the fog fades the journey's far views; true distances need none
+      savedFog.current = scene.fog
+      scene.fog = null
+      // to true scale, keeping the nearest planet where it is (so the view
+      // does not jump): the Sun is placed from that planet's true position
+      let anchor = 2
+      let best = Infinity
+      for (let i = 0; i < PLANETS.length; i += 1) {
+        const d = getPlanetPosition(i, simClock.jd, _bodyCenter).distanceTo(camera.position)
+        if (d < best) {
+          best = d
+          anchor = i
+        }
+      }
+      getPlanetPosition(anchor, simClock.jd, _bodyPos)
+      layout.trueScale = true
+      SYSTEM_OFFSET.copy(_bodyPos).sub(getPlanetOrbitPosition(anchor, simClock.jd, _bodyCenter))
+      // and the floating origin: the camera at the scene's origin
+      SYSTEM_OFFSET.sub(camera.position)
+      camera.position.set(0, 0, 0)
       camera.updateProjectionMatrix()
       camera.getWorldDirection(_forward)
       jet.position.copy(camera.position).addScaledVector(_forward, SHIP_LENGTH * 4)
@@ -591,13 +630,20 @@ export default function Pilot() {
       camOffset.current.copy(camera.position).sub(jet.position)
     }
     getShipPass().enabled = true
+    // floating origin: once the ship strays from the origin, the whole
+    // Solar System is moved back under it (32-bit precision stays fine)
+    if (jet.position.lengthSq() > 400) {
+      SYSTEM_OFFSET.sub(jet.position)
+      camera.position.sub(jet.position)
+      jet.position.set(0, 0, 0)
+    }
 
     // ---- the nearest surface sets the pace (and must not be flown into)
     let nearest = 'the Sun'
     let nearestIndex = -1
-    let clearance = jet.position.distanceTo(SYSTEM_OFFSET) - SUN_RADIUS
+    let clearance = jet.position.distanceTo(SYSTEM_OFFSET) - SUN_TRUE_RADIUS
     _bodyPos.copy(SYSTEM_OFFSET)
-    let nearestRadius = SUN_RADIUS
+    let nearestRadius = SUN_TRUE_RADIUS
     for (let i = 0; i < PLANETS.length; i += 1) {
       getPlanetPosition(i, simClock.jd, _bodyCenter)
       const radius = getPlanetVisualRadius(i)
@@ -643,9 +689,14 @@ export default function Pilot() {
 
     // ---- speed: W speeds up and the speed holds when released, S slows;
     // the limit follows the distance to the nearest surface
-    const limit = THREE.MathUtils.clamp(clearance * 0.7, SHIP_LENGTH * 0.8, 40) * (boost ? 4 : 1)
+    // (up to some 110 million km/s across empty space at true distances,
+    // so the planets are seconds apart, not hours)
+    const limit = THREE.MathUtils.clamp(clearance * 0.7, SHIP_LENGTH * 0.8, 4000) * (boost ? 4 : 1)
     const target = forwardKey ? limit : brakeKey ? 0 : Math.min(speed.current, limit)
     speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : brakeKey ? 2.2 : 3)))
+    // over the limit (closing on a world): slow at once, or at these
+    // speeds the ship would sail straight past it
+    if (speed.current > limit) speed.current += (limit - speed.current) * (1 - Math.exp(-delta * 9))
     thrust.current += ((forwardKey ? (boost ? 1 : 0.7) : 0.08) - thrust.current) * (1 - Math.exp(-delta * 6))
     pilot.speed = THREE.MathUtils.clamp(speed.current / limit, 0, 1)
 
@@ -698,6 +749,8 @@ export default function Pilot() {
     _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
     _wanted.copy(_forward).multiplyScalar(speed.current)
     velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 3.2))
+    // momentum carries direction, never extra speed
+    if (velocity.current.length() > speed.current) velocity.current.setLength(speed.current)
     jet.position.addScaledVector(velocity.current, delta)
 
     // ---- the ground: never lower than 100 km over Earth (1.6% of a

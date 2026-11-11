@@ -19,9 +19,37 @@ export type PlanetDefinition = {
 }
 
 export const SYSTEM_OFFSET = new THREE.Vector3(3, 0, -8)
+/** where the Sun sits in the journey (SYSTEM_OFFSET moves while flying) */
+export const SYSTEM_BASE = SYSTEM_OFFSET.clone()
 
 export const EARTH_RADIUS_KM = 6371
 export const EARTH_RENDER_RADIUS = 0.23
+
+/* ============================================================
+   TRUE SCALE, WHILE FLYING
+   The journey compresses distances so the whole Solar System fits on a
+   screen. Flying, the planets stand at their real distances instead:
+   1 AU is some 5,400 scene units at the planets' scale (Earth's radius
+   0.23), so Neptune is 160,000 units out and the Sun, at its true size,
+   is 109 Earths wide. `layout.trueScale` switches every position below.
+   SYSTEM_OFFSET (the Sun's place) then also moves: the flight keeps the
+   camera near the scene's origin (a floating origin), where 32-bit
+   numbers on the GPU are precise.
+============================================================ */
+export const layout = { trueScale: false }
+/** scene units per AU at the planets' scale */
+export const AU_UNITS = 149597870.7 / (EARTH_RADIUS_KM / EARTH_RENDER_RADIUS)
+/** the Sun's true radius in scene units (it is drawn with radius 1) */
+export const SUN_TRUE_RADIUS = (696340 / EARTH_RADIUS_KM) * EARTH_RENDER_RADIUS
+
+/* Far bodies at true scale lie beyond any depth buffer's reach (and the
+   fog). They are drawn nearer to the camera, along the same line, and
+   shrunk by the same factor, so they look exactly as they would: the
+   factor for a body at `distance`. Nearer ones keep their order. */
+export function farScale(distance: number) {
+  const reach = 30 + 8 * Math.log(Math.max(distance, 1))
+  return distance > reach ? reach / distance : 1
+}
 
 export function getPlanetVisualRadius(index: number) {
   const planet = PLANETS[index]
@@ -264,7 +292,7 @@ function toDisplay(orbit: OrbitAtEpoch, E: number, out: THREE.Vector3) {
   const y = orbit.px[1] * xp + orbit.qx[1] * yp
   const z = orbit.px[2] * xp + orbit.qx[2] * yp
   const r = Math.sqrt(x * x + y * y + z * z) || 1
-  const scale = orbitalDisplayDistance(r) / r
+  const scale = layout.trueScale ? AU_UNITS : orbitalDisplayDistance(r) / r
   return out.set(x * scale, z * scale, -y * scale)
 }
 

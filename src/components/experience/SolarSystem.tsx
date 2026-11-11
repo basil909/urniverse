@@ -15,6 +15,10 @@ import {
   getPlanetVisualRadius,
   PLANETS,
   SYSTEM_OFFSET,
+  SYSTEM_BASE,
+  SUN_TRUE_RADIUS,
+  farScale,
+  layout,
 } from './orbit'
 import { simClock } from './simClock'
 import { pilot } from './pilotState'
@@ -357,6 +361,8 @@ const EARTH_SPECULAR = new THREE.Color('#2b4766')
 const MOON_SPECULAR = new THREE.Color('#222222')
 
 const _scratchOrbitPos = new THREE.Vector3()
+const _farWorld = new THREE.Vector3()
+const _sunCamera = new THREE.Vector3()
 const _trailPoint = new THREE.Vector3()
 
 /* orbit trails: how far behind each planet the arc reaches, and its detail */
@@ -1187,6 +1193,7 @@ export default function SolarSystem({
      nothing, so the galaxy's "You are here" marker stands for it */
   const system = useRef<THREE.Group>(null)
   const systemScale = useRef(1)
+  const smallBodies = useRef<THREE.Group>(null)
 
   useFrame((_, delta) => {
     if (!system.current) return
@@ -1203,11 +1210,13 @@ export default function SolarSystem({
     const scale = Math.max(0.0001, systemScale.current)
     system.current.scale.setScalar(scale)
     system.current.visible = scale > 0.002
+    system.current.position.copy(SYSTEM_OFFSET)
+    if (smallBodies.current) smallBodies.current.visible = !layout.trueScale
   })
 
   return (
-    <group ref={system} position={SYSTEM_OFFSET}>
-      <group position={[-SYSTEM_OFFSET.x, -SYSTEM_OFFSET.y, -SYSTEM_OFFSET.z]}>
+    <group ref={system} position={SYSTEM_BASE}>
+      <group position={[-SYSTEM_BASE.x, -SYSTEM_BASE.y, -SYSTEM_BASE.z]}>
       <Sun />
 
       {PLANETS.map((planet, index) => (
@@ -1220,7 +1229,7 @@ export default function SolarSystem({
         />
       ))}
 
-      <group position={SYSTEM_OFFSET}>
+      <group ref={smallBodies} position={SYSTEM_BASE}>
         <Belts />
         <Comet />
       </group>
@@ -1234,6 +1243,8 @@ export default function SolarSystem({
 ============================================================ */
 
 function Sun() {
+  const sunGroup = useRef<THREE.Group>(null)
+  const camera = useThree((state) => state.camera)
   const sun = useRef<THREE.Mesh>(null)
   const material = useRef<THREE.ShaderMaterial>(null)
   const timeRef = useRef(0)
@@ -1251,10 +1262,24 @@ function Sun() {
       // the Sun rotates about once every 25 days; here, slowly and visibly
       sun.current.rotation.y += delta * 0.012
     }
+
+    // flying, at true scale: 109 Earths wide, drawn nearer when far
+    const group = sunGroup.current
+    if (group) {
+      let size = 1
+      group.position.copy(SYSTEM_BASE)
+      if (layout.trueScale) {
+        const far = farScale(SYSTEM_OFFSET.distanceTo(camera.position))
+        size = SUN_TRUE_RADIUS * far
+        // drawn at camera + (Sun - camera) * far: an offset from where it is
+        group.position.add(_sunCamera.copy(camera.position).sub(SYSTEM_OFFSET).multiplyScalar(1 - far))
+      }
+      group.scale.setScalar(size)
+    }
   })
 
   return (
-    <group position={SYSTEM_OFFSET}>
+    <group ref={sunGroup} position={SYSTEM_BASE}>
       <mesh ref={sun}>
         <sphereGeometry args={[1, 128, 128]} />
         <shaderMaterial
@@ -1268,6 +1293,7 @@ function Sun() {
       </mesh>
 
       <Corona />
+      <FlightGlare />
 
       <pointLight
         color="#fff0d0"
@@ -1276,6 +1302,64 @@ function Sun() {
         decay={0}
       />
     </group>
+  )
+}
+
+/* Flying, at true scale, the Sun is half a degree across, as it is from
+   Earth: too small for its corona to show, yet it should dazzle. This
+   glare has a fixed apparent size (some 12 degrees of soft halo round a
+   white-hot core), drawn at the Sun's distance, so planets in front of
+   the Sun still hide it. */
+const FLIGHT_GLARE_VERTEX = /* glsl */ `
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`
+const FLIGHT_GLARE_FRAGMENT = /* glsl */ `
+uniform float uOpacity;
+varying vec2 vUv;
+void main() {
+  float r = length(vUv - 0.5) * 2.0;
+  float glow = pow(max(1.0 - r, 0.0), 4.0) * 0.55 + exp(-r * 22.0) * 3.0;
+  vec3 color = mix(vec3(1.0, 0.74, 0.48), vec3(1.0, 0.97, 0.92), exp(-r * 9.0));
+  gl_FragColor = vec4(color * glow * uOpacity, 1.0);
+}`
+const _glareWorld = new THREE.Vector3()
+const _glareScale = new THREE.Vector3()
+
+function FlightGlare() {
+  const mesh = useRef<THREE.Mesh>(null)
+  const camera = useThree((state) => state.camera)
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { uOpacity: { value: 0 } },
+        vertexShader: FLIGHT_GLARE_VERTEX,
+        fragmentShader: FLIGHT_GLARE_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    [],
+  )
+  useEffect(() => () => material.dispose(), [material])
+  useFrame((_, delta) => {
+    const glare = mesh.current
+    if (!glare) return
+    const target = layout.trueScale ? 1 : 0
+    material.uniforms.uOpacity.value += (target - material.uniforms.uOpacity.value) * (1 - Math.exp(-delta * 4))
+    glare.visible = material.uniforms.uOpacity.value > 0.01
+    if (!glare.visible) return
+    glare.lookAt(camera.position)
+    // 12 degrees wide at the distance it is drawn, in the Sun group's units
+    glare.parent?.getWorldPosition(_glareWorld)
+    glare.parent?.getWorldScale(_glareScale)
+    const width = 2 * Math.tan(THREE.MathUtils.degToRad(6)) * _glareWorld.distanceTo(camera.position)
+    glare.scale.setScalar(width / Math.max(_glareScale.x, 1e-9))
+  })
+  return (
+    <mesh ref={mesh} material={material} renderOrder={-1} visible={false}>
+      <planeGeometry args={[1, 1]} />
+    </mesh>
   )
 }
 
@@ -1545,6 +1629,10 @@ function Planet({
   // sharper maps once the camera has arrived (desktop only)
   const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
   useSurfacePatches(index, body, SYSTEM_OFFSET)
+  /* the Sun's position for this planet's shaders: the Sun itself, or,
+     when the planet is drawn nearer than it is (far, at true scale), the
+     Sun moved with it, so its light still falls from the true direction */
+  const planetSun = useMemo(() => SYSTEM_OFFSET.clone(), [])
   const sharpMap = useSharpTexture(SHARP_PLANET_MAPS[index], sharp, {
     colorSpace: THREE.NoColorSpace,
   })
@@ -1595,7 +1683,7 @@ function Planet({
           planet.atmosphereColor ?? planet.baseColor,
         ),
       },
-      uSunPosition: { value: SYSTEM_OFFSET },
+      uSunPosition: { value: planetSun },
       uMap: { value: null as THREE.Texture | null },
       uHasMap: { value: 0 },
       // sunlight at this distance
@@ -1650,7 +1738,7 @@ function Planet({
       uDusk: { value: new THREE.Color(look.dusk) },
       uIntensity: { value: look.intensity },
       uThickness: { value: look.thickness },
-      uSunPosition: { value: SYSTEM_OFFSET },
+      uSunPosition: { value: planetSun },
       uLight: { value: sunlight.strength },
       uShell: { value: ATMOSPHERE_SHELL[planet.name] ?? 1.055 },
       uAirglow: { value: planet.name === 'Earth' ? 1 : 0 },
@@ -1893,6 +1981,21 @@ function Planet({
     // real position on the real orbit at the simulated date
     getPlanetOrbitPosition(index, simClock.jd, _scratchOrbitPos)
     orbit.current.position.copy(_scratchOrbitPos)
+    // at true scale (flying), a far planet is drawn nearer and smaller,
+    // along the same line of sight
+    let far = 1
+    if (layout.trueScale) {
+      _farWorld.copy(_scratchOrbitPos).add(SYSTEM_OFFSET)
+      far = farScale(_farWorld.distanceTo(camera.position))
+      if (far < 1) {
+        _farWorld.sub(camera.position).multiplyScalar(far).add(camera.position)
+        orbit.current.position.copy(_farWorld).sub(SYSTEM_OFFSET)
+      }
+    }
+    planetSun.copy(SYSTEM_OFFSET).add(orbit.current.position).sub(_scratchOrbitPos)
+    if (atmosphereMesh.current) {
+      ;(atmosphereMesh.current.material as THREE.ShaderMaterial).uniforms.uSunPosition.value = planetSun
+    }
 
     // Focus: while one planet is the subject, the others shrink to distant
     // dots so oversized outer planets never loom behind a close-up
@@ -1910,7 +2013,7 @@ function Planet({
         : 0.04 // a point of light, like a planet seen from another planet
     focusScale.current +=
       (targetScale - focusScale.current) * (1 - Math.exp(-delta * 3))
-    orbit.current.scale.setScalar(focusScale.current)
+    orbit.current.scale.setScalar(focusScale.current * far)
 
     // trail: arc of the real orbit behind the planet, fading to nothing
     const trailPositions = orbitLine.geometry.attributes.position as THREE.BufferAttribute
@@ -1954,7 +2057,7 @@ function Planet({
     if (planet.name === 'Earth') {
       body.current.getWorldPosition(_earthWorld)
       earthNight.uSunDirView.value
-        .copy(SYSTEM_OFFSET)
+        .copy(planetSun)
         .sub(_earthWorld)
         .transformDirection(camera.matrixWorldInverse)
       body.current.getWorldQuaternion(_earthQuat)
@@ -1994,7 +2097,7 @@ function Planet({
 
   return (
     <group
-      position={SYSTEM_OFFSET}
+      position={SYSTEM_BASE}
     >
       <primitive object={orbitLine} />
 
@@ -2241,8 +2344,10 @@ function Moon({ sharp }: { sharp: boolean }) {
     void time
     const moon = body.current
     if (moon) {
-      // where the Moon really is, seen from Earth (distance compressed)
-      moonDirection(simClock.bodyJd, moon.position).multiplyScalar(MOON_ORBIT_RADIUS)
+      // where the Moon really is, seen from Earth (distance compressed in
+      // the journey; flying, its true 60 Earth radii and true size)
+      moonDirection(simClock.bodyJd, moon.position).multiplyScalar(layout.trueScale ? 60.27 : MOON_ORBIT_RADIUS)
+      moon.scale.setScalar(layout.trueScale ? 0.2727 : MOON_RENDER_RADIUS)
       // tidally locked: the near side (longitude 0) always faces Earth
       moon.parent?.getWorldPosition(_moonEarth)
       moon.lookAt(_moonEarth)
@@ -2571,7 +2676,7 @@ void main() {
   gl_FragColor = vec4(color, ring.a);
 }`
 
-type RingShadowUniforms = { uRingMap: { value: THREE.Texture | null } }
+type RingShadowUniforms = { uRingMap: { value: THREE.Texture | null }; uSunPosition?: { value: THREE.Vector3 } }
 
 const _ringScale = new THREE.Vector3()
 
@@ -2678,6 +2783,7 @@ function SaturnRing({
 
   useFrame((_, delta) => {
     material.uniforms.uTime.value += delta
+    if (planetUniforms?.uSunPosition) material.uniforms.uSunPosition.value = planetUniforms.uSunPosition.value
     const mesh = ringMesh.current
     if (!mesh) return
     // the ring sits at Saturn's centre; scale follows the focus shrink
