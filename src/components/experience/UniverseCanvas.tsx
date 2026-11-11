@@ -636,14 +636,16 @@ const STREAK_BOX = 60
 
 const STREAK_VERTEX = /* glsl */ `
 uniform vec3 uCamera;
+uniform vec3 uOrigin;
 uniform vec3 uTrail;
 uniform float uBox;
 attribute float aTail;
 varying float vFade;
 
 void main() {
-  // wrap every streak into a box that travels with the camera
-  vec3 rel = mod(position - uCamera + uBox * 0.5, uBox) - uBox * 0.5;
+  // wrap every streak into a box that travels with the camera (in warp,
+  // the box scrolls past at a pace of its own: uOrigin)
+  vec3 rel = mod(position - uOrigin + uBox * 0.5, uBox) - uBox * 0.5;
   vec3 world = uCamera + rel - uTrail * aTail;
 
   float distance = length(rel);
@@ -656,11 +658,12 @@ void main() {
 
 const STREAK_FRAGMENT = /* glsl */ `
 uniform float uIntensity;
+uniform float uGain;
 varying float vFade;
 
 void main() {
   // squared: barely there at cruising speed, a whisper at peak
-  gl_FragColor = vec4(vec3(0.72, 0.8, 1.0) * vFade * uIntensity * uIntensity * 0.16, 1.0);
+  gl_FragColor = vec4(vec3(0.72, 0.8, 1.0) * vFade * uIntensity * uIntensity * uGain, 1.0);
 }`
 
 const _trail = new THREE.Vector3()
@@ -700,6 +703,8 @@ function StarStreaks() {
       new THREE.ShaderMaterial({
         uniforms: {
           uCamera: { value: new THREE.Vector3() },
+          uOrigin: { value: new THREE.Vector3() },
+          uGain: { value: 0.16 },
           uTrail: { value: new THREE.Vector3() },
           uBox: { value: STREAK_BOX },
           uIntensity: { value: 0 },
@@ -723,6 +728,21 @@ function StarStreaks() {
 
   useFrame(() => {
     if (!lines.current) return
+    if (pilot.active) {
+      // warping: streaks rush past, brighter
+      const glow = pilot.warpGlow
+      lines.current.visible = glow > 0.05
+      if (!lines.current.visible) return
+      camera.getWorldDirection(_trail)
+      _trail.multiplyScalar(1.6 * glow)
+      material.uniforms.uCamera.value.copy(camera.position)
+      material.uniforms.uOrigin.value.copy(pilot.warpOrigin)
+      material.uniforms.uTrail.value.copy(_trail)
+      material.uniforms.uIntensity.value = glow
+      material.uniforms.uGain.value = 0.9
+      return
+    }
+    material.uniforms.uGain.value = 0.16
     const intensity = flight.intensity
     lines.current.visible = intensity > 0.05
     if (!lines.current.visible) return
@@ -734,6 +754,7 @@ function StarStreaks() {
     if (speed > 1e-4) _trail.multiplyScalar(length / speed)
 
     material.uniforms.uCamera.value.copy(camera.position)
+    material.uniforms.uOrigin.value.copy(camera.position)
     material.uniforms.uTrail.value.copy(_trail)
     material.uniforms.uIntensity.value = intensity
   })

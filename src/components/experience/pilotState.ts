@@ -1,3 +1,18 @@
+import * as THREE from 'three'
+
+/* where each world is on screen, for the HUD (written by the scene each
+   frame): x, y in -1..1 (y up), whether it is ahead of the camera, its
+   distance in km and its radius on screen in pixels */
+export type FlightMarker = {
+  name: string
+  index: number // -1: the Sun
+  x: number
+  y: number
+  ahead: boolean
+  km: number
+  radiusPx: number
+}
+
 /* Shared state for the flight mode (the little jet): written by the page
    (buttons, keys, pointer, touch) and read by the 3D scene each frame. */
 export const pilot = {
@@ -23,6 +38,16 @@ export const pilot = {
   /** how far behind the ship the camera rides, in ship lengths: from
       the chase view (3.2) out to where the ship is a speck (300,000) */
   viewTarget: 3.2,
+  /** the worlds on screen, for the HUD */
+  markers: [] as FlightMarker[],
+  /** asked to warp to a world (-1: the Sun), picked up by the scene */
+  warpRequest: null as number | null,
+  /** the world being warped to ('' when not warping) */
+  warping: '',
+  /** warp's glow, 0..1: the star streaks and the wider lens */
+  warpGlow: 0,
+  /** where the warp streaks are, as if flown through at a steady pace */
+  warpOrigin: new THREE.Vector3(),
 }
 
 export const VIEW_NEAR = 3.2

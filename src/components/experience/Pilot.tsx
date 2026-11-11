@@ -58,6 +58,39 @@ const _camPos = new THREE.Vector3()
 const _turn = new THREE.Quaternion()
 const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
+const _markerDir = new THREE.Vector3()
+const _camForward = new THREE.Vector3()
+const _warpLook = new THREE.Matrix4()
+const _warpQuat = new THREE.Quaternion()
+const _warpPrev = new THREE.Vector3()
+const _bez = new THREE.Vector3()
+
+/* ============================================================
+   WARP
+   Pick a world (a marker on screen, or 1-8, 0 for the Sun) and the ship
+   flies itself there: it first climbs clear of the world it is at (to
+   one side, so the way is never through it), then crosses at warp,
+   swinging round the Sun if it lies in between, and arrives a few radii
+   out on the sunlit side, facing its goal. The crossing closes the
+   distance geometrically, so the goal grows steadily from a point to a
+   world. S cancels.
+============================================================ */
+type Warp = {
+  target: number
+  name: string
+  a0: THREE.Vector3 // all relative to the Sun, so the floating origin can move
+  a1: THREE.Vector3
+  ctrl: THREE.Vector3
+  end: THREE.Vector3
+  goal: THREE.Vector3
+  climb: number
+  duration: number
+  t: number
+  span: number
+  eps: number
+}
+
+const BODY_NAMES = ['the Sun', ...PLANETS.map((planet) => planet.name)]
 const _toSun = new THREE.Vector3()
 const _levelUp = new THREE.Vector3()
 const _targetRates = new THREE.Vector3()
@@ -556,6 +589,7 @@ export default function Pilot() {
   const shuttle = useShuttle()
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
   const scene = useThree((state) => state.scene)
+  const size = useThree((state) => state.size)
   const savedCamera = useRef({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() })
   const savedFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null)
   const ship = useRef<THREE.Group>(null)
@@ -572,6 +606,7 @@ export default function Pilot() {
   const sunLight = useRef<THREE.DirectionalLight>(null)
   const shine = useRef<THREE.DirectionalLight>(null)
   const shineFor = useRef(-2)
+  const warp = useRef<Warp | null>(null)
   const viewDistance = useRef(VIEW_NEAR)
   const beacon = useRef<THREE.Sprite>(null)
   const beaconMaterial = useMemo(() => {
@@ -614,6 +649,9 @@ export default function Pilot() {
         camera.updateProjectionMatrix()
         pilot.nearestIndex = -2
         getShipPass().enabled = false
+        warp.current = null
+        pilot.warping = ''
+        pilot.warpGlow = 0
         // back to the journey's compressed Solar System, and its camera
         layout.trueScale = false
         SYSTEM_OFFSET.copy(SYSTEM_BASE)
@@ -698,7 +736,8 @@ export default function Pilot() {
     // ---- controls: keys, mouse or touch, and a gamepad if one is in use
     const keys = pilot.keys
     const pad = readGamepad()
-    const forwardKey = keys.has('w') || pilot.touchThrust || pad.thrust > 0.2
+    const warping = warp.current !== null
+    const forwardKey = !warping && (keys.has('w') || pilot.touchThrust || pad.thrust > 0.2)
     const brakeKey = keys.has('s') || pad.brake > 0.2
     const boost = keys.has('shift') || pad.boost
     // stick-like input, -1..1: a soft centre for fine corrections, full
@@ -708,17 +747,17 @@ export default function Pilot() {
       if (a < dead) return 0
       return Math.sign(v) * Math.min(1, ((a - dead) / (1 - dead)) ** 1.6)
     }
-    const steerX = THREE.MathUtils.clamp(
+    const steerX = warping ? 0 : THREE.MathUtils.clamp(
       shape(pilot.steer.x, 0.06) + shape(pad.x, 0.12) + (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0),
       -1,
       1,
     )
-    const steerY = THREE.MathUtils.clamp(
+    const steerY = warping ? 0 : THREE.MathUtils.clamp(
       shape(pilot.steer.y, 0.06) + shape(pad.y, 0.12) + (keys.has('arrowdown') ? 1 : 0) - (keys.has('arrowup') ? 1 : 0),
       -1,
       1,
     )
-    const rollInput = (keys.has('e') ? 1 : 0) - (keys.has('q') ? 1 : 0) + pad.roll
+    const rollInput = warping ? 0 : (keys.has('e') ? 1 : 0) - (keys.has('q') ? 1 : 0) + pad.roll
 
     // ---- speed: W speeds up and the speed holds when released, S slows.
     // The limit follows the distance to the nearest surface, and tops out
@@ -802,6 +841,108 @@ export default function Pilot() {
     }
     if (height < minimum) jet.position.copy(_bodyPos).addScaledVector(_axis, minimum)
 
+    // ---- warp: asked for by the HUD; while it runs it flies the ship
+    if (pilot.warpRequest !== null) {
+      const target = pilot.warpRequest
+      pilot.warpRequest = null
+      const rel = jet.position.clone().sub(SYSTEM_OFFSET)
+      const goal = target < 0 ? new THREE.Vector3() : getPlanetOrbitPosition(target, simClock.jd, new THREE.Vector3())
+      const radius = target < 0 ? SUN_TRUE_RADIUS : getPlanetVisualRadius(target)
+      const standOff = target < 0 ? 6 : target === 5 ? 5.5 : 3.2
+      // arrive on the near side, turned towards the Sun (the lit face)
+      const fromGoal = rel.clone().sub(goal).normalize()
+      const sunward = goal.lengthSq() > 0 ? goal.clone().negate().normalize().multiplyScalar(1.2) : new THREE.Vector3()
+      const arrive = fromGoal.add(sunward)
+      if (arrive.lengthSq() < 1e-8) arrive.set(0, 1, 0)
+      const end = goal.clone().addScaledVector(arrive.normalize(), radius * standOff)
+      // first climb clear of the world we are at, to its side
+      let a1 = rel.clone()
+      let climb = 0
+      if (nearestIndex !== target && clearance < nearestRadius * 3) {
+        const atBody = _bodyPos.clone().sub(SYSTEM_OFFSET)
+        const way = end.clone().sub(rel).normalize()
+        const side = rel.clone().sub(atBody).normalize()
+        side.addScaledVector(way, -side.dot(way))
+        if (side.lengthSq() < 1e-8) side.set(0, 1, 0).addScaledVector(way, -way.y)
+        a1 = atBody.addScaledVector(side.normalize(), nearestRadius * 4)
+        climb = 1.6
+      }
+      // and round the Sun, if it lies in the way
+      const segment = end.clone().sub(a1)
+      const along = THREE.MathUtils.clamp(-a1.dot(segment) / segment.lengthSq(), 0, 1)
+      const closest = a1.clone().addScaledVector(segment, along)
+      const ctrl = a1.clone().add(end).multiplyScalar(0.5)
+      const clearSun = SUN_TRUE_RADIUS * 5
+      if (target >= 0 && closest.length() < clearSun) {
+        const away = closest.lengthSq() > 1e-8 ? closest.clone().normalize() : new THREE.Vector3(0, 1, 0)
+        ctrl.addScaledVector(away, 2 * (clearSun - closest.length()) + clearSun)
+      }
+      const span = Math.max(a1.distanceTo(end), radius * 0.01)
+      warp.current = {
+        target,
+        name: BODY_NAMES[target + 1],
+        a0: rel,
+        a1,
+        ctrl,
+        end,
+        goal,
+        climb,
+        duration: THREE.MathUtils.clamp(3.5 + 0.9 * Math.log10(Math.max(span * KM_PER_UNIT, 1e5) / 1e5), 3.5, 8),
+        t: 0,
+        span,
+        eps: radius * 0.002,
+      }
+      pilot.warping = BODY_NAMES[target + 1]
+      pilot.viewTarget = VIEW_NEAR
+    }
+    const w = warp.current
+    if (w && keys.has('s')) {
+      // cancelled: drop out of warp where we are
+      warp.current = null
+      pilot.warping = ''
+    } else if (w) {
+      w.t += delta
+      _warpPrev.copy(jet.position).sub(SYSTEM_OFFSET)
+      let glow = 0.15
+      if (w.t < w.climb) {
+        const s = THREE.MathUtils.smoothstep(w.t / w.climb, 0, 1)
+        _bez.copy(w.a0).lerp(w.a1, s)
+      } else {
+        const t = Math.min(1, (w.t - w.climb) / w.duration)
+        const s = t * t * (3 - 2 * t)
+        // the distance left shrinks geometrically: the goal grows steadily
+        const u = 1 - Math.pow(w.eps / w.span, s)
+        const v = 1 - u
+        _bez
+          .copy(w.a1)
+          .multiplyScalar(v * v)
+          .addScaledVector(w.ctrl, 2 * u * v)
+          .addScaledVector(w.end, u * u)
+        glow = Math.pow(Math.sin(Math.PI * t), 0.6)
+        if (t >= 1) {
+          warp.current = null
+          pilot.warping = ''
+          glow = 0
+        }
+      }
+      jet.position.copy(SYSTEM_OFFSET).add(_bez)
+      // face the goal
+      _markerDir.copy(SYSTEM_OFFSET).add(w.goal)
+      _warpLook.lookAt(jet.position, _markerDir, _levelUp)
+      _warpQuat.setFromRotationMatrix(_warpLook)
+      jet.quaternion.slerp(_warpQuat, 1 - Math.exp(-delta * 3))
+      _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
+      const moved = _bez.distanceTo(_warpPrev)
+      pilot.kms = (moved / Math.max(delta, 1e-4)) * KM_PER_UNIT
+      speed.current = 0
+      velocity.current.set(0, 0, 0)
+      pilot.warpGlow += (glow - pilot.warpGlow) * (1 - Math.exp(-delta * 6))
+      pilot.warpOrigin.addScaledVector(_forward, 70 * pilot.warpGlow * delta)
+      pilot.speed = Math.max(pilot.speed, pilot.warpGlow)
+    } else {
+      pilot.warpGlow += (0 - pilot.warpGlow) * (1 - Math.exp(-delta * 4))
+    }
+
     // ---- the chase camera: behind and above, swinging a little wide in
     // turns, looking slightly into them, and banking with the ship
     const bankTarget = THREE.MathUtils.clamp(yawRate * 0.42, -0.65, 0.65)
@@ -882,6 +1023,29 @@ export default function Pilot() {
     shipCamera.fov = camera.fov
     shipCamera.aspect = camera.aspect
     shipCamera.updateProjectionMatrix()
+
+    // ---- where each world is on screen, for the HUD's markers
+    camera.updateMatrixWorld()
+    camera.getWorldDirection(_camForward)
+    const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2
+    const halfHeight = size.height / 2
+    if (pilot.markers.length !== PLANETS.length + 1) {
+      pilot.markers = BODY_NAMES.map((name, i) => ({ name, index: i - 1, x: 0, y: 0, ahead: false, km: 0, radiusPx: 0 }))
+    }
+    pilot.markers.forEach((marker) => {
+      if (marker.index < 0) _bodyCenter.copy(SYSTEM_OFFSET)
+      else getPlanetPosition(marker.index, simClock.jd, _bodyCenter)
+      const radius = marker.index < 0 ? SUN_TRUE_RADIUS : getPlanetVisualRadius(marker.index)
+      _markerDir.copy(_bodyCenter).sub(camera.position)
+      const distance = _markerDir.length()
+      _markerDir.divideScalar(distance)
+      marker.ahead = _markerDir.dot(_camForward) > 0
+      marker.km = Math.max(0, distance - radius) * KM_PER_UNIT
+      marker.radiusPx = (Math.atan(radius / Math.max(distance, radius)) / halfFov) * halfHeight
+      _markerDir.add(camera.position).project(camera)
+      marker.x = _markerDir.x
+      marker.y = _markerDir.y
+    })
   })
 
   return (

@@ -1495,6 +1495,55 @@ html.is-spinning * {
   transition: opacity 0.6s;
 }
 .flight-guide.is-on { opacity: 1; }
+
+/* world markers: a ring where a world is, an arrow at the edge pointing
+   to one off screen; name and distance beside it, quiet until hovered */
+.flight-markers { position: absolute; inset: 0; }
+.flight-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -6px 0 0 -6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: 500 10px / 1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.72;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: opacity 0.4s, color 0.3s;
+}
+.flight-marker:hover,
+.flight-marker:focus-visible { opacity: 1; color: var(--text-1); }
+.flight-marker.is-target { opacity: 1; color: var(--planet-accent); }
+.flight-marker.is-hidden { opacity: 0; pointer-events: none; }
+.flight-marker[data-side='left'] { flex-direction: row-reverse; }
+/* names on the left of markers near the right edge, the mark kept on its point */
+.flight-marker[data-side='left'] { translate: calc(-100% + 12px) 0; }
+.flight-marker-mark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.flight-marker[data-edge='true'] .flight-marker-mark {
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  clip-path: polygon(100% 50%, 15% 8%, 35% 50%, 15% 92%);
+  transform: rotate(var(--angle, 0rad));
+}
+.flight-marker-label { transition: opacity 0.3s; }
+.flight-marker-label.is-quiet { opacity: 0; }
+.flight-marker:hover .flight-marker-label.is-quiet { opacity: 1; }
 .flight-guide circle,
 .flight-guide line {
   fill: none;
