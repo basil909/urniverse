@@ -17,6 +17,7 @@ import {
   SYSTEM_OFFSET,
 } from './orbit'
 import { simClock } from './simClock'
+import { pilot } from './pilotState'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
 import Belts from './Belts'
@@ -57,14 +58,19 @@ const earthNight = {
   uHasClouds: { value: 0 },
   uCloudShift: { value: 0 },
   uTime: { value: 0 },
+  uCloudHeight: { value: 0.012 },
 }
 const EARTH_CITY_LIGHTS = new THREE.Color('#ffc27a')
 const _earthWorld = new THREE.Vector3()
 const _earthAxis = new THREE.Vector3()
 const _earthQuat = new THREE.Quaternion()
 
-/* cloud deck height in Earth radii (the cloud shell sits at 1.012) */
-const CLOUD_HEIGHT = 0.012
+/* cloud deck height in Earth radii: 1.2% (76 km) from afar, so the
+   clouds visibly stand off the ground; coming in close it settles to
+   0.16% (10 km), where weather really is */
+const CLOUD_HEIGHT_FAR = 0.012
+const CLOUD_HEIGHT_NEAR = 0.0016
+const _cloudCentre = new THREE.Vector3()
 
 /* ============================================================
    CLOSE-UP DETAIL
@@ -111,14 +117,16 @@ vec3 closeDetail(vec3 p, float rugged, float stretch) {
 }
 /* tilt a normal by a height field, from its screen-space slope (pos and
    n in the same space, h in its units) */
-vec3 closeBump(vec3 n, vec3 pos, float h) {
-  vec3 dpdx = dFdx(pos); vec3 dpdy = dFdy(pos);
+vec3 closeBumpWith(vec3 n, vec3 dpdx, vec3 dpdy, float h) {
   float dhdx = dFdx(h); float dhdy = dFdy(h);
   vec3 r1 = cross(dpdy, n); vec3 r2 = cross(n, dpdx);
   float det = dot(dpdx, r1);
   if (abs(det) < 1e-30) return n;
   vec3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
   return normalize(abs(det) * n - grad);
+}
+vec3 closeBump(vec3 n, vec3 pos, float h) {
+  return closeBumpWith(n, dFdx(pos), dFdy(pos), h);
 }
 `
 
@@ -184,7 +192,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
   shader.fragmentShader = SURFACE_PATCH_GLSL + shader.fragmentShader
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
-uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
+uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight;
 ` +
     shader.fragmentShader
       .replace(
@@ -257,7 +265,7 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime;
           vec3 east = normalize(cross(normalize(uNorthView), N));
           vec3 north = cross(N, east);
           vec3 along = sunV - N * mu;
-          float reach = ${CLOUD_HEIGHT} / max(mu, 0.12);
+          float reach = uCloudHeight / max(mu, 0.12);
           float coslat = max(cos((vMapUv.y - 0.5) * 3.14159), 0.15);
           vec2 shift = vec2(dot(along, east) / (6.28318 * coslat), dot(along, north) / 3.14159) * reach;
           float cover = texture2D(uClouds, vMapUv + shift - vec2(uCloudShift, 0.0)).g;
@@ -591,9 +599,18 @@ void main() {
 
 const ATMOSPHERE_VERTEX_SHADER = /* glsl */ `
 
+uniform float uShell;
 varying vec3 vNormal; varying vec3 vWorldPosition;
+varying vec3 vCenter; varying float vRadius; /* the planet's centre and radius */
 
-void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPosition = wp.xyz; vNormal = normalize(mat3(modelMatrix) * normal); gl_Position = projectionMatrix * viewMatrix * wp; }`
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPosition = wp.xyz;
+  vNormal = normalize(mat3(modelMatrix) * normal);
+  vCenter = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vRadius = length(modelMatrix[0].xyz) / max(uShell, 1.0);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`
 
 
 
@@ -602,6 +619,7 @@ const ATMOSPHERE_FRAGMENT_SHADER = /* glsl */ `
 uniform vec3 uColor; uniform vec3 uDusk; uniform float uIntensity; uniform float uThickness;
 uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform float uAirglow;
 varying vec3 vNormal; varying vec3 vWorldPosition;
+varying vec3 vCenter; varying float vRadius;
 
 void main() {
   vec3 n = normalize(vNormal);
@@ -612,9 +630,34 @@ void main() {
      planet radii? The glow is densest where it grazes the surface and
      thins with height, so it hugs the limb instead of drawing a ring at
      the shell's outer edge. Over the disk it only brightens near the limb. */
-  float nv = clamp(dot(n, vd), 0.0, 1.0);
-  float pass = uShell * sqrt(1.0 - nv * nv);
+  float pass;
+  float column = 1.0;
+  vec3 oc = vCenter - cameraPosition;
+  bool inside = length(oc) < vRadius * uShell;
+  if (inside) {
+    /* flying inside the atmosphere (only the far side of the shell is
+       seen): the same question for the ray from the camera. Looking down
+       past the planet it grazes the air at its lowest point ahead; looking
+       up it is lowest where you are, and crosses little air on its way
+       out, so the sky overhead stays black and the horizon glows. */
+    if (gl_FrontFacing) discard;
+    vec3 ray = -vd;
+    float t = max(dot(oc, ray), 0.0);
+    vec3 closest = ray * t - oc;
+    pass = length(closest) / vRadius;
+    n = normalize(closest);
+    toSun = normalize(uSunPosition - vCenter);
+    float up = dot(ray, normalize(-oc));
+    column = 1.0 / (1.0 + max(up, 0.0) * sqrt(2.0 / max(uShell - 1.0, 0.01)) * 6.0);
+  } else {
+    if (!gl_FrontFacing) discard;
+    float nv = clamp(dot(n, vd), 0.0, 1.0);
+    pass = uShell * sqrt(1.0 - nv * nv);
+  }
   float scale = (uShell - 1.0) * mix(0.22, 0.55, clamp(uThickness / 1.2, 0.0, 1.0));
+  /* from far away the glow is drawn thicker than it is, so it shows; seen
+     from inside, the air thins over its true few tens of km */
+  if (inside) scale *= 0.4;
   float above = pass - 1.0;
   float edge = above > 0.0
     ? exp(-above / scale) * (1.0 - smoothstep(mix(uShell, 1.0, 0.25), uShell, pass))
@@ -633,7 +676,8 @@ void main() {
   float forward = pow(max(dot(-vd, toSun), 0.0), 5.0);
   float backlit = forward * smoothstep(-0.75, 0.05, ndl) * 2.2;
 
-  float a = edge * (day + backlit) * uIntensity * uLight;
+  if (inside && above < 0.0) edge = 0.0; /* that ray ends on the ground */
+  float a = edge * column * (day + backlit) * uIntensity * uLight;
   vec3 glow = color * a;
 
   /* Earth's airglow: on the night side, seen edge-on, a thin green line
@@ -656,11 +700,12 @@ void main() {
 const PLANET_VERTEX_SHADER = /* glsl */ `
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
-varying vec3 vEast; varying vec3 vNorth; varying float vScale;
+varying vec3 vEast; varying vec3 vNorth; varying float vScale; varying vec3 vViewPos;
 
 void main() {
   vUv = uv;
   vScale = length(modelMatrix[0].xyz);
+  vViewPos = (modelViewMatrix * vec4(position, 1.0)).xyz;
   vNormal = normalize(mat3(modelMatrix) * normal);
   vLocalPosition = position;
   /* map directions on the sphere: east = increasing u, north = increasing v */
@@ -687,7 +732,7 @@ uniform float uHasRings; uniform sampler2D uRingMap; uniform vec3 uRingNormal; u
 uniform sampler2D uHeight; uniform float uHasHeight; uniform float uRelief; uniform vec2 uHeightTexel; /* surface relief */
 
 varying vec3 vWorldPosition; varying vec3 vNormal; varying vec2 vUv; varying vec3 vLocalPosition;
-varying vec3 vEast; varying vec3 vNorth; varying float vScale;
+varying vec3 vEast; varying vec3 vNorth; varying float vScale; varying vec3 vViewPos;
 
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 
@@ -1011,7 +1056,9 @@ void main() {
   bool rocky = uPlanet == 0 || uPlanet == 3;
   vec3 close = closeDetail(p, rocky ? 0.6 : 0.0, rocky ? 1.0 : 5.0);
   surface *= 1.0 + close.y * (rocky ? 0.28 : 0.14) * (1.0 - 0.7 * streamedCover);
-  lit = closeBump(lit, vWorldPosition, close.x * vScale * (rocky ? 0.16 : 0.04));
+  /* slopes from camera-relative positions: world positions are too
+     coarse in 32-bit floats for steps of a few hundred metres */
+  lit = closeBumpWith(lit, dFdx(vViewPos) * mat3(viewMatrix), dFdy(vViewPos) * mat3(viewMatrix), close.x * vScale * (rocky ? 0.16 : 0.04));
   float ndlLit = dot(lit, toSun);
 
   /* soft terminator, a touch of wrap lighting for thick atmospheres */
@@ -1878,7 +1925,8 @@ function Planet({
     // almost invisible while a planet is in focus, so trails never streak across it
     const inPlanetChapter = safeProgress >= 2.1 && safeProgress < 10
     const trailOpacity = (orbitLine.material as THREE.ShaderMaterial).uniforms.uOpacity
-    const targetOpacity = inPlanetChapter ? 0.012 : 0.5
+    // orbit trails are a diagram: none while flying among the real thing
+    const targetOpacity = pilot.active ? 0 : inPlanetChapter ? 0.012 : 0.5
     trailOpacity.value +=
       (targetOpacity - trailOpacity.value) * (1 - Math.exp(-delta * 4))
 
@@ -1961,7 +2009,7 @@ function Planet({
                 spin={spin}
               />
             )}
-            <sphereGeometry args={[1, 96, 96]} />
+            <sphereGeometry args={[1, 192, 192]} />
 
             {/* clouds ride on Earth and drift slowly over it */}
             {planet.type === 'earth' && (
@@ -1999,7 +2047,7 @@ function Planet({
               <shaderMaterial
                 transparent
                 depthWrite={false}
-                side={THREE.FrontSide}
+                side={THREE.DoubleSide}
                 blending={THREE.AdditiveBlending}
                 toneMapped={false}
                 uniforms={atmosphereUniforms}
@@ -2095,18 +2143,29 @@ function EarthCloudLayer({
     earthNight.uHasClouds.value = texture ? 1 : 0
   }, [texture])
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     // weather drifts east relative to the ground
     drift.current = (drift.current + delta * 0.01) % (Math.PI * 2)
     if (cloud.current) cloud.current.rotation.y = drift.current
+    // the deck's height follows the camera's distance (in Earth radii)
+    const earth = cloud.current?.parent
+    if (cloud.current && earth) {
+      earth.getWorldPosition(_cloudCentre)
+      const e = earth.matrixWorld.elements
+      const earthRadius = Math.hypot(e[0], e[1], e[2])
+      const away = state.camera.position.distanceTo(_cloudCentre) / earthRadius
+      const height = THREE.MathUtils.lerp(CLOUD_HEIGHT_NEAR, CLOUD_HEIGHT_FAR, THREE.MathUtils.smoothstep(away, 1.25, 3))
+      cloud.current.scale.setScalar(radius * (1 + height))
+      earthNight.uCloudHeight.value = height
+    }
     earthNight.uCloudShift.value = drift.current / (Math.PI * 2)
   })
 
   if (!texture) return null
 
   return (
-    <mesh ref={cloud} scale={radius * 1.012}>
-      <sphereGeometry args={[1, 96, 96]} />
+    <mesh ref={cloud} scale={radius * (1 + CLOUD_HEIGHT_FAR)}>
+      <sphereGeometry args={[1, 192, 192]} />
       <meshPhongMaterial
         color="#ffffff"
         alphaMap={texture}

@@ -26,6 +26,7 @@ import Starfield from './Starfield'
 import NightSky from './NightSky'
 import { lens } from './lens'
 import Pilot from './Pilot'
+import { getShipPass } from './shipLayer'
 import { pilot } from './pilotState'
 import {
   SYSTEM_OFFSET,
@@ -1351,6 +1352,9 @@ function Scene({
       {/* no MSAA (costly with these buffers): SMAA below smooths planet
           and ring edges for a fraction of the price */}
       <EffectComposer multisampling={0}>
+
+        {/* the Shuttle, at its true size, in a layer of its own (flight only) */}
+        <primitive object={getShipPass()} />
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
         <Bloom intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />

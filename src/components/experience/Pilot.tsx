@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { createPortal, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
@@ -9,6 +9,7 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
 import { getPlanetPosition, getPlanetVisualRadius, PLANETS, SYSTEM_OFFSET } from './orbit'
 import { simClock } from './simClock'
 import { pilot } from './pilotState'
+import { getShipPass, shipCamera, shipScene } from './shipLayer'
 
 /* ============================================================
    FLIGHT MODE
@@ -19,20 +20,22 @@ import { pilot } from './pilotState'
    the speed holds; S slows; A D and the arrows turn and pitch, Q E roll,
    Shift boosts. Near a planet the wings level to its horizon.
 
-   Scale: the ship is tiny next to the worlds (Earth is about 115 ship
-   lengths across, Jupiter about 1,250), so from the cockpit the planets
-   are vast. Speed follows the distance to the nearest surface: a crawl
+   Scale: the ship is drawn at its true size against the planets
+   (Earth is some 340,000 Shuttle lengths across, Jupiter 3.8 million),
+   in a layer of its own (see shipLayer.ts). Speed follows the distance to the nearest surface: a crawl
    when skimming a planet, fast across empty space. Planets and the Sun
    are solid.
 ============================================================ */
 
 const SUN_RADIUS = 1
-/** ship length in scene units (Earth's radius is 0.23) */
-const SHIP_LENGTH = 0.004
-/** the camera's near limit while flying, so the tiny ship still renders */
-const FLIGHT_NEAR = 0.0012
 /** km per scene unit at the planets' scale (Earth: 6,371 km = 0.23) */
 const KM_PER_UNIT = 6371 / 0.23
+/** the Shuttle orbiter's true length, 37.24 m, in scene units: Earth is
+    some 340,000 ship-lengths across */
+const SHIP_LENGTH = 0.03724 / KM_PER_UNIT
+/** the lowest you can fly, in planet radii: 1.0157 is 100 km over Earth,
+    the edge of space */
+const LOWEST = 1.0157
 
 const _forward = new THREE.Vector3()
 const _up = new THREE.Vector3()
@@ -43,6 +46,7 @@ const _camPos = new THREE.Vector3()
 const _turn = new THREE.Quaternion()
 const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
+const _toSun = new THREE.Vector3()
 const _levelUp = new THREE.Vector3()
 const _targetRates = new THREE.Vector3()
 const _wanted = new THREE.Vector3()
@@ -221,7 +225,7 @@ function Jet({ thrust }: { thrust: { current: number } }) {
 
   // built along -z (the direction of flight), 1 unit long, then scaled
   return (
-    <group scale={SHIP_LENGTH}>
+    <group>
       {/* fuselage, with a dark spine behind the canopy */}
       <mesh geometry={parts.fuselage} material={parts.hull} rotation={[Math.PI / 2, 0, 0]} />
       <mesh material={parts.dark} position={[0, 0.066, 0.12]}>
@@ -515,7 +519,7 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     look.core.opacity = 0.3 + t * 0.65
   })
   return (
-    <group scale={SHIP_LENGTH}>
+    <group>
       <primitive object={model.body} />
       {model.engines.map((engine, i) => (
         <group
@@ -549,6 +553,10 @@ export default function Pilot() {
   const savedFov = useRef(40)
   const savedNear = useRef(0.08)
   const camOffset = useRef(new THREE.Vector3(0, SHIP_LENGTH, SHIP_LENGTH * 3))
+  const visual = useRef<THREE.Group>(null)
+  const sunLight = useRef<THREE.DirectionalLight>(null)
+  const shine = useRef<THREE.DirectionalLight>(null)
+  const shineFor = useRef(-2)
 
   useFrame((_, rawDelta) => {
     const jet = ship.current
@@ -563,8 +571,8 @@ export default function Pilot() {
         camera.near = savedNear.current
         camera.updateProjectionMatrix()
         pilot.nearestIndex = -2
+        getShipPass().enabled = false
       }
-      jet.visible = false
       return
     }
 
@@ -573,7 +581,6 @@ export default function Pilot() {
       wasActive.current = true
       savedFov.current = camera.fov
       savedNear.current = camera.near
-      camera.near = FLIGHT_NEAR
       camera.updateProjectionMatrix()
       camera.getWorldDirection(_forward)
       jet.position.copy(camera.position).addScaledVector(_forward, SHIP_LENGTH * 4)
@@ -583,7 +590,7 @@ export default function Pilot() {
       velocity.current.set(0, 0, 0)
       camOffset.current.copy(camera.position).sub(jet.position)
     }
-    jet.visible = true
+    getShipPass().enabled = true
 
     // ---- the nearest surface sets the pace (and must not be flown into)
     let nearest = 'the Sun'
@@ -662,8 +669,8 @@ export default function Pilot() {
     const rollAngle = Math.atan2(_right.dot(_levelUp), _up.dot(_levelUp))
     const level = rollInput === 0 ? THREE.MathUtils.clamp(rollAngle * 2.2, -2.2, 2.2) * (1 - vertical) : 0
     // close to the ground, the nose is eased up rather than flown in
-    const minimum = nearestRadius * 1.065 + SHIP_LENGTH * 2
-    const soft = Math.max(nearestRadius * 0.04, SHIP_LENGTH * 2.5)
+    const minimum = nearestRadius * LOWEST
+    const soft = nearestRadius * 0.02
     const closeness = 1 - THREE.MathUtils.clamp((fromCentre - minimum) / soft, 0, 1)
     const diving = Math.max(0, -_forward.dot(_axis))
     const pullUp = closeness * diving * 2.5
@@ -693,8 +700,8 @@ export default function Pilot() {
     velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 3.2))
     jet.position.addScaledVector(velocity.current, delta)
 
-    // ---- the ground: never closer than 6.5% of the radius (some 410 km
-    // over Earth, the Space Station's height). Nearing it, the descent is
+    // ---- the ground: never lower than 100 km over Earth (1.6% of a
+    // planet's radius), the edge of space. Nearing it, the descent is
     // taken out of the motion smoothly; nothing bounces.
     _axis.copy(jet.position).sub(_bodyPos)
     const height = _axis.length()
@@ -729,24 +736,59 @@ export default function Pilot() {
     camera.rotateZ(-bank.current * 0.35)
     camera.up.set(0, 1, 0)
 
-    // the ship itself leans into the turn, and its nose follows the pitch
-    const model = jet.children[0]
-    model.rotation.z = bank.current
-    model.rotation.x += (pitchRate * 0.06 - model.rotation.x) * (1 - Math.exp(-delta * 4))
-
-    // a wider lens at speed
-    const fov = 52 + pilot.speed * (boost ? 16 : 8)
-    if (Math.abs(camera.fov - fov) > 0.05) {
-      camera.fov += (fov - camera.fov) * (1 - Math.exp(-delta * 3))
-      camera.updateProjectionMatrix()
+    // ---- the ship's layer: the ship one unit long at the origin, seen by
+    // a camera placed as the real one is, in ship lengths
+    const view = visual.current
+    if (view) {
+      view.quaternion.copy(jet.quaternion)
+      // the ship leans into the turn, and its nose follows the pitch
+      const model = view.children[0]
+      model.rotation.z = bank.current
+      model.rotation.x += (pitchRate * 0.06 - model.rotation.x) * (1 - Math.exp(-delta * 4))
     }
+    shipCamera.position.copy(camera.position).sub(jet.position).divideScalar(SHIP_LENGTH)
+    shipCamera.quaternion.copy(camera.quaternion)
+    // sunlight, and light thrown up by the planet below (blue off Earth,
+    // ochre off Mars) on its day side
+    _toSun.copy(SYSTEM_OFFSET).sub(jet.position).normalize()
+    sunLight.current?.position.copy(_toSun).multiplyScalar(10)
+    if (shine.current) {
+      shine.current.position.copy(_axis).multiplyScalar(-10)
+      const nearness = Math.min(1, (nearestRadius / Math.max(height, nearestRadius)) ** 2)
+      const daySide = THREE.MathUtils.smoothstep(_axis.dot(_toSun), -0.2, 0.6)
+      shine.current.intensity = nearestIndex >= 0 ? 0.55 * nearness * daySide : 0
+      if (nearestIndex >= 0 && shineFor.current !== nearestIndex) {
+        shineFor.current = nearestIndex
+        shine.current.color.set(PLANETS[nearestIndex].atmosphereColor ?? PLANETS[nearestIndex].baseColor)
+      }
+    }
+
+    // a wider lens at speed; the near limit follows the ground (the ship
+    // is in its own layer, so nothing nearer needs drawing here)
+    const fov = 52 + pilot.speed * (boost ? 16 : 8)
+    camera.fov += (fov - camera.fov) * (1 - Math.exp(-delta * 3))
+    camera.near = THREE.MathUtils.clamp(clearance * 0.25, 1e-5, 0.01)
+    camera.updateProjectionMatrix()
+    shipCamera.fov = camera.fov
+    shipCamera.aspect = camera.aspect
+    shipCamera.updateProjectionMatrix()
   })
 
   return (
-    <group ref={ship} visible={false}>
-      <group>
-        {shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : <Jet thrust={thrust} />}
-      </group>
-    </group>
+    <>
+      {/* where the ship is (the scene's own units); it is drawn below */}
+      <group ref={ship} visible={false} />
+      {createPortal(
+        <>
+          <group ref={visual}>
+            <group>{shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : <Jet thrust={thrust} />}</group>
+          </group>
+          <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
+          <directionalLight ref={shine} intensity={0} />
+          <ambientLight intensity={0.05} />
+        </>,
+        shipScene,
+      )}
+    </>
   )
 }
