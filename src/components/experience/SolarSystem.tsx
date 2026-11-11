@@ -258,10 +258,8 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; unifor
            orange-red, as in astronaut photos of the terminator */
         vec3 sunset = mix(vec3(1.0, 0.5, 0.28), vec3(1.0), smoothstep(0.02, 0.3, mu));
         reflectedLight.directDiffuse *= sunset;
-        /* the thin bright blue edge of the atmosphere, on the day side */
-        float edgeView = 1.0 - max(dot(N, normalize(vViewPosition)), 0.0);
-        float air = pow(edgeView, 3.0) * smoothstep(-0.05, 0.25, mu);
-        reflectedLight.indirectDiffuse += vec3(0.18, 0.38, 0.9) * air * 0.55;
+        /* (the blue of the air over it is the atmosphere's own, worked out
+           in the air shell) */
         /* sun glint: a tight, bright highlight where the water mirrors the Sun */
         vec3 V = normalize(vViewPosition);
         vec3 H = normalize(sunV + V);
@@ -316,6 +314,8 @@ const MOON_SPECULAR = new THREE.Color('#222222')
 
 const _scratchOrbitPos = new THREE.Vector3()
 const _farWorld = new THREE.Vector3()
+const _airCenter = new THREE.Vector3()
+const _airScale = new THREE.Vector3()
 const _sunCamera = new THREE.Vector3()
 const _trailPoint = new THREE.Vector3()
 
@@ -355,8 +355,162 @@ const ATMOSPHERE_LOOK: Record<string, { color: string; dusk: string; intensity: 
    surface, Mars's thin air hugs it */
 const ATMOSPHERE_SHELL: Record<string, number> = {
   Venus: 1.085,
-  Mars: 1.02,
+  Mars: 1.035,
 }
+
+/* ============================================================
+   REAL AIR (Earth and Mars)
+   Sunlight scattered once on its way through the air, worked out along
+   each line of sight: Rayleigh scattering by the gas (blue far more than
+   red, so Earth's sky is blue and its sunsets red, the blue light having
+   been scattered out of the long path), and Mie scattering by haze and
+   dust, thrown mostly forward. Mars's air is a hundredth as dense, its
+   sky the colour of the fine dust held in it; the dust throws blue light
+   further forward than red, so round the setting Sun the Martian sky
+   turns blue. The sky from the ground, the sunset and the thin blue edge
+   seen from orbit are the same calculation.
+   Units are the planet's radius. From far off the air is drawn thicker
+   (scale heights multiplied, density divided by the same, so the colour
+   is unchanged) so that it shows; close in it is its true depth.
+============================================================ */
+type Air = {
+  rayleigh: [number, number, number] // scattering at the ground, per radius
+  mie: [number, number, number] // haze/dust scattering, per radius
+  mieExt: [number, number, number] // and its extinction (scattering + absorption)
+  mieG: [number, number, number] // how strongly it is thrown forward, by colour
+  hR: number // scale heights, in radii
+  hM: number
+  sun: number
+}
+const AIR: Record<string, Air> = {
+  // 5.8, 13.5, 33.1 x 10^-6 per m; haze 21 x 10^-6 per m, 1.2 km
+  Earth: {
+    rayleigh: [36.95, 86.01, 210.9],
+    mie: [100, 100, 100],
+    mieExt: [111, 111, 111],
+    mieG: [0.76, 0.76, 0.76],
+    hR: 8 / 6371,
+    hM: 1.2 / 6371,
+    sun: 32,
+  },
+  // CO2 at 0.6% of Earth's pressure; dust of optical depth ~0.3 over an
+  // 11 km scale height, absorbing blue, forward-scattering blue hardest
+  Mars: {
+    rayleigh: [0.61, 1.42, 3.49],
+    mie: [92, 74, 54],
+    mieExt: [97, 98, 101],
+    mieG: [0.62, 0.7, 0.88],
+    hR: 11.1 / 3389.5,
+    hM: 11 / 3389.5,
+    sun: 13,
+  },
+}
+
+const PHYSICAL_AIR_FRAGMENT_SHADER = /* glsl */ `
+#define PI 3.14159265
+uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform float uAirglow;
+uniform vec3 uRayleigh; uniform vec3 uMie; uniform vec3 uMieExt; uniform vec3 uMieG;
+uniform float uHR; uniform float uHM; uniform float uSun; uniform float uExaggerate;
+varying vec3 vNormal; varying vec3 vWorldPosition;
+varying vec3 vCenter; varying float vRadius;
+
+vec2 sphereHit(vec3 o, vec3 d, float r) {
+  float b = dot(o, d);
+  float c = dot(o, o) - r * r;
+  float h = b * b - c;
+  if (h < 0.0) return vec2(1e9, -1e9);
+  h = sqrt(h);
+  return vec2(-b - h, -b + h);
+}
+vec3 miePhase(float mu, vec3 g) {
+  vec3 g2 = g * g;
+  return 3.0 / (8.0 * PI) * ((1.0 - g2) * (1.0 + mu * mu)) / ((2.0 + g2) * pow(1.0 + g2 - 2.0 * g * mu, vec3(1.5)));
+}
+
+void main() {
+  vec3 o = (cameraPosition - vCenter) / vRadius;
+  vec3 d = normalize(vWorldPosition - cameraPosition);
+  float camR = length(o);
+  // each pixel once: the near side of the shell from outside, the far side from within
+  if (camR < uShell ? gl_FrontFacing : !gl_FrontFacing) discard;
+
+  float E = uExaggerate;
+  float hR = uHR * E;
+  float hM = uHM * E;
+  vec3 bR = uRayleigh / E;
+  vec3 bMs = uMie / E;
+  vec3 bMe = uMieExt / E;
+  float top = min(uShell, 1.0 + max(hR, hM) * 9.0);
+  // the ground: the mean radius, or where you stand if lower (Hellas)
+  float ground = min(1.0, camR - 1e-7);
+
+  vec2 ta = sphereHit(o, d, top);
+  float t0 = max(ta.x, 0.0);
+  float t1 = ta.y;
+  vec2 tg = sphereHit(o, d, ground);
+  if (tg.x > 0.0) t1 = min(t1, tg.x);
+  if (t1 <= t0) discard;
+
+  vec3 sunDir = normalize(uSunPosition - vCenter);
+  const int VIEW = 16;
+  const int LIGHT = 6;
+  float seg = (t1 - t0) / float(VIEW);
+  float depthR = 0.0;
+  float depthM = 0.0;
+  vec3 sumR = vec3(0.0);
+  vec3 sumM = vec3(0.0);
+  for (int i = 0; i < VIEW; i++) {
+    vec3 p = o + d * (t0 + seg * (float(i) + 0.5));
+    float h = length(p) - 1.0;
+    float dR = exp(-h / hR) * seg;
+    float dM = exp(-h / hM) * seg;
+    depthR += dR * 0.5;
+    depthM += dM * 0.5;
+    // the light's way in from the Sun: none if the planet is in the way
+    vec2 tl = sphereHit(p, sunDir, top);
+    vec2 tb = sphereHit(p, sunDir, ground * 0.9999);
+    if (tb.x < 0.0 || tb.x > 1e8) {
+      float sl = tl.y / float(LIGHT);
+      float lR = 0.0;
+      float lM = 0.0;
+      for (int j = 0; j < LIGHT; j++) {
+        float hq = length(p + sunDir * sl * (float(j) + 0.5)) - 1.0;
+        lR += exp(-hq / hR) * sl;
+        lM += exp(-hq / hM) * sl;
+      }
+      vec3 att = exp(-(bR * (depthR + lR) + bMe * (depthM + lM)));
+      sumR += dR * att;
+      sumM += dM * att;
+    }
+    depthR += dR * 0.5;
+    depthM += dM * 0.5;
+  }
+  float mu = dot(d, sunDir);
+  vec3 light = (sumR * bR * (3.0 / (16.0 * PI)) * (1.0 + mu * mu) + sumM * bMs * miePhase(mu, uMieG)) * uSun * uLight;
+  vec3 through = exp(-(bR * depthR + bMe * depthM));
+  // a soft exposure on brightness alone, so the colours keep their hue
+  // (a sunset stays orange-red instead of washing to yellow)
+  float lum = dot(light, vec3(0.2126, 0.7152, 0.0722));
+  vec3 color = light * ((1.0 - exp(-lum * 1.4)) / max(lum, 1e-5));
+  color = min(color, vec3(1.0)) + max(color - 1.0, 0.0) * 0.15;
+
+  /* Earth's airglow: on the night side, seen edge-on, a thin green line
+     about 95 km up under a fainter red layer near 250 km */
+  if (uAirglow > 0.5) {
+    float along = -dot(o, d);
+    vec3 closest = o + d * max(along, 0.0);
+    float above = length(closest) - 1.0;
+    if (above > 0.0 && (tg.x < 0.0 || tg.x > 1e8)) {
+      float night = 1.0 - smoothstep(-0.2, 0.05, dot(normalize(closest), sunDir));
+      float green = exp(-pow((above - 0.0149) / 0.0014, 2.0));
+      float red = exp(-pow((above - 0.036) / 0.006, 2.0));
+      color += (vec3(0.32, 1.0, 0.45) * green * 0.3 + vec3(1.0, 0.35, 0.25) * red * 0.04) * night;
+    }
+  }
+  // what lies behind is dimmed by the air in front of it
+  float alpha = 1.0 - dot(through, vec3(0.3333));
+  gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));
+}`
 
 /* ============================================================
    DRAG TO SPIN
@@ -1100,7 +1254,8 @@ void main() {
   if (uPlanet == 3) {
     color = mix(color, vec3(0.92, 0.66, 0.48) * light * uLight, pow(1.0 - facing, 2.4) * 0.42);
   }
-  color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
+  /* Mars's air is worked out in its shell; the rest keep a soft rim */
+  if (uPlanet != 3) color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
 
   gl_FragColor = vec4(max(color, vec3(0.003)), 1.0);
 
@@ -1916,6 +2071,18 @@ function Planet({
       uShell: { value: ATMOSPHERE_SHELL[planet.name] ?? 1.055 },
       uAirglow: { value: planet.name === 'Earth' ? 1 : 0 },
       uGroundSky: { value: 0 },
+      ...(AIR[planet.name]
+        ? {
+            uRayleigh: { value: new THREE.Vector3(...AIR[planet.name].rayleigh) },
+            uMie: { value: new THREE.Vector3(...AIR[planet.name].mie) },
+            uMieExt: { value: new THREE.Vector3(...AIR[planet.name].mieExt) },
+            uMieG: { value: new THREE.Vector3(...AIR[planet.name].mieG) },
+            uHR: { value: AIR[planet.name].hR },
+            uHM: { value: AIR[planet.name].hM },
+            uSun: { value: AIR[planet.name].sun },
+            uExaggerate: { value: 1 },
+          }
+        : {}),
     }
   }, [planet, sunlight])
 
@@ -2177,6 +2344,16 @@ function Planet({
       if (atmosphere.uGroundSky) {
         atmosphere.uGroundSky.value = low ? 1 - THREE.MathUtils.smoothstep(pilot.altitudeKm, top * 0.15, top) : 0
       }
+      const air = AIR[planet.name]
+      if (air && atmosphere.uExaggerate) {
+        // true depth close in; thickened (up to what the shell holds) from afar
+        atmosphereMesh.current.getWorldPosition(_airCenter)
+        atmosphereMesh.current.getWorldScale(_airScale)
+        const shell = ATMOSPHERE_SHELL[planet.name] ?? 1.055
+        const away = camera.position.distanceTo(_airCenter) / (_airScale.x / shell)
+        const most = (shell - 1) / (9 * Math.max(air.hR, air.hM))
+        atmosphere.uExaggerate.value = THREE.MathUtils.clamp(1 + (away - 1.03) * 1.5, 1, Math.max(1, most))
+      }
     }
 
     // Focus: while one planet is the subject, the others shrink to distant
@@ -2356,16 +2533,31 @@ function Planet({
               scale={visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055)}
             >
               <sphereGeometry args={[1, 64, 64]} />
-              <shaderMaterial
-                transparent
-                depthWrite={false}
-                side={THREE.DoubleSide}
-                blending={THREE.AdditiveBlending}
-                toneMapped={false}
-                uniforms={atmosphereUniforms}
-                vertexShader={ATMOSPHERE_VERTEX_SHADER}
-                fragmentShader={ATMOSPHERE_FRAGMENT_SHADER}
-              />
+              {AIR[planet.name] ? (
+                <shaderMaterial
+                  transparent
+                  depthWrite={false}
+                  side={THREE.DoubleSide}
+                  blending={THREE.CustomBlending}
+                  blendSrc={THREE.OneFactor}
+                  blendDst={THREE.OneMinusSrcAlphaFactor}
+                  toneMapped={false}
+                  uniforms={atmosphereUniforms}
+                  vertexShader={ATMOSPHERE_VERTEX_SHADER}
+                  fragmentShader={PHYSICAL_AIR_FRAGMENT_SHADER}
+                />
+              ) : (
+                <shaderMaterial
+                  transparent
+                  depthWrite={false}
+                  side={THREE.DoubleSide}
+                  blending={THREE.AdditiveBlending}
+                  toneMapped={false}
+                  uniforms={atmosphereUniforms}
+                  vertexShader={ATMOSPHERE_VERTEX_SHADER}
+                  fragmentShader={ATMOSPHERE_FRAGMENT_SHADER}
+                />
+              )}
             </mesh>
           )}
 
