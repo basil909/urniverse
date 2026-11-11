@@ -12,6 +12,12 @@ export const pilot = {
   /** for the HUD: current speed (0..1 of the local limit) and nearest body */
   speed: 0,
   nearest: '',
+  /** nearest planet's orbit index (-1: the Sun, -2: not flying) */
+  nearestIndex: -2,
+  /** distance to the nearest surface, scene units */
+  clearance: Infinity,
+  /** altitude above the nearest planet in km (-1 near the Sun) */
+  altitudeKm: -1,
 }
 
 export function resetPilotInput() {

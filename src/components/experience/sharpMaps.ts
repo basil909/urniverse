@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
+import { pilot } from './pilotState'
+
 /* Sharper surface maps (4096×2048), loaded only for the planet in focus.
    Everything starts on the light 2K maps; once the camera has arrived at a
    planet its 4K maps are decoded off the main thread and swapped in, and they
@@ -84,7 +86,10 @@ export function useSharpFocus(
     const arrived = inChapter && progress - chapter >= focusIn
     arrivedFor.current = arrived ? arrivedFor.current + delta : 0
     const settled = arrivedFor.current >= SETTLE_SECONDS
-    const next = settled || (sharpRef.current && inChapter)
+    // flying the jet: sharpen whichever planet you are closing in on
+    const approached = pilot.active && pilot.nearestIndex === index && pilot.clearance < 3
+    const stillNear = pilot.active && pilot.nearestIndex === index && pilot.clearance < 5
+    const next = settled || (sharpRef.current && inChapter) || approached || (sharpRef.current && stillNear)
     if (next !== sharpRef.current) {
       sharpRef.current = next
       setSharp(next)

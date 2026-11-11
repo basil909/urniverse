@@ -4,10 +4,19 @@ import { useEffect, useState } from 'react'
 
 import { pilot, resetPilotInput } from '../experience/pilotState'
 
+/* altitude above the nearest planet, readable at any distance */
+function formatAltitude(km: number) {
+  if (km >= 1e6) return `${(km / 1e6).toFixed(1)} million km up`
+  // round to two significant figures: 3,200 km, 48,000 km, 450 km
+  const rounded = Number(km.toPrecision(2))
+  return `${rounded.toLocaleString('en-GB')} km up`
+}
+
 /* While flying: the controls (mouse, keys, touch), and a minimal HUD:
    the nearest world, a speed bar, a hint that fades, and "Land". */
 export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [nearest, setNearest] = useState('')
+  const [altitude, setAltitude] = useState(-1)
   const [speed, setSpeed] = useState(0)
   const [hint, setHint] = useState(true)
   const [touch, setTouch] = useState(false)
@@ -19,6 +28,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     const hud = window.setInterval(() => {
       setNearest(pilot.nearest)
       setSpeed(pilot.speed)
+      setAltitude(pilot.altitudeKm)
     }, 150)
 
     const key = (event: KeyboardEvent) => event.key.toLowerCase()
@@ -89,7 +99,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   return (
     <div className="flight-hud">
       <div className="flight-readout" aria-live="polite">
-        <span className="flight-near">Near {nearest}</span>
+        <span className="flight-near">
+          {altitude >= 0 ? `${nearest} · ${formatAltitude(altitude)}` : `Near ${nearest}`}
+        </span>
         <span className="flight-speed" aria-hidden="true">
           <span style={{ transform: `scaleX(${Math.max(0.02, speed)})` }} />
         </span>
