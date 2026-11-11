@@ -18,11 +18,25 @@ export const pilot = {
   clearance: Infinity,
   /** altitude above the nearest planet in km (-1 near the Sun) */
   altitudeKm: -1,
+  /** true speed, km/s */
+  kms: 0,
+  /** how far behind the ship the camera rides, in ship lengths: from
+      the chase view (3.2) out to where the ship is a speck (300,000) */
+  viewTarget: 3.2,
 }
+
+export const VIEW_NEAR = 3.2
+export const VIEW_FAR = 300000
+/* the C key steps through these */
+export const VIEW_STEPS = [3.2, 400, 30000]
 
 export function resetPilotInput() {
   pilot.keys.clear()
   pilot.steer.x = 0
   pilot.steer.y = 0
   pilot.touchThrust = false
+}
+
+export function setView(target: number) {
+  pilot.viewTarget = Math.min(VIEW_FAR, Math.max(VIEW_NEAR, target))
 }

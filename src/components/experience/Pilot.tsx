@@ -17,7 +17,7 @@ import {
   SYSTEM_OFFSET,
 } from './orbit'
 import { simClock } from './simClock'
-import { pilot } from './pilotState'
+import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
 
 /* ============================================================
@@ -44,6 +44,10 @@ const SHIP_LENGTH = 0.03724 / KM_PER_UNIT
 /** the lowest you can fly, in planet radii: 1.0157 is 100 km over Earth,
     the edge of space */
 const LOWEST = 1.0157
+/** the speed of light, in scene units per second */
+const LIGHT = 299792.458 / KM_PER_UNIT
+/** Shift: a warp no ship has, so the outer planets are not hours away */
+const WARP = 40
 
 const _forward = new THREE.Vector3()
 const _up = new THREE.Vector3()
@@ -568,6 +572,33 @@ export default function Pilot() {
   const sunLight = useRef<THREE.DirectionalLight>(null)
   const shine = useRef<THREE.DirectionalLight>(null)
   const shineFor = useRef(-2)
+  const viewDistance = useRef(VIEW_NEAR)
+  const beacon = useRef<THREE.Sprite>(null)
+  const beaconMaterial = useMemo(() => {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 64
+    const context = canvas.getContext('2d')!
+    const glow = context.createRadialGradient(32, 32, 0, 32, 32, 32)
+    glow.addColorStop(0, 'rgba(255,255,255,1)')
+    glow.addColorStop(0.18, 'rgba(200,225,255,0.9)')
+    glow.addColorStop(0.5, 'rgba(120,170,255,0.25)')
+    glow.addColorStop(1, 'rgba(120,170,255,0)')
+    context.fillStyle = glow
+    context.fillRect(0, 0, 64, 64)
+    return new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      sizeAttenuation: false,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
+  }, [])
+  useEffect(() => () => {
+    beaconMaterial.map?.dispose()
+    beaconMaterial.dispose()
+  }, [beaconMaterial])
 
   useFrame((_, rawDelta) => {
     const jet = ship.current
@@ -625,6 +656,8 @@ export default function Pilot() {
       jet.position.copy(camera.position).addScaledVector(_forward, SHIP_LENGTH * 4)
       jet.quaternion.copy(camera.quaternion)
       speed.current = 0
+      viewDistance.current = VIEW_NEAR
+      pilot.viewTarget = VIEW_NEAR
       rates.current.set(0, 0, 0)
       velocity.current.set(0, 0, 0)
       camOffset.current.copy(camera.position).sub(jet.position)
@@ -687,11 +720,13 @@ export default function Pilot() {
     )
     const rollInput = (keys.has('e') ? 1 : 0) - (keys.has('q') ? 1 : 0) + pad.roll
 
-    // ---- speed: W speeds up and the speed holds when released, S slows;
-    // the limit follows the distance to the nearest surface
-    // (up to some 110 million km/s across empty space at true distances,
-    // so the planets are seconds apart, not hours)
-    const limit = THREE.MathUtils.clamp(clearance * 0.7, SHIP_LENGTH * 0.8, 4000) * (boost ? 4 : 1)
+    // ---- speed: W speeds up and the speed holds when released, S slows.
+    // The limit follows the distance to the nearest surface, and tops out
+    // at the speed of light: even so, Mars is minutes away, Neptune hours,
+    // which is the point. Shift is a warp of up to 40 times light speed.
+    const limit = boost
+      ? THREE.MathUtils.clamp(clearance * 1.5, SHIP_LENGTH * 2, LIGHT * WARP)
+      : THREE.MathUtils.clamp(clearance * 0.5, SHIP_LENGTH * 0.8, LIGHT)
     const target = forwardKey ? limit : brakeKey ? 0 : Math.min(speed.current, limit)
     speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : brakeKey ? 2.2 : 3)))
     // over the limit (closing on a world): slow at once, or at these
@@ -699,6 +734,7 @@ export default function Pilot() {
     if (speed.current > limit) speed.current += (limit - speed.current) * (1 - Math.exp(-delta * 9))
     thrust.current += ((forwardKey ? (boost ? 1 : 0.7) : 0.08) - thrust.current) * (1 - Math.exp(-delta * 6))
     pilot.speed = THREE.MathUtils.clamp(speed.current / limit, 0, 1)
+    pilot.kms = speed.current * KM_PER_UNIT
 
     // ---- which way is "up": away from the planet when near one (so its
     // horizon stays level), the ecliptic's north out in open space
@@ -772,18 +808,29 @@ export default function Pilot() {
     bank.current += (bankTarget - bank.current) * (1 - Math.exp(-delta * 4))
     _up.set(0, 1, 0).applyQuaternion(jet.quaternion)
     _right.set(1, 0, 0).applyQuaternion(jet.quaternion)
+    // pulled back (scroll wheel, C), the same framing at a larger scale,
+    // until the Shuttle is a speck against the planet
+    viewDistance.current = Math.exp(
+      THREE.MathUtils.lerp(Math.log(viewDistance.current), Math.log(pilot.viewTarget), 1 - Math.exp(-delta * 2.5)),
+    )
+    const reach = SHIP_LENGTH * (viewDistance.current / VIEW_NEAR)
     _camPos
       .set(0, 0, 0)
-      .addScaledVector(_forward, -SHIP_LENGTH * 3.2)
-      .addScaledVector(_up, SHIP_LENGTH * (0.85 + pitchRate * 0.12))
-      .addScaledVector(_right, SHIP_LENGTH * yawRate * 0.35)
+      .addScaledVector(_forward, -reach * 3.2)
+      .addScaledVector(_up, reach * (0.85 + pitchRate * 0.12))
+      .addScaledVector(_right, reach * yawRate * 0.35)
     camOffset.current.lerp(_camPos, 1 - Math.exp(-delta * 6))
     camera.position.copy(jet.position).add(camOffset.current)
+    // pulled far back, the camera stays above the ground
+    _camTarget.copy(camera.position).sub(_bodyPos)
+    if (_camTarget.length() < nearestRadius * 1.004) {
+      camera.position.copy(_bodyPos).addScaledVector(_camTarget.normalize(), nearestRadius * 1.004)
+    }
     _camTarget
       .copy(jet.position)
-      .addScaledVector(_forward, SHIP_LENGTH * 6)
-      .addScaledVector(_right, -SHIP_LENGTH * yawRate * 0.9)
-      .addScaledVector(_up, SHIP_LENGTH * pitchRate * 0.5)
+      .addScaledVector(_forward, reach * 6)
+      .addScaledVector(_right, -reach * yawRate * 0.9)
+      .addScaledVector(_up, reach * pitchRate * 0.5)
     camera.up.copy(_up)
     camera.lookAt(_camTarget)
     camera.rotateZ(-bank.current * 0.35)
@@ -801,6 +848,16 @@ export default function Pilot() {
     }
     shipCamera.position.copy(camera.position).sub(jet.position).divideScalar(SHIP_LENGTH)
     shipCamera.quaternion.copy(camera.quaternion)
+    const shipAway = shipCamera.position.length()
+    shipCamera.near = Math.max(0.05, shipAway * 0.05)
+    shipCamera.far = shipAway * 3 + 100
+    // when the ship is too small to see, a soft beacon marks it
+    if (beacon.current) {
+      const shown = THREE.MathUtils.smoothstep(shipAway, 120, 900)
+      const pulse = 0.75 + 0.25 * Math.sin(performance.now() * 0.004)
+      beaconMaterial.opacity = shown * pulse
+      beacon.current.visible = shown > 0.01
+    }
     // sunlight, and light thrown up by the planet below (blue off Earth,
     // ochre off Mars) on its day side
     _toSun.copy(SYSTEM_OFFSET).sub(jet.position).normalize()
@@ -839,6 +896,7 @@ export default function Pilot() {
           <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
           <directionalLight ref={shine} intensity={0} />
           <ambientLight intensity={0.05} />
+          <sprite ref={beacon} material={beaconMaterial} scale={[0.028, 0.028, 1]} visible={false} />
         </>,
         shipScene,
       )}

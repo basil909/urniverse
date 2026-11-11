@@ -2,14 +2,28 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { pilot, resetPilotInput } from '../experience/pilotState'
+import { pilot, resetPilotInput, setView, VIEW_STEPS } from '../experience/pilotState'
+
+/* round to two significant figures: 3,200, 48,000, 450 */
+const round2 = (value: number) => Number(value.toPrecision(2)).toLocaleString('en-GB')
 
 /* altitude above the nearest planet, readable at any distance */
 function formatAltitude(km: number) {
+  if (km >= 1e9) return `${(km / 1e9).toFixed(1)} billion km up`
   if (km >= 1e6) return `${(km / 1e6).toFixed(1)} million km up`
-  // round to two significant figures: 3,200 km, 48,000 km, 450 km
-  const rounded = Number(km.toPrecision(2))
-  return `${rounded.toLocaleString('en-GB')} km up`
+  return `${round2(km)} km up`
+}
+
+/* true speed, and past light speed, as a multiple of it */
+const LIGHT_KMS = 299792.458
+function formatSpeed(kms: number) {
+  if (kms < 0.05) return ''
+  if (kms >= LIGHT_KMS * 0.995) {
+    const times = kms / LIGHT_KMS
+    return times < 1.05 ? 'light speed' : `${times < 10 ? times.toFixed(1) : Math.round(times)}× light speed`
+  }
+  if (kms < 1) return `${round2(kms * 1000)} m/s`
+  return `${round2(kms)} km/s`
 }
 
 /* While flying: the controls (mouse, keys, touch), and a minimal HUD:
@@ -20,6 +34,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [nearest, setNearest] = useState('')
   const [altitude, setAltitude] = useState(-1)
   const [speed, setSpeed] = useState(0)
+  const [kms, setKms] = useState(0)
   const [hint, setHint] = useState(true)
   const [touch, setTouch] = useState(false)
   const guide = useRef<SVGSVGElement>(null)
@@ -33,12 +48,19 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setNearest(pilot.nearest)
       setSpeed(pilot.speed)
       setAltitude(pilot.altitudeKm)
+      setKms(pilot.kms)
     }, 150)
 
     const key = (event: KeyboardEvent) => event.key.toLowerCase()
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onLand()
+        return
+      }
+      if (event.key.toLowerCase() === 'c' && !event.repeat) {
+        // step the camera back: chase, far, very far, and in again
+        const next = VIEW_STEPS.find((step) => step > pilot.viewTarget * 1.05)
+        setView(next ?? VIEW_STEPS[0])
         return
       }
       const k = key(event)
@@ -81,6 +103,11 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
     }
     const onBlur = () => resetPilotInput()
+    // the scroll wheel pulls the camera back (or in), smoothly
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      setView(pilot.viewTarget * Math.exp(event.deltaY * 0.004))
+    }
 
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
@@ -89,6 +116,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
     window.addEventListener('blur', onBlur)
+    window.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       window.clearTimeout(hintTimer)
       window.clearInterval(hud)
@@ -99,6 +127,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       window.removeEventListener('blur', onBlur)
+      window.removeEventListener('wheel', onWheel)
       resetPilotInput()
     }
   }, [onLand])
@@ -113,7 +142,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       )}
       <div className="flight-readout" aria-live="polite">
         <span className="flight-near">
-          {altitude >= 0 ? `${nearest} · ${formatAltitude(altitude)}` : `Near ${nearest}`}
+          {[altitude >= 0 ? `${nearest} · ${formatAltitude(altitude)}` : `Near ${nearest}`, formatSpeed(kms)]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
         <span className="flight-speed" aria-hidden="true">
           <span style={{ transform: `scaleX(${Math.max(0.02, speed)})` }} />
@@ -123,7 +154,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly'
-          : 'Steer with the mouse or arrows · W or click to fly, S to slow · Q E roll · Shift boost · Esc lands'}
+          : 'Steer with the mouse or arrows · W or click to fly, S to slow · Shift warp · scroll or C to pull back · Esc lands'}
       </p>
 
       {touch && (

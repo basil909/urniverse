@@ -2006,7 +2006,10 @@ function Planet({
       chapter >= 2 && chapter <= 9 ? chapter - 2 : chapter === 10 ? 2 : -1
     // In the Sun chapter the Sun is the subject: giants step back too
     const sunFocus = chapter === 1 && index >= 4
-    const targetScale = sunFocus
+    // flying, every planet is its true size
+    const targetScale = pilot.active
+      ? 1
+      : sunFocus
       ? 0.35
       : subject < 0 || subject === index
         ? 1
