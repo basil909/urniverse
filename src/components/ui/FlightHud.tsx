@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { pilot, resetPilotInput } from '../experience/pilotState'
 
@@ -13,13 +13,17 @@ function formatAltitude(km: number) {
 }
 
 /* While flying: the controls (mouse, keys, touch), and a minimal HUD:
-   the nearest world, a speed bar, a hint that fades, and "Land". */
+   the nearest world, a speed bar, a hint that fades, "Land", and for the
+   mouse a faint steering guide: a ring marks the centre, where the ship
+   flies straight, and a line runs from it to the pointer. */
 export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [nearest, setNearest] = useState('')
   const [altitude, setAltitude] = useState(-1)
   const [speed, setSpeed] = useState(0)
   const [hint, setHint] = useState(true)
   const [touch, setTouch] = useState(false)
+  const guide = useRef<SVGSVGElement>(null)
+  const guideLine = useRef<SVGLineElement>(null)
 
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches
@@ -38,7 +42,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         return
       }
       const k = key(event)
-      if (['w', 'a', 's', 'd', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
+      if (['w', 'a', 's', 'd', 'q', 'e', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
         event.preventDefault()
         pilot.keys.add(k === ' ' ? 'w' : k)
       }
@@ -54,6 +58,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       if (event.pointerType === 'mouse') {
         pilot.steer.x = (event.clientX / window.innerWidth) * 2 - 1
         pilot.steer.y = (event.clientY / window.innerHeight) * 2 - 1
+        guide.current?.classList.add('is-on')
+        guideLine.current?.setAttribute('x2', String(event.clientX))
+        guideLine.current?.setAttribute('y2', String(event.clientY))
       } else if (dragFrom) {
         // touch: steer by dragging from where the finger landed
         pilot.steer.x = Math.max(-1, Math.min(1, (event.clientX - dragFrom.x) / 110))
@@ -98,6 +105,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
 
   return (
     <div className="flight-hud">
+      {!touch && (
+        <svg ref={guide} className="flight-guide" aria-hidden="true">
+          <circle cx="50%" cy="50%" r="18" />
+          <line ref={guideLine} x1="50%" y1="50%" x2="50%" y2="50%" />
+        </svg>
+      )}
       <div className="flight-readout" aria-live="polite">
         <span className="flight-near">
           {altitude >= 0 ? `${nearest} · ${formatAltitude(altitude)}` : `Near ${nearest}`}
@@ -110,7 +123,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly'
-          : 'Steer with the mouse · hold W or click to fly · Shift to boost · Esc to land'}
+          : 'Steer with the mouse or arrows · W or click to fly, S to slow · Q E roll · Shift boost · Esc lands'}
       </p>
 
       {touch && (

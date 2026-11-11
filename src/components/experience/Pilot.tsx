@@ -13,9 +13,11 @@ import { pilot } from './pilotState'
 /* ============================================================
    FLIGHT MODE
    A small jet you fly through the Solar System. The camera rides behind
-   it; steering follows the mouse (or a drag on touch screens), W / Up
-   (or the on-screen button) gives thrust, S / Down brakes, A D or the
-   arrows turn, Shift boosts.
+   it. The mouse (or a drag on touch screens, or a gamepad's stick)
+   steers: its offset from the centre of the screen sets how fast the
+   ship turns. W (or a click held, or the Thrust button) speeds up and
+   the speed holds; S slows; A D and the arrows turn and pitch, Q E roll,
+   Shift boosts. Near a planet the wings level to its horizon.
 
    Scale: the ship is tiny next to the worlds (Earth is about 115 ship
    lengths across, Jupiter about 1,250), so from the cockpit the planets
@@ -41,6 +43,29 @@ const _camPos = new THREE.Vector3()
 const _turn = new THREE.Quaternion()
 const _axis = new THREE.Vector3()
 const _bodyCenter = new THREE.Vector3()
+const _levelUp = new THREE.Vector3()
+const _targetRates = new THREE.Vector3()
+const _wanted = new THREE.Vector3()
+
+/* the first connected gamepad, if any: left stick steers, right trigger
+   gives thrust, left trigger brakes, the bumpers roll, A boosts */
+const NO_PAD = { x: 0, y: 0, roll: 0, thrust: 0, brake: 0, boost: false }
+function readGamepad() {
+  if (typeof navigator === 'undefined' || !navigator.getGamepads) return NO_PAD
+  for (const pad of navigator.getGamepads()) {
+    if (!pad || !pad.connected) continue
+    const button = (i: number) => pad.buttons[i]?.value ?? 0
+    return {
+      x: pad.axes[0] ?? 0,
+      y: pad.axes[1] ?? 0,
+      roll: button(5) - button(4),
+      thrust: button(7),
+      brake: button(6),
+      boost: button(0) > 0.5,
+    }
+  }
+  return NO_PAD
+}
 
 /* a hull texture: light grey panels, fine panel lines, an accent stripe
    and a few small markings, drawn once on a canvas */
@@ -519,6 +544,8 @@ export default function Pilot() {
   const speed = useRef(0)
   const thrust = useRef(0)
   const bank = useRef(0)
+  const rates = useRef(new THREE.Vector3()) // pitch, yaw, roll (rad/s)
+  const velocity = useRef(new THREE.Vector3())
   const savedFov = useRef(40)
   const savedNear = useRef(0.08)
   const camOffset = useRef(new THREE.Vector3(0, SHIP_LENGTH, SHIP_LENGTH * 3))
@@ -552,6 +579,8 @@ export default function Pilot() {
       jet.position.copy(camera.position).addScaledVector(_forward, SHIP_LENGTH * 4)
       jet.quaternion.copy(camera.quaternion)
       speed.current = 0
+      rates.current.set(0, 0, 0)
+      velocity.current.set(0, 0, 0)
       camOffset.current.copy(camera.position).sub(jet.position)
     }
     jet.visible = true
@@ -580,66 +609,130 @@ export default function Pilot() {
     // altitude in km, at the planets' scale (the Sun is not drawn to it)
     pilot.altitudeKm = nearestIndex >= 0 ? clearance * KM_PER_UNIT : -1
 
-    // ---- controls
+    // ---- controls: keys, mouse or touch, and a gamepad if one is in use
     const keys = pilot.keys
-    const forwardKey = keys.has('w') || keys.has('arrowup') || pilot.touchThrust
-    const brakeKey = keys.has('s') || keys.has('arrowdown')
-    const boost = keys.has('shift')
-    const turnLeft = keys.has('a') || keys.has('arrowleft')
-    const turnRight = keys.has('d') || keys.has('arrowright')
+    const pad = readGamepad()
+    const forwardKey = keys.has('w') || pilot.touchThrust || pad.thrust > 0.2
+    const brakeKey = keys.has('s') || pad.brake > 0.2
+    const boost = keys.has('shift') || pad.boost
+    // stick-like input, -1..1: a soft centre for fine corrections, full
+    // deflection for hard turns
+    const shape = (v: number, dead: number) => {
+      const a = Math.abs(v)
+      if (a < dead) return 0
+      return Math.sign(v) * Math.min(1, ((a - dead) / (1 - dead)) ** 1.6)
+    }
+    const steerX = THREE.MathUtils.clamp(
+      shape(pilot.steer.x, 0.06) + shape(pad.x, 0.12) + (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0),
+      -1,
+      1,
+    )
+    const steerY = THREE.MathUtils.clamp(
+      shape(pilot.steer.y, 0.06) + shape(pad.y, 0.12) + (keys.has('arrowdown') ? 1 : 0) - (keys.has('arrowup') ? 1 : 0),
+      -1,
+      1,
+    )
+    const rollInput = (keys.has('e') ? 1 : 0) - (keys.has('q') ? 1 : 0) + pad.roll
 
-    // a crawl near surfaces, fast in open space
+    // ---- speed: W speeds up and the speed holds when released, S slows;
+    // the limit follows the distance to the nearest surface
     const limit = THREE.MathUtils.clamp(clearance * 0.7, SHIP_LENGTH * 0.8, 40) * (boost ? 4 : 1)
     const target = forwardKey ? limit : brakeKey ? 0 : Math.min(speed.current, limit)
-    speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : 2.5)))
+    speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : brakeKey ? 2.2 : 3)))
     thrust.current += ((forwardKey ? (boost ? 1 : 0.7) : 0.08) - thrust.current) * (1 - Math.exp(-delta * 6))
     pilot.speed = THREE.MathUtils.clamp(speed.current / limit, 0, 1)
 
-    // steering: mouse offset (with a small dead zone) plus keys
-    const dead = (v: number) => (Math.abs(v) < 0.08 ? 0 : (v - Math.sign(v) * 0.08) / 0.92)
-    const yaw = -dead(pilot.steer.x) * 1.3 + (turnLeft ? 1.1 : 0) - (turnRight ? 1.1 : 0)
-    const pitch = -dead(pilot.steer.y) * 1.0
+    // ---- which way is "up": away from the planet when near one (so its
+    // horizon stays level), the ecliptic's north out in open space
+    _axis.copy(jet.position).sub(_bodyPos)
+    const fromCentre = _axis.length()
+    _axis.divideScalar(fromCentre)
+    const nearWeight = 1 - THREE.MathUtils.smoothstep(fromCentre / nearestRadius, 1.6, 4)
+    _levelUp.set(0, 1, 0).lerp(_axis, nearWeight).normalize()
 
-    _up.set(0, 1, 0).applyQuaternion(jet.quaternion)
-    _right.set(1, 0, 0).applyQuaternion(jet.quaternion)
-    _turn.setFromAxisAngle(_up, yaw * delta)
-    jet.quaternion.premultiply(_turn)
-    _turn.setFromAxisAngle(_right, pitch * delta)
-    jet.quaternion.premultiply(_turn)
-    // gently level the wings when not turning
+    // ---- turning: the inputs set turn rates, which the ship reaches
+    // quickly but not instantly, so it has weight without lag
     _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
     _right.set(1, 0, 0).applyQuaternion(jet.quaternion)
-    _turn.setFromAxisAngle(_forward, _right.y * delta * 1.5)
+    _up.set(0, 1, 0).applyQuaternion(jet.quaternion)
+    // levels the wings when not rolling (less so when pointing straight up
+    // or down, where "level" has no meaning)
+    const vertical = Math.abs(_forward.dot(_levelUp))
+    // (the full roll angle, so it rights itself even from upside down)
+    const rollAngle = Math.atan2(_right.dot(_levelUp), _up.dot(_levelUp))
+    const level = rollInput === 0 ? THREE.MathUtils.clamp(rollAngle * 2.2, -2.2, 2.2) * (1 - vertical) : 0
+    // close to the ground, the nose is eased up rather than flown in
+    const minimum = nearestRadius * 1.065 + SHIP_LENGTH * 2
+    const soft = Math.max(nearestRadius * 0.04, SHIP_LENGTH * 2.5)
+    const closeness = 1 - THREE.MathUtils.clamp((fromCentre - minimum) / soft, 0, 1)
+    const diving = Math.max(0, -_forward.dot(_axis))
+    const pullUp = closeness * diving * 2.5
+
+    _targetRates.set(
+      -steerY * 1.15, // pitch: nose up is positive
+      -steerX * 1.25, // yaw
+      rollInput * 1.8 + level, // roll: right wing down is positive
+    )
+    rates.current.lerp(_targetRates, 1 - Math.exp(-delta * 7))
+    const [pitchInput, yawRate, rollRate] = rates.current.toArray()
+    // the ground's pull-up acts at once (not smoothed), so it stops the
+    // moment the nose reaches the horizon instead of overshooting it
+    const pitchRate = pitchInput + pullUp
+    // a turn also rolls the ship a little into it, as a plane does
+    _turn.setFromAxisAngle(_up, yawRate * delta)
+    jet.quaternion.premultiply(_turn)
+    _turn.setFromAxisAngle(_right, pitchRate * delta)
+    jet.quaternion.premultiply(_turn)
+    _turn.setFromAxisAngle(_forward, rollRate * delta)
     jet.quaternion.premultiply(_turn).normalize()
 
-    // ---- move, and stay out of solid bodies (skimming is allowed)
+    // ---- moving: the ship carries its momentum, so it slides a little
+    // through hard turns before the new heading takes over
     _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
-    jet.position.addScaledVector(_forward, speed.current * delta)
-    // the closest approach: 6.5% of the radius, some 410 km over Earth,
-    // the height the Space Station flies (fine detail fills in below the maps)
-    const minimum = nearestRadius * 1.065 + SHIP_LENGTH * 2
-    const offset = _axis.copy(jet.position).sub(_bodyPos)
-    if (offset.length() < minimum) {
-      jet.position.copy(_bodyPos).addScaledVector(offset.normalize(), minimum)
-      speed.current *= 0.5
-    }
+    _wanted.copy(_forward).multiplyScalar(speed.current)
+    velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 3.2))
+    jet.position.addScaledVector(velocity.current, delta)
 
-    // ---- the chase camera, banking into turns
-    bank.current += (THREE.MathUtils.clamp(yaw * 0.45, -0.6, 0.6) - bank.current) * (1 - Math.exp(-delta * 3))
+    // ---- the ground: never closer than 6.5% of the radius (some 410 km
+    // over Earth, the Space Station's height). Nearing it, the descent is
+    // taken out of the motion smoothly; nothing bounces.
+    _axis.copy(jet.position).sub(_bodyPos)
+    const height = _axis.length()
+    _axis.divideScalar(height)
+    const sink = velocity.current.dot(_axis)
+    if (sink < 0) {
+      const near = 1 - THREE.MathUtils.clamp((height - minimum) / soft, 0, 1)
+      velocity.current.addScaledVector(_axis, -sink * near)
+    }
+    if (height < minimum) jet.position.copy(_bodyPos).addScaledVector(_axis, minimum)
+
+    // ---- the chase camera: behind and above, swinging a little wide in
+    // turns, looking slightly into them, and banking with the ship
+    const bankTarget = THREE.MathUtils.clamp(yawRate * 0.42, -0.65, 0.65)
+    bank.current += (bankTarget - bank.current) * (1 - Math.exp(-delta * 4))
     _up.set(0, 1, 0).applyQuaternion(jet.quaternion)
-    // the camera keeps its distance at any speed: only its offset around
-    // the jet is smoothed (so it swings gently behind in turns)
-    _camPos.set(0, 0, 0).addScaledVector(_forward, -SHIP_LENGTH * 3.2).addScaledVector(_up, SHIP_LENGTH * 0.85)
+    _right.set(1, 0, 0).applyQuaternion(jet.quaternion)
+    _camPos
+      .set(0, 0, 0)
+      .addScaledVector(_forward, -SHIP_LENGTH * 3.2)
+      .addScaledVector(_up, SHIP_LENGTH * (0.85 + pitchRate * 0.12))
+      .addScaledVector(_right, SHIP_LENGTH * yawRate * 0.35)
     camOffset.current.lerp(_camPos, 1 - Math.exp(-delta * 6))
     camera.position.copy(jet.position).add(camOffset.current)
-    _camTarget.copy(jet.position).addScaledVector(_forward, SHIP_LENGTH * 6)
+    _camTarget
+      .copy(jet.position)
+      .addScaledVector(_forward, SHIP_LENGTH * 6)
+      .addScaledVector(_right, -SHIP_LENGTH * yawRate * 0.9)
+      .addScaledVector(_up, SHIP_LENGTH * pitchRate * 0.5)
     camera.up.copy(_up)
     camera.lookAt(_camTarget)
     camera.rotateZ(-bank.current * 0.35)
     camera.up.set(0, 1, 0)
 
-    // the jet itself leans into the turn
-    jet.children[0].rotation.z = bank.current
+    // the ship itself leans into the turn, and its nose follows the pitch
+    const model = jet.children[0]
+    model.rotation.z = bank.current
+    model.rotation.x += (pitchRate * 0.06 - model.rotation.x) * (1 - Math.exp(-delta * 4))
 
     // a wider lens at speed
     const fov = 52 + pilot.speed * (boost ? 16 : 8)
