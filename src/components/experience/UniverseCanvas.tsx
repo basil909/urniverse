@@ -1200,13 +1200,27 @@ void main() {
   float along = 0.28 + 0.72 * exp(-pow(fromCentre / 1.25, 2.0));
   float bulge = exp(-pow(l / 0.42, 2.0) - pow(b / 0.16, 2.0));
   float clouds = skyFbm(gal * 7.0);
-  float rift = smoothstep(0.42, 0.68, skyFbm(gal * vec3(11.0, 11.0, 26.0) + 4.0))
-    * exp(-pow((b + 0.012) / 0.038, 2.0))
-    * (1.0 - smoothstep(0.6, 2.4, fromCentre));
+  /* dark nebulae where they really are: the Great Rift, running just north
+     of the plane from Cygnus (l ~ 80) down to Sagittarius (l ~ -10), and
+     the Coalsack beside the Southern Cross (l 301, b -1) */
+  float riftSpan = smoothstep(-0.25, -0.05, l) * (1.0 - smoothstep(1.25, 1.45, l));
+  float riftCentre = 0.03 + 0.015 * sin(l * 3.0);
+  float rift = riftSpan * exp(-pow((b - riftCentre) / 0.03, 2.0))
+    * (0.55 + 0.45 * smoothstep(0.35, 0.65, skyFbm(gal * vec3(12.0, 12.0, 30.0) + 4.0)));
+  vec2 coalsack = vec2(l + 1.0367, b + 0.0175);
+  rift = max(rift, exp(-dot(coalsack, coalsack) / 0.0036));
   vec3 tint = mix(vec3(0.6, 0.68, 0.92), vec3(1.0, 0.83, 0.62), exp(-pow(fromCentre / 0.9, 2.0)));
+  /* the bright star clouds: Sagittarius (l 2, b -4), Scutum (l 27, b -2.5),
+     Cygnus (l 75, b 1) and Carina (l -73, b -1) */
+  vec2 sgr = vec2(l - 0.035, b + 0.07);
+  vec2 sct = vec2(l - 0.47, b + 0.044);
+  vec2 cyg = vec2(l - 1.31, b - 0.017);
+  vec2 car = vec2(l + 1.27, b + 0.017);
+  float starClouds = exp(-dot(sgr, sgr) / 0.004) * 1.1 + exp(-dot(sct, sct) / 0.0025) * 0.8
+    + exp(-dot(cyg, cyg) / 0.006) * 0.6 + exp(-dot(car, car) / 0.006) * 0.6;
   /* clumpy, not a flat haze: star clouds stand out, gaps stay dark */
   float clumps = smoothstep(0.35, 0.8, clouds);
-  float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 1.2) * (1.0 - rift * 0.85);
+  float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 1.2 + starClouds) * (1.0 - rift * 0.85);
   sky = sky * (1.0 - rift * 0.6 * band) + tint * glow * 0.022;
 
   gl_FragColor = vec4(sky * uIntensity, 1.0);

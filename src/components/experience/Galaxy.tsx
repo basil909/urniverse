@@ -134,6 +134,7 @@ const starVertexShader = /* glsl */ `
 const starFragmentShader = /* glsl */ `
   varying vec3 vColor;
   varying float vFade;
+  uniform float uFade;
 
   void main() {
     float d =
@@ -163,7 +164,7 @@ const starFragmentShader = /* glsl */ `
     gl_FragColor =
       vec4(
         vColor,
-        alpha * vFade
+        alpha * vFade * uFade
       );
   }
 `
@@ -882,7 +883,10 @@ export default function Galaxy({
       }),
     [],
   )
-  const glowStrength = useRef(0.14)
+  const glowStrength = useRef(0)
+  const dustMaterial = useRef<THREE.PointsMaterial>(null)
+  const clusterMaterial = useRef<THREE.PointsMaterial>(null)
+  const coreMaterial = useRef<THREE.SpriteMaterial>(null)
   useEffect(() => () => glowMaterial.dispose(), [glowMaterial])
 
   /* ==========================================================
@@ -905,6 +909,10 @@ export default function Galaxy({
 
           uPixelRatio: {
             value: 1,
+          },
+
+          uFade: {
+            value: 0,
           },
         },
 
@@ -971,13 +979,20 @@ export default function Galaxy({
     galaxy.current.rotation.y +=
       delta * 0.004
 
-    // the glow is a quiet backdrop until the finale, where it is the subject
-    if (progressRef) {
-      const target = (progressRef.current ?? 0) > 10.6 ? 0.6 : 0.14
-      glowStrength.current +=
-        (target - glowStrength.current) * (1 - Math.exp(-delta * 1.5))
-      glowMaterial.uniforms.uStrength.value = glowStrength.current
-    }
+    /* We live inside the Milky Way, so it can never hang in our sky as a
+       spiral: the model appears only as the camera pulls out of the galaxy
+       in the finale (and leaves again on the way home). */
+    const progress = progressRef ? progressRef.current ?? 0 : 11.5
+    const fade =
+      THREE.MathUtils.smoothstep(progress, 11.0, 11.12) *
+      (1 - THREE.MathUtils.smoothstep(progress, 12.0, 12.12))
+    galaxy.current.visible = fade > 0.001
+    glowStrength.current = 0.6 * fade
+    glowMaterial.uniforms.uStrength.value = glowStrength.current
+    starMaterial.uniforms.uFade.value = fade
+    if (dustMaterial.current) dustMaterial.current.opacity = 0.42 * fade
+    if (clusterMaterial.current) clusterMaterial.current.opacity = 0.2 * fade
+    if (coreMaterial.current) coreMaterial.current.opacity = 0.14 * fade
 
     // marker shows only once the camera has settled on the galaxy
     if (marker.current && progressRef) {
@@ -1050,6 +1065,7 @@ export default function Galaxy({
             frustumCulled // skipped entirely when the galaxy is off-screen
           >
             <pointsMaterial
+              ref={dustMaterial}
               fog={false}
               map={softDot}
               color="#020205"
@@ -1078,6 +1094,7 @@ export default function Galaxy({
             frustumCulled // skipped entirely when the galaxy is off-screen
           >
             <pointsMaterial
+              ref={clusterMaterial}
               fog={false}
               map={softDot}
               color="#dcecff"
@@ -1103,6 +1120,7 @@ export default function Galaxy({
             renderOrder={-2}
           >
             <spriteMaterial
+              ref={coreMaterial}
               map={softDot}
               color="#ffdca8"
               opacity={0.14}

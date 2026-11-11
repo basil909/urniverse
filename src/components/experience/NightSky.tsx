@@ -98,25 +98,34 @@ const LINES: [string, string][] = [
   ['Sirius', 'Mirzam'], ['Sirius', 'Adhara'], ['Adhara', 'Wezen'], ['Sirius', 'Wezen'],
 ]
 
-/* Deep-sky objects at their true positions (J2000). Shown brighter and a
-   little larger than the naked eye sees them, as in long-exposure photos.
+/* Deep-sky objects at their true positions (J2000) and true apparent
+   sizes (catalogue dimensions). Brightness follows how visible each one
+   really is: the Magellanic Clouds, the Carina and Orion nebulae and the
+   Andromeda Galaxy are naked-eye objects under a dark sky; the Rosette,
+   Eagle and North America nebulae show only in long exposures, so they
+   are faint here. Colours are those of long-exposure photographs (to the
+   eye, nebulae look grey).
    kind: 0 emission nebula, 1 spiral galaxy, 2 ring nebula, 3 irregular galaxy.
-   [name, RA h, Dec deg, radius deg, axis ratio, position angle deg,
-    kind, inner colour, outer colour, brightness] */
+   [name, RA h, Dec deg, true radius deg (half the major axis), axis ratio,
+    position angle deg, kind, inner colour, outer colour, visibility] */
 type DeepSkyObject = [string, number, number, number, number, number, number, string, string, number]
 
 const DEEP_SKY: DeepSkyObject[] = [
-  ['Orion Nebula', 5.588, -5.39, 1.3, 0.85, 20, 0, '#b8e4ff', '#e8708f', 0.75],
-  ['Carina Nebula', 10.752, -59.87, 3.0, 0.8, 70, 0, '#ffd8a8', '#e8607a', 0.75],
-  ['Lagoon Nebula', 18.06, -24.38, 1.4, 0.6, 80, 0, '#ffe0ec', '#e86c8c', 0.7],
-  ['Eagle Nebula', 18.313, -13.79, 1.1, 0.9, 0, 0, '#9fe0d0', '#e07a8a', 0.5],
-  ['Rosette Nebula', 6.53, 4.95, 1.2, 1.0, 0, 2, '#f39aa6', '#d9566e', 0.42],
-  ['North America Nebula', 20.98, 44.33, 2.0, 0.8, 30, 0, '#ffb0b8', '#d95670', 0.5],
-  ['Andromeda Galaxy', 0.712, 41.27, 3.4, 0.32, 35, 1, '#fff0d8', '#aab8ff', 0.9],
-  ['Large Magellanic Cloud', 5.392, -69.76, 6.5, 0.75, 170, 3, '#ecefff', '#b9c3ff', 0.8],
-  ['Tarantula Nebula', 5.645, -69.1, 1.0, 1.0, 0, 0, '#ffe2ec', '#ff5f8a', 0.9],
-  ['Small Magellanic Cloud', 0.877, -72.83, 3.5, 0.55, 45, 3, '#eef0ff', '#b8c2ff', 0.65],
+  ['Orion Nebula', 5.588, -5.39, 0.71, 0.7, 20, 0, '#b8e4ff', '#e8708f', 0.8],
+  ['Carina Nebula', 10.752, -59.87, 1.0, 0.85, 70, 0, '#ffd8a8', '#e8607a', 0.8],
+  ['Lagoon Nebula', 18.06, -24.38, 0.75, 0.45, 80, 0, '#ffe0ec', '#e86c8c', 0.55],
+  ['Eagle Nebula', 18.313, -13.82, 0.5, 0.8, 0, 0, '#9fe0d0', '#e07a8a', 0.22],
+  ['Rosette Nebula', 6.532, 4.95, 0.65, 1.0, 0, 2, '#f39aa6', '#d9566e', 0.2],
+  ['North America Nebula', 20.988, 44.52, 1.0, 0.83, 30, 0, '#ffb0b8', '#d95670', 0.25],
+  ['Andromeda Galaxy', 0.712, 41.27, 1.6, 0.32, 35, 1, '#fff0d8', '#aab8ff', 0.65],
+  ['Large Magellanic Cloud', 5.393, -69.75, 5.4, 0.85, 170, 3, '#ecefff', '#b9c3ff', 0.75],
+  ['Tarantula Nebula', 5.644, -69.1, 0.35, 1.0, 0, 0, '#ffe2ec', '#ff5f8a', 0.55],
+  ['Small Magellanic Cloud', 0.879, -72.83, 2.7, 0.64, 45, 3, '#eef0ff', '#b8c2ff', 0.55],
 ]
+
+/* the drawn shapes fade out before their quad's edge: the quad is made a
+   little larger than the object so its visible extent matches the true size */
+const DEEP_QUAD_SCALE = 1.6
 
 const DEEP_VERTEX = /* glsl */ `
 attribute vec2 aCorner;
@@ -340,7 +349,7 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
       skyDirection(ra, dec, center)
       east.crossVectors(pole, center).normalize()
       north.crossVectors(center, east).normalize()
-      const half = Math.tan((radius * Math.PI) / 180) * SKY_RADIUS * 0.99
+      const half = Math.tan((radius * DEEP_QUAD_SCALE * Math.PI) / 180) * SKY_RADIUS * 0.99
       const ci = new THREE.Color(a)
       const co = new THREE.Color(b)
       corners.forEach(([x, y], k) => {
