@@ -23,6 +23,17 @@ const SEGMENTS = 200
 /** the finest ring, in planet radii (about a metre on Earth) */
 const INNER = 1.5e-7
 
+/* the sea's wave trains (Earth; Titan's lakes, far calmer): wavelength,
+   steepness (slope), and a fixed direction on the globe */
+const WAVES = [
+  { lengthKm: 0.16, steep: 0.07, dir: new THREE.Vector3(0.62, 0.21, -0.75).normalize() },
+  { lengthKm: 0.085, steep: 0.08, dir: new THREE.Vector3(-0.31, 0.55, -0.77).normalize() },
+  { lengthKm: 0.043, steep: 0.09, dir: new THREE.Vector3(0.81, -0.42, 0.41).normalize() },
+  { lengthKm: 0.021, steep: 0.1, dir: new THREE.Vector3(-0.66, -0.2, 0.72).normalize() },
+  { lengthKm: 0.0105, steep: 0.11, dir: new THREE.Vector3(0.12, 0.93, 0.35).normalize() },
+  { lengthKm: 0.0052, steep: 0.12, dir: new THREE.Vector3(0.45, 0.3, 0.84).normalize() },
+]
+
 const TERRAIN_VERTEX = /* glsl */ `
 attribute vec2 aPolar; // ring position 0..1, angle
 uniform vec3 uC; uniform vec3 uE1; uniform vec3 uE2;
@@ -30,6 +41,7 @@ uniform float uH0; uniform float uSmin; uniform float uSmax;
 uniform vec3 uSunL;
 varying vec3 vDir; varying vec3 vNormalL; varying vec3 vViewPos; varying float vEdge;
 varying vec3 vUpView; varying vec3 vSunView;
+varying vec3 vRelP; varying vec3 vEastView; varying vec3 vNorthView;
 ${GROUND_GLSL}
 void main() {
   float t = aPolar.x;
@@ -58,6 +70,10 @@ void main() {
   // relative to the patch's centre, written to stay exact for small s
   float hs = sin(0.5 * s);
   vec3 rel = uC * ((h - uH0) - (1.0 + h) * 2.0 * hs * hs) + T * (1.0 + h) * sn;
+  vRelP = rel;
+  vec3 eastL = normalize(cross(vec3(0.0, 1.0, 0.0), dir) + vec3(1e-7, 0.0, 0.0));
+  vEastView = normalize(normalMatrix * eastL);
+  vNorthView = normalize(normalMatrix * cross(dir, eastL));
   vec4 mv = modelViewMatrix * vec4(rel, 1.0);
   vViewPos = mv.xyz;
   gl_Position = projectionMatrix * mv;
@@ -96,6 +112,42 @@ float shipShade(vec3 p, vec3 sun) {
 }
 varying vec3 vDir; varying vec3 vNormalL; varying vec3 vViewPos; varying float vEdge;
 varying vec3 vUpView; varying vec3 vSunView;
+varying vec3 vRelP; varying vec3 vEastView; varying vec3 vNorthView;
+uniform vec3 uWaveK[6]; uniform float uWavePhase[6]; uniform float uWaveSteep[6]; uniform float uRadiusKm;
+uniform float uLakes;
+/* the sea's surface: six trains of waves, from a long swell to wind chop,
+   moving at deep-water speeds (their phases kept exact on the CPU); each
+   fades out once it is finer than a pixel, and what is lost to sight
+   roughens the water instead, widening the Sun's glint into glitter.
+   Returns the slope (east, north) and the unresolved roughness. */
+vec3 seaSlope(vec3 d) {
+  vec3 p = vRelP * uRadiusKm;
+  float px = length(fwidth(p));
+  vec3 eastL = normalize(cross(vec3(0.0, 1.0, 0.0), d) + vec3(1e-7, 0.0, 0.0));
+  vec3 northL = cross(d, eastL);
+  vec3 g = vec3(0.0);
+  float rough = 0.0;
+  for (int i = 0; i < 6; i++) {
+    vec3 K = uWaveK[i];
+    float lambda = 6.2831853 / length(K);
+    float seen = 1.0 - smoothstep(lambda * 0.12, lambda * 0.5, px);
+    g += normalize(K) * cos(uWavePhase[i] + dot(p, K)) * uWaveSteep[i] * seen;
+    rough += uWaveSteep[i] * (1.0 - seen);
+  }
+  return vec3(dot(g, eastL), dot(g, northL), rough);
+}
+vec3 waterShade(vec3 base, vec3 nView, float lit, float rough, float daylight) {
+  vec3 viewDir = normalize(-vViewPos);
+  vec3 sunView = normalize(vSunView);
+  float cosv = max(dot(nView, viewDir), 0.0);
+  float fres = 0.02 + 0.98 * pow(1.0 - cosv, 5.0);
+  vec3 sky = uSky * uSkyLight * daylight * 1.3;
+  vec3 h = normalize(sunView + viewDir);
+  float power = mix(1400.0, 60.0, clamp(rough / 0.35, 0.0, 1.0));
+  float spec = pow(max(dot(nView, h), 0.0), power) * (power + 2.0) / 8.0 * 0.06;
+  vec3 deep = base * 0.85 * (0.05 + lit * uLight);
+  return mix(deep, sky, fres) + vec3(1.0, 0.93, 0.8) * spec * lit * uLight;
+}
 ${GROUND_GLSL}
 ${CLOSE_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
@@ -135,14 +187,25 @@ void main() {
   if (uEarth > 0.5) lit *= 1.0 - 0.8 * cloudShade(d, uSunL);
   // sunlight, plus light from the sky itself (none on airless Mercury)
   vec3 color = base * (vec3(0.02) + lit * uLight * uLightTint + uSky * uSkyLight * day * (0.6 + 0.4 * dot(n, d)));
-  // Earth's sea: darker, with the Sun's glint
+  // Earth's sea: waves, the sky mirrored in it, the Sun's moving glint
   if (uEarth > 0.5 && land < 0.99) {
-    vec3 viewDir = normalize(-vViewPos);
-    vec3 nView = normalize(vUpView);
-    vec3 sunView = normalize(vSunView);
-    float glint = pow(max(dot(reflect(-sunView, nView), viewDir), 0.0), 220.0) * 3.0 + pow(max(dot(reflect(-sunView, nView), viewDir), 0.0), 18.0) * 0.12;
-    vec3 sea = base * 0.85 * (0.05 + lit * uLight) + vec3(1.0, 0.93, 0.8) * glint * lit;
+    vec3 slope = seaSlope(d);
+    vec3 nView = normalize(normalize(vUpView) - slope.x * normalize(vEastView) - slope.y * normalize(vNorthView));
+    vec3 sea = waterShade(base, nView, lit, slope.z, day);
     color = mix(sea, color, land);
+  }
+  // Titan's seas of liquid methane and ethane, round its north pole: dark
+  // in the radar-like mosaic, mirror-smooth (winds barely ripple them)
+  if (uLakes > 0.5) {
+    float lum = dot(base, vec3(0.3, 0.5, 0.2)) / max(uAlbedo, 0.01);
+    float polar = smoothstep(0.78, 0.9, d.y);
+    float lake = polar * (1.0 - smoothstep(0.1, 0.17, lum));
+    if (lake > 0.0) {
+      vec3 slope = seaSlope(d) * 0.12;
+      vec3 nView = normalize(normalize(vUpView) - slope.x * normalize(vEastView) - slope.y * normalize(vNorthView));
+      vec3 liquid = waterShade(base * 0.3, nView, lit, 0.0, day);
+      color = mix(color, liquid, lake);
+    }
   }
   // Earth at night: its cities, from the ground as from orbit
   if (uEarth > 0.5 && uHasNight > 0.5) {
@@ -231,6 +294,7 @@ export default function Terrain({
   night?: () => THREE.Texture | null
 }) {
   const mesh = useRef<THREE.Mesh>(null)
+  const seaTime = useRef(0)
   const config = GROUND[index]
   const model = useMemo(() => new GroundModel(config), [config])
   const geometry = useMemo(terrainGeometry, [])
@@ -294,6 +358,11 @@ export default function Terrain({
           ...cloudVolume,
           ...earthGround,
           uEarthElev: { value: earth ? 1 : 0 },
+          uWaveK: { value: WAVES.map(() => new THREE.Vector3()) },
+          uWavePhase: { value: WAVES.map(() => 0) },
+          uWaveSteep: { value: WAVES.map((wave) => wave.steep) },
+          uRadiusKm: { value: config.radiusKm },
+          uLakes: { value: index === 17 ? 1 : 0 },
           uRadiusM: { value: config.radiusKm * 1000 },
         },
         vertexShader: TERRAIN_VERTEX,
@@ -359,6 +428,20 @@ export default function Terrain({
     u.uE1.value.copy(_e1)
     u.uE2.value.copy(_e2)
     u.uH0.value = h0
+    // the waves: their phase at the patch's centre, worked out in double
+    // precision (the shader adds the small part across the patch)
+    if (earth || index === 17) {
+      seaTime.current += delta
+      const g = index === 17 ? 1.35e-3 : 9.81e-3 // km/s^2: Titan's weak pull
+      WAVES.forEach((wave, i) => {
+        const k = (2 * Math.PI) / wave.lengthKm
+        u.uWaveK.value[i].copy(wave.dir).multiplyScalar(k)
+        const omega = Math.sqrt(g * k)
+        const centre = _c.x * wave.dir.x + _c.y * wave.dir.y + _c.z * wave.dir.z
+        const phase = centre * (1 + h0) * config.radiusKm * k - omega * seaTime.current
+        u.uWavePhase.value[i] = phase - Math.floor(phase / (2 * Math.PI)) * 2 * Math.PI
+      })
+    }
     u.uSmax.value = reach
     u.uGroundFade.value = fade
     u.uMap.value = map()
