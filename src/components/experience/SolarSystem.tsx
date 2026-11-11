@@ -38,6 +38,8 @@ import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
+import { cloudVolume } from './clouds'
+import CloudVolume from './CloudVolume'
 import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
@@ -2502,7 +2504,7 @@ function Planet({
 
             {/* clouds ride on Earth and drift slowly over it */}
             {planet.type === 'earth' && (
-              <EarthCloudLayer radius={1} texture={sharpClouds ?? earthClouds} />
+              <EarthCloudLayer radius={1} texture={sharpClouds ?? earthClouds} sun={planetSun} light={sunlight} />
             )}
 
             {planet.name === 'Earth' && earthMap ? (
@@ -2634,9 +2636,13 @@ function materialIsShader(
 function EarthCloudLayer({
   radius,
   texture,
+  sun,
+  light,
 }: {
   radius: number
   texture: THREE.Texture | null
+  sun: THREE.Vector3
+  light: { strength: number }
 }) {
   const cloud = useRef<THREE.Mesh>(null)
   const drift = useRef(0)
@@ -2645,6 +2651,7 @@ function EarthCloudLayer({
   useEffect(() => {
     earthNight.uClouds.value = texture
     earthNight.uHasClouds.value = texture ? 1 : 0
+    cloudVolume.uCloudMap.value = texture
   }, [texture])
 
   useFrame((state, delta) => {
@@ -2665,11 +2672,21 @@ function EarthCloudLayer({
     }
     earthNight.uCloudShift.value = drift.current / (Math.PI * 2)
     cloudDeck.shift = earthNight.uCloudShift.value
+    cloudVolume.uCloudShift.value = earthNight.uCloudShift.value
+    cloudVolume.uCloudMap.value = texture
+    // flying low, the flat deck gives way to the clouds in 3D
+    if (cloud.current) {
+      const flat = cloud.current.material as THREE.MeshPhongMaterial
+      flat.opacity = 0.85 * (1 - cloudVolume.uCloudOn.value)
+      cloud.current.visible = flat.opacity > 0.01
+    }
   })
 
   if (!texture) return null
 
   return (
+    <>
+    <CloudVolume sun={sun} light={light} />
     <mesh ref={cloud} scale={radius * (1 + CLOUD_HEIGHT_FAR)}>
       <sphereGeometry args={[1, 192, 192]} />
       <meshPhongMaterial
@@ -2683,6 +2700,7 @@ function EarthCloudLayer({
         onBeforeCompile={detailClouds}
       />
     </mesh>
+    </>
   )
 }
 

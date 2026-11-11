@@ -10,6 +10,7 @@ import { SURFACE_PATCH_GLSL, surfacePatch } from './surfaceTiles'
 import { aimEarthGround, earthElevation, earthGround, releaseEarthGround } from './earthTiles'
 import { sphereUv } from './groundState'
 import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, shipShadow } from './groundState'
+import { CLOUD_GLSL, cloudVolume } from './clouds'
 
 /* The patch of ground under the ship (see groundState.ts). A child of the
    planet's sphere, so it turns with it; its vertices are placed on the
@@ -98,6 +99,7 @@ varying vec3 vUpView; varying vec3 vSunView;
 ${GROUND_GLSL}
 ${CLOSE_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
+${CLOUD_GLSL}
 void main() {
   vec3 d = normalize(vDir);
   vec2 uv = gUv(d);
@@ -129,6 +131,8 @@ void main() {
   float day = smoothstep(-0.12, 0.08, sunUp);
   float lit = max(dot(n, uSunL), 0.0) * smoothstep(-0.05, 0.05, sunUp);
   lit *= 1.0 - 0.88 * shipShade(vViewPos, normalize(vSunView));
+  // Earth: the shadows of the clouds overhead
+  if (uEarth > 0.5) lit *= 1.0 - 0.8 * cloudShade(d, uSunL);
   // sunlight, plus light from the sky itself (none on airless Mercury)
   vec3 color = base * (vec3(0.02) + lit * uLight * uLightTint + uSky * uSkyLight * day * (0.6 + 0.4 * dot(n, d)));
   // Earth's sea: darker, with the Sun's glint
@@ -287,6 +291,7 @@ export default function Terrain({
           uHasNight: { value: 0 },
           ...surfacePatch,
           ...shipShadow,
+          ...cloudVolume,
           ...earthGround,
           uEarthElev: { value: earth ? 1 : 0 },
           uRadiusM: { value: config.radiusKm * 1000 },

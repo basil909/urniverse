@@ -28,6 +28,7 @@ import { pilot, VIEW_NEAR } from './pilotState'
 import { getShipPass, shipCamera, shipScene } from './shipLayer'
 import { cloudDeck, GROUND, ground, groundAltitude, groundLatLon, ringState, shipShadow, sphereUv } from './groundState'
 import { FEATURES } from './features'
+import { CLOUD_BASE_KM, CLOUD_TOP_KM } from './clouds'
 import {
   FIRST_CRAFT_ID,
   FIRST_STAR_ID,
@@ -2064,13 +2065,16 @@ export default function Pilot() {
     if (onGround && nearestIndex === 2 && ground.model) {
       _local.copy(camera.position).applyMatrix4(ground.inverse)
       const heightKm = (_local.length() - 1) * 6371
-      const deckKm = cloudDeck.height * 6371
-      const near = 1 - THREE.MathUtils.smoothstep(Math.abs(heightKm - deckKm), 0.35, 1.6)
-      if (near > 0) {
+      // inside the cloud layer, where the cover is thick enough to be in cloud
+      if (heightKm > CLOUD_BASE_KM - 0.3 && heightKm < CLOUD_TOP_KM) {
         _local.normalize()
         const [u, v] = sphereUv(_local)
         const cover = ground.model.cloudCover((((u - cloudDeck.shift) % 1) + 1) % 1, v)
-        pilot.mist = near * THREE.MathUtils.smoothstep(cover, 0.25, 0.75)
+        const topKm = CLOUD_BASE_KM + (CLOUD_TOP_KM - CLOUD_BASE_KM) * THREE.MathUtils.lerp(0.28, 1, THREE.MathUtils.smoothstep(cover, 0.4, 0.95)) * 0.8
+        const near =
+          THREE.MathUtils.smoothstep(heightKm, CLOUD_BASE_KM - 0.2, CLOUD_BASE_KM + 0.4) *
+          (1 - THREE.MathUtils.smoothstep(heightKm, topKm - 1, topKm))
+        pilot.mist = near * THREE.MathUtils.smoothstep(cover, 0.45, 0.85) * 0.85
         pilot.mistLight = THREE.MathUtils.smoothstep(_axis.dot(_toSun), -0.1, 0.25)
       }
     }
