@@ -134,10 +134,26 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         '#include <alphamap_fragment>',
         `#include <alphamap_fragment>
       float cloudCover = diffuseColor.a;
+      /* real cloud fields have firm edges: thin haze fades away, thick
+         cloud is solid (not a grey veil over the ground) */
+      diffuseColor.a = smoothstep(0.16, 0.66, cloudCover);
       {
         vec3 cd = closeDetail(normalize(vSurfaceP), 0.0, 1.0);
         diffuseColor.a *= clamp(1.0 + cd.y * 1.5, 0.0, 1.6);
         diffuseColor.rgb *= 1.0 + cd.y * 0.3;
+      }`,
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+      {
+        /* sunlit cloud tops are the brightest thing on Earth (albedo
+           ~0.7): lit by the Sun itself, warm near the day/night line */
+        float sunUp = dot(normalize(geometryNormal), normalize(uSunDirView));
+        float day = smoothstep(-0.08, 0.25, sunUp);
+        vec3 sunTint = mix(vec3(1.0, 0.55, 0.32), vec3(1.0), smoothstep(0.0, 0.3, sunUp));
+        reflectedLight.directDiffuse = diffuseColor.rgb * sunTint * day * 0.92;
+        reflectedLight.indirectDiffuse = diffuseColor.rgb * 0.015;
       }`,
       )
       .replace(
@@ -553,7 +569,7 @@ void main() {
   // it is faint beside it (as in photographs from orbit), so the planet
   // keeps its true colours instead of looking washed out
   float fromSpace = smoothstep(0.002, 0.03, camR - 1.0);
-  light *= mix(1.0, 0.3, fromSpace);
+  light *= mix(1.0, 0.16, fromSpace);
   // a soft exposure on brightness alone, so the colours keep their hue
   // (a sunset stays orange-red instead of washing to yellow)
   float lum = dot(light, vec3(0.2126, 0.7152, 0.0722));
@@ -573,8 +589,9 @@ void main() {
       color += (vec3(0.32, 1.0, 0.45) * green * 0.3 + vec3(1.0, 0.35, 0.25) * red * 0.04) * night;
     }
   }
-  // what lies behind is dimmed by the air in front of it
-  float alpha = 1.0 - dot(through, vec3(0.3333));
+  // what lies behind is dimmed by the air in front of it (eased from
+  // space with the glow, or the air greys the ground instead of veiling it)
+  float alpha = (1.0 - dot(through, vec3(0.3333))) * mix(1.0, 0.35, fromSpace);
   gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));
 }`
 
@@ -2767,7 +2784,7 @@ function EarthCloudLayer({
         color="#ffffff"
         alphaMap={texture}
         transparent
-        opacity={0.85}
+        opacity={0.95}
         depthWrite={false}
         shininess={0}
         side={THREE.DoubleSide}

@@ -1448,12 +1448,15 @@ export default function Pilot() {
     // (between the stars, thousands of AU from anything, the warp has no
     // ceiling: the nearest stars are light-years apart)
     const interstellar = clearance > 2000 * AU_UNITS
-    // Shift: up to 40 times light speed wherever you are (no ceiling
-    // between the stars); otherwise the limit follows the nearest surface
+    // Shift: warp, anywhere, up to 40 times light speed (no ceiling between
+    // the stars). It follows the distance to the nearest world, more
+    // loosely than plain flight: leaving a planet it builds and builds,
+    // closing on one it eases down, so you arrive instead of overshooting
+    // (and it never drops below a brisk ~2 km/s, even skimming the ground)
     const limit = boost
       ? interstellar
         ? Math.max(LIGHT * WARP, clearance * 1.5)
-        : LIGHT * WARP
+        : THREE.MathUtils.clamp(clearance * 2.5, SHIP_LENGTH * 50, LIGHT * WARP)
       : THREE.MathUtils.clamp(clearance * 0.5, SHIP_LENGTH * 0.8, LIGHT)
     const target = forwardKey ? limit : brakeKey ? 0 : Math.min(speed.current, limit)
     if (boost) {
