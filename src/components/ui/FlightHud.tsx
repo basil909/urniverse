@@ -814,10 +814,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         </span>
       </div>
 
-      {/* the clouds are yesterday's real ones: say so, near Earth */}
+      {/* the clouds and snow are yesterday's real ones: say so, near Earth */}
       {nearest === 'Earth' && altitude >= 300 && altitude < 60000 && cloudsDate && (
         <p className="flight-credit">
-          Clouds: NASA GIBS, VIIRS and MODIS true colour of {cloudsDate} (UTC)
+          Clouds and snow: NASA GIBS, VIIRS and MODIS of {cloudsDate} (UTC)
         </p>
       )}
       {/* credit for the streamed ground data, shown while it is on screen */}
@@ -825,6 +825,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         <p className="flight-credit">
           Imagery: Sentinel-2 cloudless 2016 by EOX (s2maps.eu), contains modified Copernicus Sentinel data ·
           Elevation: Terrain Tiles, AWS Open Data
+          {cloudsDate && ` · Clouds and snow: NASA GIBS, ${cloudsDate}`}
         </p>
       )}
 

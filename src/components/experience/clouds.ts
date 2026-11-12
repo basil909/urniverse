@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
+
 /* ============================================================
    EARTH'S CLOUDS IN 3D, FLYING LOW
    From orbit the clouds are a map on a shell. Coming down, the weather
@@ -24,9 +26,12 @@ export const cloudVolume = {
   uCloudOn: { value: 0 },
   /** samples for a cloud's shadow on the ground (fewer at lower quality) */
   uShadeSteps: { value: 5 },
+  // the sharp patch round the view (cloudPatch.ts)
+  ...cloudPatchUniforms,
 }
 
 export const CLOUD_GLSL = /* glsl */ `
+${CLOUD_PATCH_GLSL}
 uniform sampler2D uCloudMap; uniform float uCloudShift;
 uniform float uCloudBase; uniform float uCloudTop; uniform float uCloudOn; uniform int uShadeSteps;
 
@@ -47,13 +52,15 @@ float cNoise(vec3 p) {
 
 /* cover from the map, where the weather has drifted to; read a little
    off its true place by noise some 20 km across, so a map pixel (the
-   real-cloud map's are 16 km) never shows as a square cloud */
+   real-cloud map's are 16 km) never shows as a square cloud (much less
+   so where the sharp patch has the clouds' real shapes) */
 float cloudCoverAt(vec3 dir) {
   vec3 w = dir * 320.0;
-  dir = normalize(dir + (vec3(cNoise(w), cNoise(w + 5.2), cNoise(w + 9.7)) - 0.5) * 0.006);
+  float warp = uCloudPatchRect.z > 0.0 ? 0.0012 : 0.006;
+  dir = normalize(dir + (vec3(cNoise(w), cNoise(w + 5.2), cNoise(w + 9.7)) - 0.5) * warp);
   float u = fract(atan(dir.z, -dir.x) / 6.2831853 + 1.0 - uCloudShift);
   float v = 1.0 - acos(clamp(dir.y, -1.0, 1.0)) / 3.14159265;
-  return texture2D(uCloudMap, vec2(u, v)).g;
+  return cloudFromMaps(uCloudMap, vec2(u, v));
 }
 
 /* density 0..1 at a point (radii from Earth's centre); detail 0..1 */

@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { patchCover } from './cloudPatch'
+
 /* ============================================================
    TODAY'S CLOUDS
    Earth's weather as it really was yesterday: NASA's daily true-colour
@@ -48,6 +50,9 @@ export const earthToday = {
   ready: new Set<() => void>(),
   /** cloud cover 0..1 at a map position (u, v as three.js sphere UVs), or null */
   cover(u: number, v: number) {
+    // the sharp patch round the view first
+    const sharp = patchCover(u, v)
+    if (sharp !== null) return sharp
     const map = this.sampler
     if (!map) return null
     const x = Math.min(map.width - 1, Math.max(0, Math.floor(u * map.width)))

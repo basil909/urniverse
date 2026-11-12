@@ -39,6 +39,7 @@ import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
+import { aimCloudPatch, CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
 import { earthToday, loadEarthToday } from './earthToday'
 import { earthRelief, loadEarthRelief } from './earthRelief'
 import CloudVolume from './CloudVolume'
@@ -108,6 +109,9 @@ const _earthQuat = new THREE.Quaternion()
 const CLOUD_HEIGHT_FAR = 0.012
 const CLOUD_HEIGHT_NEAR = 0.0016
 const _cloudCentre = new THREE.Vector3()
+const _patchView = new THREE.Vector3()
+const _patchAt = new THREE.Vector3()
+const _patchAhead = new THREE.Vector3()
 
 /* ============================================================
    CLOSE-UP DETAIL
@@ -136,14 +140,16 @@ function withSurfaceVaryings(shader: THREE.WebGLProgramParametersWithUniforms) {
 
 /* Earth's clouds: fine wisps that break up the soft edges up close */
 function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime, ...cloudTops })
+  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime, ...cloudTops, ...cloudPatchUniforms })
   withSurfaceVaryings(shader)
   shader.fragmentShader =
     'uniform vec3 uSunDirView; uniform float uTime; uniform vec3 uSunLocal;\n' +
+    CLOUD_PATCH_GLSL +
     shader.fragmentShader
       .replace(
         '#include <alphamap_fragment>',
-        `#include <alphamap_fragment>
+        `/* the cloud map, sharp round the view where the patch has arrived */
+      diffuseColor.a *= cloudFromMaps(alphaMap, vAlphaMapUv);
       float cloudCover = diffuseColor.a;
       /* real cloud fields have firm edges: thin haze fades away, thick
          cloud is solid (not a grey veil over the ground) */
@@ -172,11 +178,11 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         float coslatL = max(length(P.xz), 0.15);
         float tall = ${(15 / 6371).toFixed(7)};
         vec2 texel = vec2(1.5 / 2560.0, 1.5 / 1280.0);
-        float hC = pow(texture2D(alphaMap, vAlphaMapUv).g, 2.5);
-        float hEast = pow(texture2D(alphaMap, vAlphaMapUv + vec2(texel.x, 0.0)).g, 2.5);
-        float hWest = pow(texture2D(alphaMap, vAlphaMapUv - vec2(texel.x, 0.0)).g, 2.5);
-        float hNorth = pow(texture2D(alphaMap, vAlphaMapUv + vec2(0.0, texel.y)).g, 2.5);
-        float hSouth = pow(texture2D(alphaMap, vAlphaMapUv - vec2(0.0, texel.y)).g, 2.5);
+        float hC = pow(cloudFromMaps(alphaMap, vAlphaMapUv), 2.5);
+        float hEast = pow(cloudFromMaps(alphaMap, vAlphaMapUv + vec2(texel.x, 0.0)), 2.5);
+        float hWest = pow(cloudFromMaps(alphaMap, vAlphaMapUv - vec2(texel.x, 0.0)), 2.5);
+        float hNorth = pow(cloudFromMaps(alphaMap, vAlphaMapUv + vec2(0.0, texel.y)), 2.5);
+        float hSouth = pow(cloudFromMaps(alphaMap, vAlphaMapUv - vec2(0.0, texel.y)), 2.5);
         float sx = (hEast - hWest) * tall / (2.0 * texel.x * 6.28318 * coslatL);
         float sy = (hNorth - hSouth) * tall / (2.0 * texel.y * 3.14159);
         vec3 nL = normalize(P - eastL * sx - northL * sy);
@@ -190,7 +196,7 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         float shadowed = 0.0;
         float dL = 0.0012;
         for (int k = 0; k < 5; k++) {
-          float hk = pow(texture2D(alphaMap, vAlphaMapUv + towardL * dL).g, 2.5) * tall;
+          float hk = pow(cloudFromMaps(alphaMap, vAlphaMapUv + towardL * dL), 2.5) * tall;
           shadowed = max(shadowed, smoothstep(0.0, tall * 0.15, hk - (hC * tall + dL * riseL)));
           dL *= 1.9;
         }
@@ -224,7 +230,7 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
 }
 
 function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, earthNight, surfacePatch, groundHole)
+  Object.assign(shader.uniforms, earthNight, surfacePatch, groundHole, cloudPatchUniforms)
   withSurfaceVaryings(shader)
   shader.fragmentShader =
     'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
@@ -234,7 +240,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
       // landed: the ground patch replaces the sphere here
       if (uHolePlanet == 2 && dot(normalize(vSurfaceP), uHoleDir) > uHoleCos) discard;`,
     )
-  shader.fragmentShader = SURFACE_PATCH_GLSL + shader.fragmentShader
+  shader.fragmentShader = SURFACE_PATCH_GLSL + CLOUD_PATCH_GLSL + shader.fragmentShader
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
 uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight; uniform float uAurora3D;
@@ -320,7 +326,7 @@ uniform sampler2D uRelief; uniform float uHasRelief; uniform sampler2D uSnow; un
           float reach = uCloudHeight / max(mu, 0.12);
           float coslat = max(cos((vMapUv.y - 0.5) * 3.14159), 0.15);
           vec2 shift = vec2(dot(along, east) / (6.28318 * coslat), dot(along, north) / 3.14159) * reach;
-          float cover = texture2D(uClouds, vMapUv + shift - vec2(uCloudShift, 0.0)).g;
+          float cover = cloudFromMaps(uClouds, vMapUv + shift - vec2(uCloudShift, 0.0));
           shade = 1.0 - cover * 0.55;
         }
         /* mountains near the day/night line: the light comes in low, and
@@ -2910,6 +2916,26 @@ function EarthCloudLayer({
       // near Earth: fetch yesterday's real clouds, and the globe's relief
       if (away < 12 && !earthToday.started) loadEarthToday()
       if (away < 12 && !earthRelief.started) loadEarthRelief()
+      // sharp clouds round where you are looking (yesterday's real ones only)
+      if (away < 1.35 && today) {
+        state.camera.getWorldDirection(_patchView)
+        _patchAt.copy(state.camera.position)
+        cloud.current.worldToLocal(_patchAt)
+        _patchAhead.copy(state.camera.position).add(_patchView)
+        cloud.current.worldToLocal(_patchAhead).sub(_patchAt)
+        const up = _patchAt.normalize()
+        // a little ahead of the point below, along the view
+        _patchAhead.addScaledVector(up, -_patchAhead.dot(up))
+        const altitudeKm = (away - 1) * 6371
+        if (_patchAhead.lengthSq() > 1e-12) {
+          _patchAhead.normalize()
+          const angle = Math.min((altitudeKm * 1.2) / 6371, 0.3)
+          up.multiplyScalar(Math.cos(angle)).addScaledVector(_patchAhead, Math.sin(angle))
+        }
+        const u = (Math.atan2(up.z, -up.x) / (2 * Math.PI) + 1) % 1
+        const lat = 90 - (Math.acos(THREE.MathUtils.clamp(up.y, -1, 1)) * 180) / Math.PI
+        aimCloudPatch(u * 360 - 180, lat, altitudeKm, earthToday.date)
+      } else aimCloudPatch(0, 0, 0, null)
       // the Sun's direction in the cloud layer's own frame (it turns)
       _sunLocal.copy(sun)
       cloud.current.worldToLocal(_sunLocal).normalize()
