@@ -22,6 +22,9 @@ export const pilot = {
   active: false,
   /** held keys */
   keys: new Set<string>(),
+  /** the ship's turn rates this frame (radians a second; pitch nose up,
+   * yaw nose left, roll right wing down): its moving parts follow them */
+  turn: { pitch: 0, yaw: 0, roll: 0 },
   /** steering, -1..1 each way (mouse offset from the centre, or a drag) */
   steer: { x: 0, y: 0 },
   /** on-screen thrust button (touch) */

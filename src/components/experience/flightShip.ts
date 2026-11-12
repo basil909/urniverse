@@ -13,6 +13,9 @@ export const SHIP_LENGTH = 0.03724 / KM_PER_UNIT
 /** the lowest you can fly, in planet radii: 1.0157 is 100 km over Earth,
     the edge of space */
 export const LOWEST = 1.0157
+/** standing on its wheels: the ship's centre this far above the ground,
+ * in ship lengths (the belly about 2 m up, as the real one stood) */
+export const ON_WHEELS = 0.195
 /** the speed of light, in scene units per second */
 export const LIGHT = 299792.458 / KM_PER_UNIT
 /** Shift: a warp no ship has, so the outer planets are not hours away */

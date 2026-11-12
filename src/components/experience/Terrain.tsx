@@ -12,6 +12,7 @@ import { sphereUv } from './groundState'
 import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, shipShadow } from './groundState'
 import { CLOUD_GLSL, cloudVolume } from './clouds'
 import { earthToday } from './earthToday'
+import { earthEclipse, MOON_SHADOW_GLSL } from './eclipse'
 
 /* The patch of ground under the ship (see groundState.ts). A child of the
    planet's sphere, so it turns with it; its vertices are placed on the
@@ -153,6 +154,7 @@ ${GROUND_GLSL}
 ${CLOSE_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
 ${CLOUD_GLSL}
+${MOON_SHADOW_GLSL}
 uniform sampler2D uSnow; uniform float uHasSnow;
 /* Earth: yesterday's snow (NASA's map, some 16 km a pixel: the share of
    the ground white), laid on the ground as snow lies. Within a few km
@@ -219,6 +221,8 @@ void main() {
   lit *= 1.0 - 0.88 * shipShade(vViewPos, normalize(vSunView));
   // Earth: the shadows of the clouds overhead
   if (uEarth > 0.5) lit *= 1.0 - 0.8 * cloudShade(d, uSunL);
+  // and in an eclipse, the Moon's shadow
+  if (uEarth > 0.5) lit *= 1.0 - moonShadow(d, 0.0);
   // sunlight, plus light from the sky itself (none on airless Mercury)
   vec3 color = base * (vec3(0.02) + lit * uLight * uLightTint + uSky * uSkyLight * day * (0.6 + 0.4 * dot(n, d)));
   // Earth's sea: waves, the sky mirrored in it, the Sun's moving glint
@@ -393,6 +397,7 @@ export default function Terrain({
           ...shipShadow,
           ...cloudVolume,
           ...earthGround,
+          ...earthEclipse,
           uEarthElev: { value: earth ? 1 : 0 },
           uWaveK: { value: WAVES.map(() => new THREE.Vector3()) },
           uWavePhase: { value: WAVES.map(() => 0) },

@@ -24,6 +24,8 @@ import {
   getSmallBodyOrbitPosition,
   getBodyRadius,
   moonDirection,
+  moonDistanceKm,
+  planetSpinAngle,
   MOON_ID,
   MOON_TRUE_DISTANCE,
   MOON_RADIUS_KM,
@@ -40,6 +42,17 @@ import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
 import { aimCloudPatch, CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
+import {
+  cloudEclipse,
+  EARTH_SHADOW_GLSL,
+  earthEclipse,
+  intoFrame,
+  MOON_SHADOW_GLSL,
+  moonEclipse,
+  PLANET_SHADOW_GLSL,
+  satelliteEclipse,
+  SUN_ANGLE_1AU,
+} from './eclipse'
 import { earthToday, loadEarthToday } from './earthToday'
 import { earthRelief, loadEarthRelief } from './earthRelief'
 import CloudVolume from './CloudVolume'
@@ -109,6 +122,8 @@ const _earthQuat = new THREE.Quaternion()
 const CLOUD_HEIGHT_FAR = 0.012
 const CLOUD_HEIGHT_NEAR = 0.0016
 const _cloudCentre = new THREE.Vector3()
+const _eclipseWay = new THREE.Vector3()
+const _eclipseAt = new THREE.Vector3()
 const _patchView = new THREE.Vector3()
 const _patchAt = new THREE.Vector3()
 const _patchAhead = new THREE.Vector3()
@@ -140,11 +155,12 @@ function withSurfaceVaryings(shader: THREE.WebGLProgramParametersWithUniforms) {
 
 /* Earth's clouds: fine wisps that break up the soft edges up close */
 function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime, ...cloudTops, ...cloudPatchUniforms })
+  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime, ...cloudTops, ...cloudPatchUniforms, ...cloudEclipse })
   withSurfaceVaryings(shader)
   shader.fragmentShader =
     'uniform vec3 uSunDirView; uniform float uTime; uniform vec3 uSunLocal;\n' +
     CLOUD_PATCH_GLSL +
+    MOON_SHADOW_GLSL +
     shader.fragmentShader
       .replace(
         '#include <alphamap_fragment>',
@@ -201,7 +217,8 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
           dL *= 1.9;
         }
         float relief = mix(1.0, dome, low * 0.8) * (1.0 - 0.75 * shadowed * low);
-        reflectedLight.directDiffuse = diffuseColor.rgb * sunTint * day * 0.92 * relief;
+        // (and in an eclipse, the Moon's shadow on the cloud tops)
+        reflectedLight.directDiffuse = diffuseColor.rgb * sunTint * day * 0.92 * relief * (1.0 - moonShadow(P, 8.0));
         reflectedLight.indirectDiffuse = diffuseColor.rgb * 0.015;
       }`,
       )
@@ -230,7 +247,7 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
 }
 
 function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, earthNight, surfacePatch, groundHole, cloudPatchUniforms)
+  Object.assign(shader.uniforms, earthNight, surfacePatch, groundHole, cloudPatchUniforms, earthEclipse)
   withSurfaceVaryings(shader)
   shader.fragmentShader =
     'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
@@ -240,7 +257,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
       // landed: the ground patch replaces the sphere here
       if (uHolePlanet == 2 && dot(normalize(vSurfaceP), uHoleDir) > uHoleCos) discard;`,
     )
-  shader.fragmentShader = SURFACE_PATCH_GLSL + CLOUD_PATCH_GLSL + shader.fragmentShader
+  shader.fragmentShader = SURFACE_PATCH_GLSL + CLOUD_PATCH_GLSL + MOON_SHADOW_GLSL + shader.fragmentShader
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
 uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight; uniform float uAurora3D;
@@ -353,6 +370,8 @@ uniform sampler2D uRelief; uniform float uHasRelief; uniform sampler2D uSnow; un
           }
           shade *= 1.0 - 0.85 * dark;
         }
+        /* an eclipse: the Moon's shadow, its dark core and wide penumbra */
+        shade *= 1.0 - moonShadow(normalize(vSurfaceP), 0.0);
         reflectedLight.directDiffuse *= shade;
         reflectedLight.directSpecular *= shade;
         /* low sun through more air: light along the day/night line turns
@@ -2145,7 +2164,6 @@ function Planet({
   const body = useRef<THREE.Mesh>(null)
   const timeRef = useRef(0)
   const focusScale = useRef(1)
-  const lastSpinJd = useRef(0)
   // the weather's own clock (see below)
   const weather = useRef(0)
   const lastWeatherJd = useRef(simClock.bodyJd)
@@ -2468,9 +2486,6 @@ function Planet({
     }
   }, [gl, planet.name])
 
-  const rotationSpeed =
-    (24 / planet.rotationPeriodHours) * 0.12 // negative = retrograde (Venus, Uranus)
-
   /* Orbit trail: a fading arc of the real orbit behind the planet,
      recomputed each frame as the planet moves */
   const orbitLine = useMemo(() => {
@@ -2649,38 +2664,37 @@ function Planet({
       earthNight.uTime.value = time
     }
 
-    // Earth turns with the simulated clock to its real orientation; the
-    // others spin at their real relative rates. Dragging adds an offset.
-    const trueSpin = planet.name === 'Earth' ? earthSpinAngle(simClock.bodyJd, poleQuaternion) : null
-    if (trueSpin !== null && held) {
-      // a hovered marker holds Earth still: absorb the clock's turn
+    // every planet turns with the simulated clock to its real orientation
+    // (Earth by sidereal time, the rest by the IAU's rotation models), so
+    // the face it shows is the face it really shows; dragging adds an offset
+    const trueSpin =
+      planet.name === 'Earth' ? earthSpinAngle(simClock.bodyJd, poleQuaternion) : planetSpinAngle(index, simClock.bodyJd, poleQuaternion)
+    if (held) {
+      // a hovered marker holds the planet still: absorb the clock's turn
       userSpin.current -= trueSpin - lastTrueSpin.current
     }
-    if (trueSpin !== null) lastTrueSpin.current = trueSpin
+    lastTrueSpin.current = trueSpin
 
-    if (!held) {
-      // flying, they turn at their real rates on the flight's clock (which
-      // can be sped up); in the journey, at a gentle pace of their own
-      if (trueSpin === null) {
-        if (!pilot.active) body.current.rotation.y += delta * rotationSpeed
-        else body.current.rotation.y += ((simClock.bodyJd - lastSpinJd.current) * 24 * Math.PI * 2) / planet.rotationPeriodHours
-      }
-      lastSpinJd.current = simClock.bodyJd
-    } else if (spinState) {
-      spinState.velocity = 0
-    }
+    if (held && spinState) spinState.velocity = 0
 
     if (spinState && isFocused) {
       userSpin.current += spinState.pending
-      if (trueSpin === null) body.current.rotation.y += spinState.pending
       spinState.pending = 0
       if (!spinState.dragging) {
         userSpin.current += spinState.velocity * delta
-        if (trueSpin === null) body.current.rotation.y += spinState.velocity * delta
         spinState.velocity *= Math.exp(-delta * 2.2)
       }
     }
-    if (trueSpin !== null) body.current.rotation.y = trueSpin + userSpin.current
+    body.current.rotation.y = trueSpin + userSpin.current
+
+    // eclipses: where the Moon really is (its true distance) and the way
+    // to the Sun, in Earth's own frame
+    if (planet.name === 'Earth') {
+      moonDirection(simClock.bodyJd, _eclipseWay).multiplyScalar(moonDistanceKm(simClock.bodyJd))
+      intoFrame(_eclipseWay, body.current, earthEclipse.uMoonKm.value)
+      body.current.getWorldPosition(_eclipseAt)
+      intoFrame(_eclipseWay.copy(planetSun).sub(_eclipseAt).normalize(), body.current, earthEclipse.uSunWay.value)
+    }
   })
 
   return (
@@ -2800,6 +2814,7 @@ function Planet({
               shadowUniforms={uniforms}
               sunlight={sunlight}
               tilt={poleQuaternion}
+              sunAU={planet.distanceAU}
             />
           )}
         </group>
@@ -2936,6 +2951,10 @@ function EarthCloudLayer({
         const lat = 90 - (Math.acos(THREE.MathUtils.clamp(up.y, -1, 1)) * 180) / Math.PI
         aimCloudPatch(u * 360 - 180, lat, altitudeKm, earthToday.date)
       } else aimCloudPatch(0, 0, 0, null)
+      // eclipses: the Moon and the Sun in the cloud layer's frame
+      moonDirection(simClock.bodyJd, _eclipseWay).multiplyScalar(moonDistanceKm(simClock.bodyJd))
+      intoFrame(_eclipseWay, cloud.current, cloudEclipse.uMoonKm.value)
+      intoFrame(_eclipseWay.copy(sun).sub(_cloudCentre).normalize(), cloud.current, cloudEclipse.uSunWay.value)
       // the Sun's direction in the cloud layer's own frame (it turns)
       _sunLocal.copy(sun)
       cloud.current.worldToLocal(_sunLocal).normalize()
@@ -2982,12 +3001,29 @@ function EarthCloudLayer({
 /* the Moon's material: cut away under the landing ground, and NASA's
    lunar mosaic streamed in when flying low */
 function moonGround(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, surfacePatch, groundHole)
+  Object.assign(shader.uniforms, surfacePatch, groundHole, moonEclipse)
   withSurfaceVaryings(shader)
   shader.fragmentShader =
     'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
     SURFACE_PATCH_GLSL +
+    EARTH_SHADOW_GLSL +
     shader.fragmentShader
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+      {
+        /* a lunar eclipse: Earth's shadow; in its core, only sunlight bent
+           through Earth's air reaches the Moon, reddened: copper, darker
+           towards the shadow's middle */
+        float umbra;
+        vec3 n = normalize(vSurfaceP);
+        float hidden = earthShadow(n, umbra);
+        reflectedLight.directDiffuse *= 1.0 - hidden;
+        reflectedLight.directSpecular *= 1.0 - hidden;
+        float facing = smoothstep(-0.1, 0.3, dot(n, normalize(uSunWayM)));
+        reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.16, 0.05, 0.016) * hidden * hidden * facing * mix(1.0, 0.45, umbra);
+      }`,
+      )
       .replace(
         '#include <clipping_planes_fragment>',
         `#include <clipping_planes_fragment>
@@ -3012,15 +3048,27 @@ function satelliteHole(id: number) {
   let hook = satelliteGround.get(id)
   if (!hook) {
     hook = (shader) => {
-      Object.assign(shader.uniforms, groundHole)
+      Object.assign(shader.uniforms, groundHole, satelliteEclipse(id))
       withSurfaceVaryings(shader)
       shader.fragmentShader =
         'uniform int uHolePlanet; uniform vec3 uHoleDir; uniform float uHoleCos;\n' +
-        shader.fragmentShader.replace(
-          '#include <clipping_planes_fragment>',
-          `#include <clipping_planes_fragment>
+        PLANET_SHADOW_GLSL +
+        shader.fragmentShader
+          .replace(
+            '#include <clipping_planes_fragment>',
+            `#include <clipping_planes_fragment>
       if (uHolePlanet == ${id} && dot(normalize(vSurfaceP), uHoleDir) > uHoleCos) discard;`,
-        )
+          )
+          .replace(
+            '#include <lights_fragment_end>',
+            `#include <lights_fragment_end>
+      {
+        /* behind its planet, out of the sunlight */
+        float hidden = planetShadow(normalize(vSurfaceP));
+        reflectedLight.directDiffuse *= 1.0 - hidden;
+        reflectedLight.directSpecular *= 1.0 - hidden;
+      }`,
+          )
     }
     satelliteGround.set(id, hook)
   }
@@ -3114,6 +3162,11 @@ function Moon({ sharp }: { sharp: boolean }) {
       moon.parent?.getWorldPosition(_moonEarth)
       moon.lookAt(_moonEarth)
       moon.rotateY(-Math.PI / 2)
+      // eclipses: Earth (at the true distance) and the Sun, in the Moon's frame
+      moonDirection(simClock.bodyJd, _eclipseWay).multiplyScalar(-moonDistanceKm(simClock.bodyJd))
+      intoFrame(_eclipseWay, moon, moonEclipse.uEarthKm.value)
+      moon.getWorldPosition(_eclipseAt)
+      intoFrame(_eclipseWay.copy(SYSTEM_OFFSET).sub(_eclipseAt).normalize(), moon, moonEclipse.uSunWayM.value)
     }
   })
 
@@ -3205,6 +3258,7 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
 }
 
 type MoonShadowUniforms = {
+  uSunPosition?: { value: THREE.Vector3 }
   uMoonPos: { value: THREE.Vector3[] }
   uMoonRadius: { value: number[] }
   uMoonCount: { value: number }
@@ -3218,6 +3272,7 @@ function MoonSystem({
   shadowUniforms,
   sunlight,
   tilt,
+  sunAU = 1,
 }: {
   system: MoonSystemSpec
   planetRadius: number
@@ -3225,6 +3280,8 @@ function MoonSystem({
   sunlight?: { strength: number; tint: THREE.Color }
   /* the planet's spin-axis orientation (its equatorial frame) */
   tilt?: THREE.Quaternion
+  /* the planet's distance from the Sun (AU): the Sun's size in its sky */
+  sunAU?: number
 }) {
   const moonColors = useMemo(
     () =>
@@ -3288,6 +3345,10 @@ function MoonSystem({
       const satellite = SATELLITES.find((entry) => entry.name === moon.name)
       const body = bodies.current[i]
       if (satellite && body) {
+        // locked to their planet, the same face always turned to it: its
+        // longitude 0 (Io's and Titan's maps are centred on it, the
+        // others' on 180 degrees)
+        body.rotation.y = moon.name === 'Io' || moon.name === 'Titan' ? Math.PI : 0
         if (layout.trueScale) {
           const kmPerUnit = EARTH_RADIUS_KM / EARTH_RENDER_RADIUS
           // the group above may be scaled (a far planet drawn smaller)
@@ -3298,6 +3359,23 @@ function MoonSystem({
           body.position.set(moon.distance * planetRadius, 0, 0)
           const shape = moon.shape ?? [1, 1, 1]
           body.scale.set(shape[0] * moon.radius * planetRadius, shape[1] * moon.radius * planetRadius, shape[2] * moon.radius * planetRadius)
+        }
+        // its planet's shadow: the planet and the Sun in the moon's frame,
+        // in moon radii (at the drawn sizes and distances)
+        const id = satelliteIdOf(moon.name)
+        const planetFrame = arm.parent
+        if (id >= 0 && planetFrame) {
+          const shadow = satelliteEclipse(id)
+          body.getWorldPosition(_eclipseAt)
+          body.getWorldScale(_moonScale)
+          const moonRadius = Math.max(_moonScale.x, _moonScale.y, _moonScale.z)
+          planetFrame.getWorldScale(_satScale)
+          planetFrame.getWorldPosition(_eclipseWay).sub(_eclipseAt).divideScalar(moonRadius)
+          intoFrame(_eclipseWay, body, shadow.uOccluder.value)
+          shadow.uOccluderR.value = (planetRadius * _satScale.x) / moonRadius
+          _eclipseWay.copy(shadowUniforms?.uSunPosition?.value ?? SYSTEM_OFFSET).sub(_eclipseAt).normalize()
+          intoFrame(_eclipseWay, body, shadow.uSunWayS.value)
+          shadow.uSunAng.value = SUN_ANGLE_1AU / Math.max(sunAU, 0.3)
         }
         // low over Titan, its orange sky
         const haze = hazes.current[i]

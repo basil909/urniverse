@@ -406,6 +406,55 @@ export function getPlanetPoleQuaternion(index: number) {
   return new THREE.Quaternion().setFromUnitVectors(UP, axis)
 }
 
+/* Where each planet's prime meridian points at a date (IAU 2015: the
+   angle W = W0 + W' d, degrees, d days from J2000, measured along the
+   planet's equator from where it crosses Earth's): so Mars shows the
+   face it really shows today, Olympus Mons where it really is. Venus and
+   Uranus turn backwards. Jupiter's is System III (its magnetic field),
+   the giants' clouds drifting against it. */
+const SPINS: readonly (readonly [number, number])[] = [
+  [329.5988, 6.1385108], // Mercury
+  [160.2, -1.4813688], // Venus
+  [190.147, 360.9856235], // Earth
+  [176.63, 350.89198226], // Mars
+  [284.95, 870.536], // Jupiter
+  [38.9, 810.7939024], // Saturn
+  [203.81, -501.1600928], // Uranus
+  [249.978, 541.1397757], // Neptune
+]
+const _meridian = new THREE.Vector3()
+const _inversePole = new THREE.Quaternion()
+
+/** the planet's turn about its own axis (rotation.y in its tilted frame)
+ * that puts its map's longitude 0 on the real prime meridian */
+export function planetSpinAngle(index: number, jd: number, pole: THREE.Quaternion) {
+  const spin = SPINS[index]
+  const axis = POLES[index]
+  if (!spin || !axis) return 0
+  const W = (spin[0] + spin[1] * (jd - 2451545.0)) * DEG
+  const ra = axis[0] * DEG
+  const dec = axis[1] * DEG
+  // J2000 equatorial: the pole P, the node Q where the planet's equator
+  // rises through Earth's, and P x Q; the meridian is W along from Q
+  const px = Math.cos(dec) * Math.cos(ra)
+  const py = Math.cos(dec) * Math.sin(ra)
+  const pz = Math.sin(dec)
+  const qx = -Math.sin(ra)
+  const qy = Math.cos(ra)
+  const rx = -pz * qy
+  const ry = pz * qx
+  const rz = px * qy - py * qx
+  const x = qx * Math.cos(W) + rx * Math.sin(W)
+  const y = qy * Math.cos(W) + ry * Math.sin(W)
+  const z = rz * Math.sin(W)
+  // equatorial -> ecliptic -> scene, then into the planet's tilted frame
+  const ey = y * Math.cos(OBLIQUITY_J2000) + z * Math.sin(OBLIQUITY_J2000)
+  const ez = -y * Math.sin(OBLIQUITY_J2000) + z * Math.cos(OBLIQUITY_J2000)
+  _meridian.set(x, ez, -ey).applyQuaternion(_inversePole.copy(pole).invert())
+  // the map's longitude 0 sits on the body's local +x
+  return Math.atan2(-_meridian.z, _meridian.x)
+}
+
 /** Eccentric anomaly of the planet at a Julian Date (for drawing trails) */
 export function getPlanetEccentricAnomaly(index: number, jd: number) {
   const orbit = orbitAt(index, jd)
@@ -541,8 +590,13 @@ export function getBodyName(id: number) {
 
 /* ============================================================
    THE MOON, AS A BODY TO FLY TO (flying only)
-   Its direction from Earth is a short lunar series (good to about a
-   degree); at true scale it stands 60.27 Earth radii out, 1,737 km in
+   Where it is, from Earth: the main terms of the ELP-2000 lunar theory
+   as Meeus gives them (Astronomical Algorithms, ch. 47), good to well
+   under an arcminute: enough for eclipses on their real dates, and the
+   Moon's shadow where it really falls (checked against the eclipses of
+   12 August 2026 and 2 August 2027, and the lunar eclipses of 2025-26).
+   At true scale it stands 60.27 Earth radii out (its mean distance; the
+   true one, 356,000-406,000 km, is used for its shadow), 1,737 km in
    radius. Body id 12, after the planets and the four asteroids.
 ============================================================ */
 export const MOON_ID = PLANETS.length + 4
@@ -550,19 +604,91 @@ export const MOON_RADIUS_KM = 1737.4
 /** the Moon's distance from Earth at true scale, scene units */
 export const MOON_TRUE_DISTANCE = 60.27 * EARTH_RENDER_RADIUS
 
-export function moonDirection(jd: number, out: THREE.Vector3) {
-  const d = jd - 2451545.0
+/* D, M, M', F multiples; longitude (1e-6 degree) and distance (metres) */
+const MOON_LR: readonly (readonly number[])[] = [
+  [0, 0, 1, 0, 6288774, -20905355], [2, 0, -1, 0, 1274027, -3699111], [2, 0, 0, 0, 658314, -2955968],
+  [0, 0, 2, 0, 213618, -569925], [0, 1, 0, 0, -185116, 48888], [0, 0, 0, 2, -114332, -3149],
+  [2, 0, -2, 0, 58793, 246158], [2, -1, -1, 0, 57066, -152138], [2, 0, 1, 0, 53322, -170733],
+  [2, -1, 0, 0, 45758, -204586], [0, 1, -1, 0, -40923, -129620], [1, 0, 0, 0, -34720, 108743],
+  [0, 1, 1, 0, -30383, 104755], [2, 0, 0, -2, 15327, 10321], [0, 0, 1, 2, -12528, 0],
+  [0, 0, 1, -2, 10980, 79661], [4, 0, -1, 0, 10675, -34782], [0, 0, 3, 0, 10034, -23210],
+  [4, 0, -2, 0, 8548, -21636], [2, 1, -1, 0, -7888, 24208], [2, 1, 0, 0, -6766, 30824],
+  [1, 0, -1, 0, -5163, -8379], [1, 1, 0, 0, 4987, -16675], [2, -1, 1, 0, 4036, -12831],
+  [2, 0, 2, 0, 3994, -10445], [4, 0, 0, 0, 3861, -11650], [2, 0, -3, 0, 3665, 14403],
+  [0, 1, -2, 0, -2689, -7003], [2, 0, -1, 2, -2602, 0], [2, -1, -2, 0, 2390, 10056],
+  [1, 0, 1, 0, -2348, 6322], [2, -2, 0, 0, 2236, -9884], [0, 1, 2, 0, -2120, 5751],
+  [0, 2, 0, 0, -2069, 0], [2, -2, -1, 0, 2048, -4950], [2, 0, 1, -2, -1773, 4130],
+  [2, 0, 0, 2, -1595, 0], [4, -1, -1, 0, 1215, -3958], [0, 0, 2, 2, -1110, 0],
+  [3, 0, -1, 0, -892, 3258], [2, 1, 1, 0, -810, 2616], [4, -1, -2, 0, 759, -1897],
+  [0, 2, -1, 0, -713, -2117], [2, 2, -1, 0, -700, 2354], [2, 1, -2, 0, 691, 0],
+  [2, -1, 0, -2, 596, 0], [4, 0, 1, 0, 549, -1423], [0, 0, 4, 0, 537, -1117],
+  [4, -1, 0, 0, 520, -1571], [1, 0, -2, 0, -487, -1739], [2, 1, 0, -2, -399, 0],
+  [0, 0, 2, -2, -381, -4421], [1, 1, 1, 0, 351, 0], [3, 0, -2, 0, -340, 0],
+  [4, 0, -3, 0, 330, 0], [2, -1, 2, 0, 327, 0], [0, 2, 1, 0, -323, 1165],
+  [1, 1, -1, 0, 299, 0], [2, 0, 3, 0, 294, 0], [2, 0, -1, -2, 0, 8752],
+]
+/* D, M, M', F multiples; latitude (1e-6 degree) */
+const MOON_B: readonly (readonly number[])[] = [
+  [0, 0, 0, 1, 5128122], [0, 0, 1, 1, 280602], [0, 0, 1, -1, 277693], [2, 0, 0, -1, 173237],
+  [2, 0, -1, 1, 55413], [2, 0, -1, -1, 46271], [2, 0, 0, 1, 32573], [0, 0, 2, 1, 17198],
+  [2, 0, 1, -1, 9266], [0, 0, 2, -1, 8822], [2, -1, 0, -1, 8216], [2, 0, -2, -1, 4324],
+  [2, 0, 1, 1, 4200], [2, 1, 0, -1, -3359], [2, -1, -1, 1, 2463], [2, -1, 0, 1, 2211],
+  [2, -1, -1, -1, 2065], [0, 1, -1, -1, -1870], [4, 0, -1, -1, 1828], [0, 1, 0, 1, -1794],
+  [0, 0, 0, 3, -1749], [0, 1, -1, 1, -1565], [1, 0, 0, 1, -1491], [0, 1, 1, 1, -1475],
+  [0, 1, 1, -1, -1410], [0, 1, 0, -1, -1344], [1, 0, 0, -1, -1335], [0, 0, 3, 1, 1107],
+  [4, 0, 0, -1, 1021], [4, 0, -1, 1, 833],
+]
+/* Terrestrial Time runs about 69 s ahead of the clock's (UTC) */
+const DELTA_T_DAYS = 69.2 / 86400
+
+const _moonCache = { jd: NaN, lambda: 0, beta: 0, km: 384400 }
+function moonPlace(jd: number) {
+  if (_moonCache.jd === jd) return _moonCache
+  const T = (jd + DELTA_T_DAYS - 2451545.0) / 36525
   const rad = Math.PI / 180
-  const L = 218.316 + 13.176396 * d // mean longitude
-  const M = (134.963 + 13.064993 * d) * rad // mean anomaly
-  const F = (93.272 + 13.22935 * d) * rad // argument of latitude
-  const D = (297.85 + 12.190749 * d) * rad // mean elongation from the Sun
-  const Ms = (357.529 + 0.98560028 * d) * rad // the Sun's mean anomaly
-  const lambda =
-    (L + 6.289 * Math.sin(M) + 1.274 * Math.sin(2 * D - M) + 0.658 * Math.sin(2 * D) - 0.186 * Math.sin(Ms)) * rad
-  const beta = 5.128 * Math.sin(F) * rad
+  const Lp = 218.3164477 + 481267.88123421 * T - 0.0015786 * T * T
+  const D = (297.8501921 + 445267.1114034 * T - 0.0018819 * T * T) * rad
+  const M = (357.5291092 + 35999.0502909 * T - 0.0001536 * T * T) * rad
+  const Mp = (134.9633964 + 477198.8675055 * T + 0.0087414 * T * T) * rad
+  const F = (93.272095 + 483202.0175233 * T - 0.0036539 * T * T) * rad
+  const E = 1 - 0.002516 * T - 0.0000074 * T * T
+  let sl = 0
+  let sr = 0
+  let sb = 0
+  for (const [d, m, mp, f, cl, cr] of MOON_LR) {
+    const arg = d * D + m * M + mp * Mp + f * F
+    const e = m === 0 ? 1 : Math.abs(m) === 1 ? E : E * E
+    sl += cl * e * Math.sin(arg)
+    sr += cr * e * Math.cos(arg)
+  }
+  for (const [d, m, mp, f, cb] of MOON_B) {
+    const e = m === 0 ? 1 : Math.abs(m) === 1 ? E : E * E
+    sb += cb * e * Math.sin(d * D + m * M + mp * Mp + f * F)
+  }
+  const A1 = (119.75 + 131.849 * T) * rad
+  const A2 = (53.09 + 479264.29 * T) * rad
+  const A3 = (313.45 + 481266.484 * T) * rad
+  sl += 3958 * Math.sin(A1) + 1962 * Math.sin(Lp * rad - F) + 318 * Math.sin(A2)
+  sb += -2235 * Math.sin(Lp * rad) + 382 * Math.sin(A3) + 175 * Math.sin(A1 - F) + 175 * Math.sin(A1 + F)
+  sb += 127 * Math.sin(Lp * rad - Mp) - 115 * Math.sin(Lp * rad + Mp)
+  // ecliptic of the date -> of J2000 (the planets' frame): undo precession
+  const precession = 1.396971 * T + 0.0003086 * T * T
+  _moonCache.jd = jd
+  _moonCache.lambda = (Lp + sl / 1e6 - precession) * rad
+  _moonCache.beta = (sb / 1e6) * rad
+  _moonCache.km = 385000.56 + sr / 1000
+  return _moonCache
+}
+
+export function moonDirection(jd: number, out: THREE.Vector3) {
+  const { lambda, beta } = moonPlace(jd)
   // ecliptic -> scene (x -> X, north -> Y, y -> -Z)
   return out.set(Math.cos(beta) * Math.cos(lambda), Math.sin(beta), -Math.cos(beta) * Math.sin(lambda))
+}
+
+/** the Moon's true distance from Earth's centre, km */
+export function moonDistanceKm(jd: number) {
+  return moonPlace(jd).km
 }
 
 /* the clock the Moon's position follows (set by simClock, which imports

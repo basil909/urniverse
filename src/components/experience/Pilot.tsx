@@ -47,6 +47,7 @@ import { planWarp, stepWarp, type Warp } from './flightWarp'
 import { placeCamera } from './flightCamera'
 import CometEncke from './CometEncke'
 import { AsteroidField, TrojanBodies } from './AsteroidField'
+import ShuttleParts from './ShuttleParts'
 
 /* ============================================================
    FLIGHT MODE
@@ -1227,7 +1228,10 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     const time = state.clock.elapsedTime
     const flicker = 0.92 + Math.sin(time * 47) * 0.05 + Math.sin(time * 29) * 0.03
     flames.current.forEach((flame) => {
-      if (flame) flame.scale.y = (0.15 + t * 1.4 * flicker) * flame.userData.radius
+      if (!flame) return
+      flame.scale.y = (0.15 + t * 1.4 * flicker) * flame.userData.radius
+      // the main engines gimbal with the turn, a few degrees
+      flame.rotation.set(Math.PI / 2 - THREE.MathUtils.clamp(pilot.turn.pitch * 0.08, -0.15, 0.15), 0, THREE.MathUtils.clamp(pilot.turn.yaw * 0.08, -0.15, 0.15))
     })
     look.outer.opacity = 0.15 + t * 0.5
     look.core.opacity = 0.3 + t * 0.65
@@ -1270,6 +1274,7 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
   return (
     <group>
       <primitive object={model.body} />
+      <ShuttleParts material={model.body.material as THREE.Material} />
       {model.tank && <primitive object={model.tank} />}
       {model.boosters.map((booster, i) => (
         <group key={`booster-${i}`}>
@@ -1654,6 +1659,9 @@ export default function Pilot() {
     // the ground's pull-up acts at once (not smoothed), so it stops the
     // moment the nose reaches the horizon instead of overshooting it
     const pitchRate = pitchInput + pullUp
+    pilot.turn.pitch = pitchRate
+    pilot.turn.yaw = yawRate
+    pilot.turn.roll = rollRate
     // a turn also rolls the ship a little into it, as a plane does
     if (!auto) {
       _turn.setFromAxisAngle(_up, yawRate * delta)

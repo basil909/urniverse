@@ -2,7 +2,7 @@ import * as THREE from 'three'
 
 import { pilot } from './pilotState'
 import { GROUND, ground, groundAltitude } from './groundState'
-import { aimShip, flyHeading, KM_PER_UNIT, SHIP_LENGTH } from './flightShip'
+import { aimShip, flyHeading, KM_PER_UNIT, ON_WHEELS, SHIP_LENGTH } from './flightShip'
 import { runwayGlide, runwayToGo } from './flightMission'
 
 /* ============================================================
@@ -128,7 +128,7 @@ export function flyLanding(frame: LandingFrame) {
   if (pilot.landState !== 'flying' && pilot.landState !== 'descending' && onGround) {
     ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
     _groundUp.copy(jet.position).applyMatrix4(ground.inverse).normalize().applyQuaternion(_bodyQuat)
-    const rest = SHIP_LENGTH * 0.14 // the belly on the ground
+    const rest = SHIP_LENGTH * ON_WHEELS // on its wheels
     const altitude = groundAltitude(jet.position)
     const km = Math.max(0, (altitude - rest) * KM_PER_UNIT)
     if (pilot.landState === 'landing') {
