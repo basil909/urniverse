@@ -39,7 +39,7 @@ import {
   starTemperature,
 } from './spaceBodies'
 import { sunVisibility } from './sunVisibility'
-import { aimShip, KM_PER_UNIT, LIGHT, LOWEST, SHIP_LENGTH, WARP } from './flightShip'
+import { KM_PER_UNIT, LIGHT, LOWEST, SHIP_LENGTH, WARP } from './flightShip'
 import { flyLanding } from './flightLanding'
 import { planWarp, stepWarp, type Warp } from './flightWarp'
 import { placeCamera } from './flightCamera'
