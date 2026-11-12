@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { pilot } from './pilotState'
 import { GROUND, ground, groundAltitude } from './groundState'
 import { aimShip, flyHeading, KM_PER_UNIT, SHIP_LENGTH } from './flightShip'
+import { runwayGlide, runwayToGo } from './flightMission'
 
 /* ============================================================
    LANDING AND TAKING OFF, FLOWN FOR YOU
@@ -54,6 +55,7 @@ const _bodyPosDummy = new THREE.Vector3()
 const _bodyScaleDummy = new THREE.Vector3()
 const _turn = new THREE.Quaternion()
 const _axisUp = new THREE.Vector3()
+const _runwayLocal = new THREE.Vector3()
 
 export function flyLanding(frame: LandingFrame) {
   const {
@@ -137,9 +139,13 @@ export function flyLanding(frame: LandingFrame) {
       // at touchdown; L anywhere else is a quicker, steeper glide
       const runway = pilot.runwayApproach
       const along = runway ? 0.1 + 0.055 * THREE.MathUtils.smoothstep(km, 0.05, 0.6) : Math.min(2.5, 0.083 + km * 0.9)
-      const down = runway
-        ? along * THREE.MathUtils.lerp(0.022, 0.34, THREE.MathUtils.smoothstep(km, 0.03, 0.6))
-        : 0.0025 + km * 0.5
+      let down = 0.0025 + km * 0.5
+      if (runway) {
+        // held on the approach's glide, towards the touchdown point
+        _runwayLocal.copy(jet.position).applyMatrix4(ground.inverse).normalize()
+        const glide = runwayGlide(runwayToGo(_runwayLocal))
+        down = THREE.MathUtils.clamp(along * glide.slope + (km - glide.height) * 0.6, 0, along * 0.5)
+      }
       flyHeading(heading.current, _groundUp, steerX, delta)
       _wanted.copy(heading.current).multiplyScalar(along).addScaledVector(_groundUp, -down).divideScalar(KM_PER_UNIT)
       velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 2.5))
@@ -158,7 +164,10 @@ export function flyLanding(frame: LandingFrame) {
     } else if (pilot.landState === 'rolling') {
       // on the ground, braking to a stop, the nose coming down
       flyHeading(heading.current, _groundUp, steerX, delta)
-      const kms = Math.max(0, velocity.current.length() * KM_PER_UNIT - 0.006 * delta)
+      // (at Kennedy as the Shuttle did, its drag chute out: a longer
+      // roll-out, stopping a little past the runway's middle)
+      const brake = pilot.runwayApproach ? 0.003 : 0.006
+      const kms = Math.max(0, velocity.current.length() * KM_PER_UNIT - brake * delta)
       velocity.current.copy(heading.current).multiplyScalar(kms / KM_PER_UNIT)
       jet.position.addScaledVector(velocity.current, delta)
       jet.position.addScaledVector(_groundUp, rest - groundAltitude(jet.position))

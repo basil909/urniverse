@@ -256,6 +256,38 @@ function aimPoint(out: THREE.Vector3) {
   return travel(surfaceDir(RUNWAY_15.lat, RUNWAY_15.lon, _d2), RUNWAY_15.heading + 180, 2.3, out)
 }
 
+/* the last of the approach, as the self-flying landing flies it, against
+   the distance still to go to the touchdown point (760 m past the
+   threshold): the steep outer glide (19 degrees, aimed 2.3 km short of
+   the threshold), the pull-up starting some 600 m up, and the shallow
+   inner glide (1.5 degrees) onto the touchdown point */
+const TOUCHDOWN_KM = 0.76
+const OUTER = Math.tan(THREE.MathUtils.degToRad(19))
+const INNER = Math.tan(THREE.MathUtils.degToRad(1.5))
+const MEET = (OUTER * (2.3 + TOUCHDOWN_KM)) / (OUTER - INNER) // where the two glides cross
+const PULL_UP = 0.5 // km: how gently the one blends into the other
+const _touch = new THREE.Vector3()
+const _rel = new THREE.Vector3()
+
+/** km along the runway's line still to fly to the touchdown point (less
+ * than 0 past it), from the ship's direction in Earth's own frame */
+export function runwayToGo(local: THREE.Vector3) {
+  travel(surfaceDir(RUNWAY_15.lat, RUNWAY_15.lon, _d2), RUNWAY_15.heading, TOUCHDOWN_KM, _touch)
+  frameAt(_touch, _east, _north)
+  const b = THREE.MathUtils.degToRad(RUNWAY_15.heading)
+  _way.copy(_north).multiplyScalar(Math.cos(b)).addScaledVector(_east, Math.sin(b))
+  return -_rel.copy(local).sub(_touch).dot(_way) * EARTH_KM
+}
+
+/** the height (km) wanted `togo` km from touchdown, and the glide's slope there */
+export function runwayGlide(togo: number) {
+  const x = (togo - MEET) / PULL_UP
+  // a smooth corner between the two straight glides
+  const soft = PULL_UP * (Math.max(x, 0) + Math.log1p(Math.exp(-Math.abs(x))))
+  const blend = 1 / (1 + Math.exp(-x))
+  return { height: INNER * togo + (OUTER - INNER) * soft, slope: INNER + (OUTER - INNER) * blend }
+}
+
 export function stepReturn({ jet, velocity, speed, heading, memory, delta }: Frame) {
   const body = earth()
   if (!body) return

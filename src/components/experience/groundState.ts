@@ -131,6 +131,32 @@ float gElevation(vec2 uv, out float known) {
   float hf = f.y > 0.0 ? f.x / f.y : 0.0;
   return mix(hc, hf, clamp(f.y, 0.0, 1.0));
 }
+/* metres above the sea (never below it), averaged over the ground one
+   vertex stands for (\`spacing\`, radii): a mesh vertex hundreds of metres
+   from its neighbours that read the ~30 m elevation at one point would
+   land on single pixels (spikes), and as the mesh slides with the ship,
+   on different ones each frame (hills that seethe) */
+float gElevationOver(vec2 uv, float spacing, out float known) {
+  float k0;
+  float e0 = max(gElevation(uv, k0), 0.0);
+  if (spacing < 1.2e-5) {
+    known = k0;
+    return e0;
+  }
+  float cosLat = max(cos((uv.y - 0.5) * 3.14159265), 0.05);
+  vec2 off = vec2(spacing / (6.28318531 * cosLat), spacing / 3.14159265) * 0.5;
+  float k1;
+  float k2;
+  float k3;
+  float k4;
+  float sum = e0 * 2.0
+    + max(gElevation(uv + vec2(off.x, 0.0), k1), 0.0)
+    + max(gElevation(uv - vec2(off.x, 0.0), k2), 0.0)
+    + max(gElevation(uv + vec2(0.0, off.y), k3), 0.0)
+    + max(gElevation(uv - vec2(0.0, off.y), k4), 0.0);
+  known = min(k0, min(min(k1, k2), min(k3, k4)));
+  return sum / 6.0;
+}
 /* land (1) or sea (0) */
 float gLand(vec2 uv) {
   return uHasSea > 0.5 ? smoothstep(0.42, 0.22, texture2D(uSeaMap, uv).r) : 1.0;
@@ -159,8 +185,8 @@ float gHeight(vec3 d, float spacing) {
   // little generated roughness below its ~30 m pixels)
   if (uEarthElev > 0.5) {
     float known;
-    float elevation = gElevation(uv, known);
-    float real = max(elevation, 0.0) / uRadiusM + (elevation > 0.0 ? detail * 0.02 : 0.0);
+    float elevation = gElevationOver(uv, spacing, known);
+    float real = elevation / uRadiusM + (elevation > 0.0 ? detail * 0.02 : 0.0);
     h = mix(h, real, known);
   }
   return h * uGroundFade;
