@@ -1182,13 +1182,16 @@ vec2 cloudFlow(vec2 uv) {
   return v;
 }
 
-vec3 flowingClouds(vec2 uv) {
+/* gx, gy: how the map's coordinates change from pixel to pixel before
+   any swirling; the map is read with those, so warping where it is read
+   (which changes fast) does not make the GPU fall back to a blurred copy */
+vec3 flowingClouds(vec2 uv, vec2 gx, vec2 gy) {
   vec2 v = cloudFlow(uv);
   float period = 7.0;
   float t0 = fract(uTime / period);
   float t1 = fract(uTime / period + 0.5);
-  vec3 a = texture2D(uMap, uv - v * (t0 - 0.5) * period).rgb;
-  vec3 b = texture2D(uMap, uv - v * (t1 - 0.5) * period).rgb;
+  vec3 a = textureGrad(uMap, uv - v * (t0 - 0.5) * period, gx, gy).rgb;
+  vec3 b = textureGrad(uMap, uv - v * (t1 - 0.5) * period, gx, gy).rgb;
   return mix(a, b, abs(1.0 - 2.0 * t0));
 }
 
@@ -1222,20 +1225,47 @@ void main() {
       swirl = 1.0 - smoothstep(0.0008, 0.0025, length(fwidth(p)));
       if (swirl > 0.0) {
         vec3 q = p * vec3(1.0, 3.2, 1.0);
+        /* where two bands meet the brightness changes fast with latitude:
+           there the jets shear past each other and the clouds roil (waves,
+           curls, festoons); inside a broad band they are calmer */
+        float dv = 3.0 / 2048.0;
+        float above = dot(texture2D(uMap, vUv + vec2(0.0, dv), 2.0).rgb, vec3(0.333));
+        float below = dot(texture2D(uMap, vUv - vec2(0.0, dv), 2.0).rgb, vec3(0.333));
+        float edge = smoothstep(0.012, 0.07, abs(above - below));
+        /* each giant its own weather: Jupiter roiling, Saturn softer, the
+           ice giants gentle */
+        float stir = (uPlanet == 4 ? 1.0 : uPlanet == 5 ? 0.6 : 0.35) * (0.5 + 0.9 * edge);
         vec2 eddy = vec2(fbm(q * 34.0 + vec3(0.0, 0.0, uTime * 0.004)), fbm(q * 34.0 + 7.3)) - 0.5;
+        /* a middle scale: small curls a few hundred km across */
+        vec2 curl = vec2(fbm(q * 95.0 + vec3(1.7, 0.0, uTime * 0.006)), fbm(q * 95.0 + 4.1)) - 0.5;
         vec2 fine = vec2(noise(q * 260.0), noise(q * 260.0 + 3.7)) - 0.5;
-        mapUv += (eddy * vec2(0.012, 0.007) + fine * vec2(0.0016, 0.0011)) * swirl;
+        mapUv += (eddy * vec2(0.012, 0.007) * stir + curl * vec2(0.0065, 0.004) * stir + fine * vec2(0.0016, 0.0011)) * swirl;
       }
     }
+    vec2 gx = dFdx(vUv);
+    vec2 gy = dFdy(vUv);
+    /* (across the map's seam the coordinates jump: no blur there) */
+    gx.x -= floor(gx.x + 0.5);
+    gy.x -= floor(gy.x + 0.5);
     surface = (uPlanet == 4 || uPlanet == 5 || uPlanet == 1)
-      ? flowingClouds(mapUv)
-      : texture2D(uMap, mapUv).rgb;
+      ? flowingClouds(mapUv, gx, gy)
+      : textureGrad(uMap, mapUv, gx, gy).rgb;
     if (swirl > 0.0) {
       vec3 broad = texture2D(uMap, mapUv, 4.0).rgb;
       surface = max(broad + (surface - broad) * (1.0 + 1.3 * swirl), vec3(0.0));
       /* and their colour deepened, the way close views are seen */
       float grey = dot(surface, vec3(0.299, 0.587, 0.114));
       surface = max(mix(vec3(grey), surface, 1.0 + 0.6 * swirl) * (1.0 - 0.1 * swirl), vec3(0.0));
+      /* fine filaments drawn out along the jets (detail finer than any
+         map: invented, but following the real bands' flow) */
+      vec3 fq = p * vec3(1.0, 9.0, 1.0) * 70.0 + vec3(uTime * 0.012, 0.0, 0.0);
+      float filament = fbm(fq) - 0.5;
+      float streaks = uPlanet == 5 ? 0.3 : uPlanet == 4 ? 0.28 : 0.12;
+      surface *= 1.0 + filament * streaks * swirl;
+      /* close up the bright zones sit just below the glow (bloom), which
+         would otherwise spread over a planet filling the view and flatten
+         it into a milky haze */
+      surface *= 1.0 - 0.18 * swirl;
     }
     /* flying low: NASA's imagery of the ground below, streamed in */
     if (uPatchPlanet == uPlanet) {
