@@ -437,6 +437,11 @@ const ATMOSPHERE_LOOK: Record<string, { color: string; dusk: string; intensity: 
   Neptune: { color: '#8fc0e6', dusk: '#6a9cd0', intensity: 0.42, thickness: 0.5 },
 }
 
+/* the clouds' motion, in shader time units per day of simulated time: the
+   shaders' rates were set for one unit a second, some 2,600 times the
+   real winds; this brings them to the real ones */
+const WEATHER_PER_DAY = 86400 / 2600
+
 /* atmosphere shell size in planet radii: thick hazes stand off the
    surface, Mars's thin air hugs it */
 const ATMOSPHERE_SHELL: Record<string, number> = {
@@ -2126,6 +2131,9 @@ function Planet({
   const timeRef = useRef(0)
   const focusScale = useRef(1)
   const lastSpinJd = useRef(0)
+  // the weather's own clock (see below)
+  const weather = useRef(0)
+  const lastWeatherJd = useRef(simClock.bodyJd)
   const { gl } = useThree()
   // sharper maps once the camera has arrived (desktop only)
   const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
@@ -2580,7 +2588,15 @@ function Planet({
       (targetOpacity - trailOpacity.value) * (1 - Math.exp(-delta * 4))
 
     if (materialIsShader(body.current.material)) {
-      body.current.material.uniforms.uTime.value = time
+      /* the weather moves on the simulation's own clock, at the real
+         winds' speed (Jupiter's jets ~150 m/s, Saturn's ~400, Venus's
+         cloud tops round in four days): still when time is held, flowing
+         when it runs fast; never faster than the eye can follow, so a
+         quick clock never makes it churn */
+      const days = simClock.bodyJd - lastWeatherJd.current
+      lastWeatherJd.current = simClock.bodyJd
+      weather.current += THREE.MathUtils.clamp(days * WEATHER_PER_DAY, 0, delta * 0.5)
+      body.current.material.uniforms.uTime.value = weather.current
     }
 
     // drag to spin: only the planet in focus responds
@@ -2833,6 +2849,7 @@ function EarthCloudLayer({
 }) {
   const cloud = useRef<THREE.Mesh>(null)
   const drift = useRef(0)
+  const lastDriftJd = useRef(simClock.bodyJd)
   // yesterday's real clouds (NASA GIBS), once fetched; the usual map until then
   const [today, setToday] = useState<THREE.Texture | null>(earthToday.texture)
   useEffect(() => {
@@ -2861,9 +2878,13 @@ function EarthCloudLayer({
   }, [shown])
 
   useFrame((state, delta) => {
-    // weather drifts east relative to the ground (real clouds stay where
-    // the satellites saw them)
-    drift.current = today ? 0 : (drift.current + delta * 0.01) % (Math.PI * 2)
+    // weather drifts east relative to the ground, on the simulation's
+    // clock at a real pace (some 0.1 radians a day; never faster than a
+    // slow glide when time runs fast); real clouds stay where the
+    // satellites saw them
+    const days = simClock.bodyJd - lastDriftJd.current
+    lastDriftJd.current = simClock.bodyJd
+    drift.current = today ? 0 : (drift.current + THREE.MathUtils.clamp(days * 0.1, 0, delta * 0.004)) % (Math.PI * 2)
     if (cloud.current) cloud.current.rotation.y = drift.current
     // the deck's height follows the camera's distance (in Earth radii)
     const earth = cloud.current?.parent
