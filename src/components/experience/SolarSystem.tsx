@@ -39,6 +39,7 @@ import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
+import { earthToday, loadEarthToday } from './earthToday'
 import CloudVolume from './CloudVolume'
 import Aurora, { AURORA } from './Aurora'
 import { bodyFrames } from './spaceBodies'
@@ -2767,17 +2768,26 @@ function EarthCloudLayer({
 }) {
   const cloud = useRef<THREE.Mesh>(null)
   const drift = useRef(0)
+  // yesterday's real clouds (NASA GIBS), once fetched; the usual map until then
+  const [today, setToday] = useState<THREE.Texture | null>(earthToday.texture)
+  useEffect(() => {
+    const ready = () => setToday(earthToday.texture)
+    earthToday.ready.add(ready)
+    return () => void earthToday.ready.delete(ready)
+  }, [])
+  const shown = today ?? texture
 
   // the ground's shadow map reads the same clouds
   useEffect(() => {
-    earthNight.uClouds.value = texture
-    earthNight.uHasClouds.value = texture ? 1 : 0
-    cloudVolume.uCloudMap.value = texture
-  }, [texture])
+    earthNight.uClouds.value = shown
+    earthNight.uHasClouds.value = shown ? 1 : 0
+    cloudVolume.uCloudMap.value = shown
+  }, [shown])
 
   useFrame((state, delta) => {
-    // weather drifts east relative to the ground
-    drift.current = (drift.current + delta * 0.01) % (Math.PI * 2)
+    // weather drifts east relative to the ground (real clouds stay where
+    // the satellites saw them)
+    drift.current = today ? 0 : (drift.current + delta * 0.01) % (Math.PI * 2)
     if (cloud.current) cloud.current.rotation.y = drift.current
     // the deck's height follows the camera's distance (in Earth radii)
     const earth = cloud.current?.parent
@@ -2786,6 +2796,8 @@ function EarthCloudLayer({
       const e = earth.matrixWorld.elements
       const earthRadius = Math.hypot(e[0], e[1], e[2])
       const away = state.camera.position.distanceTo(_cloudCentre) / earthRadius
+      // near Earth: fetch yesterday's real clouds
+      if (away < 12 && !earthToday.started) loadEarthToday()
       const height = THREE.MathUtils.lerp(CLOUD_HEIGHT_NEAR, CLOUD_HEIGHT_FAR, THREE.MathUtils.smoothstep(away, 1.25, 3))
       cloud.current.scale.setScalar(radius * (1 + height))
       earthNight.uCloudHeight.value = height
@@ -2794,7 +2806,7 @@ function EarthCloudLayer({
     earthNight.uCloudShift.value = drift.current / (Math.PI * 2)
     cloudDeck.shift = earthNight.uCloudShift.value
     cloudVolume.uCloudShift.value = earthNight.uCloudShift.value
-    cloudVolume.uCloudMap.value = texture
+    cloudVolume.uCloudMap.value = shown
     // flying low, the flat deck gives way to the clouds in 3D
     if (cloud.current) {
       const flat = cloud.current.material as THREE.MeshPhongMaterial
@@ -2803,7 +2815,7 @@ function EarthCloudLayer({
     }
   })
 
-  if (!texture) return null
+  if (!shown) return null
 
   return (
     <>
@@ -2812,7 +2824,7 @@ function EarthCloudLayer({
       <sphereGeometry args={[1, 192, 192]} />
       <meshPhongMaterial
         color="#ffffff"
-        alphaMap={texture}
+        alphaMap={shown}
         transparent
         opacity={0.95}
         depthWrite={false}

@@ -60,8 +60,9 @@ export function planWarp(
     end = goal.clone().addScaledVector(arrive.normalize(), 1500 / KM_PER_UNIT)
   }
   if (target >= FIRST_CRAFT_ID && target < FIRST_STAR_ID) {
-    // a spacecraft: a few hundred metres off (the rover: from above)
-    const off = Math.max(radius * 8, 0.3 / KM_PER_UNIT)
+    // a spacecraft: alongside, close enough to see it against the Shuttle
+    // (the rover: from above)
+    const off = Math.max(radius * 3, 0.08 / KM_PER_UNIT)
     if (target === FIRST_CRAFT_ID + 5) {
       const mars = getBodyOrbitPosition(3, simClock.jd, new THREE.Vector3())
       end = goal.clone().addScaledVector(goal.clone().sub(mars).normalize(), off)

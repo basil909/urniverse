@@ -28,6 +28,7 @@ import { getShipPass, shipCamera, shipScene } from './shipLayer'
 import { cloudDeck, ground, groundAltitude, groundLatLon, ringState, shipShadow, sphereUv } from './groundState'
 import { FEATURES } from './features'
 import { CLOUD_BASE_KM, CLOUD_TOP_KM } from './clouds'
+import { earthToday } from './earthToday'
 import {
   FIRST_CRAFT_ID,
   COMET_ID,
@@ -1816,7 +1817,9 @@ export default function Pilot() {
       if (heightKm > CLOUD_BASE_KM - 0.3 && heightKm < CLOUD_TOP_KM) {
         _local.normalize()
         const [u, v] = sphereUv(_local)
-        const cover = ground.model.cloudCover((((u - cloudDeck.shift) % 1) + 1) % 1, v)
+        const cu = (((u - cloudDeck.shift) % 1) + 1) % 1
+        // yesterday's real clouds when loaded, else the usual map
+        const cover = earthToday.cover(cu, v) ?? ground.model.cloudCover(cu, v)
         const topKm = CLOUD_BASE_KM + (CLOUD_TOP_KM - CLOUD_BASE_KM) * THREE.MathUtils.lerp(0.28, 1, THREE.MathUtils.smoothstep(cover, 0.4, 0.95)) * 0.8
         const near =
           THREE.MathUtils.smoothstep(heightKm, CLOUD_BASE_KM - 0.2, CLOUD_BASE_KM + 0.4) *

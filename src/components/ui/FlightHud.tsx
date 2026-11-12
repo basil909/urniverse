@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { pilot, resetPilotInput, setView, TIME_STEPS, VIEW_STEPS } from '../experience/pilotState'
 import { FlightAudio, SOUND_EVENT, soundSwitch } from './flightAudio'
+import { earthToday } from '../experience/earthToday'
 
 /* the first flight's guide: three steps, shown once (remembered) */
 const GUIDE_KEY = 'urniverse-flight-guide'
@@ -295,6 +296,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [hullK, setHullK] = useState(0)
   const [goTo, setGoTo] = useState(false)
   const [controls, setControls] = useState(false)
+  const [cloudsDate, setCloudsDate] = useState('')
   const goToOpen = useRef(false)
   const controlsOpen = useRef(false)
   useEffect(() => {
@@ -348,7 +350,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           // and how big it is, in Shuttles (37.24 m long)
           const shuttles = (pilot.nearestRadiusKm * 2) / 0.03724
           const across =
-            shuttles >= 1e9
+            world.kind === 'craft'
+              ? `${Math.round(pilot.nearestRadiusKm * 2000)} m across · ${shuttles < 1 ? `${Math.round(shuttles * 100)}% of the Shuttle’s length` : `${shuttles.toFixed(1)} Shuttle lengths`}`
+              : shuttles >= 1e9
               ? `${(shuttles / 1e9).toFixed(shuttles >= 1e10 ? 0 : 1)} billion`
               : shuttles >= 1e6
               ? `${(shuttles / 1e6).toFixed(shuttles >= 1e7 ? 0 : 1)} million`
@@ -375,6 +379,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       const { lat, lon } = pilot.site
       setSite(`${Math.abs(lat).toFixed(1)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lon).toFixed(1)}° ${lon < 0 ? 'W' : 'E'}`)
       setImmersion(pilot.immersion)
+      setCloudsDate(earthToday.date)
       setHullK(pilot.hullK)
       // crossing the heliopause, where the Sun's wind meets the galaxy's
       if (lastSunAU < 120 && pilot.sunAU >= 120) showToast('Leaving the heliosphere: interstellar space begins')
@@ -793,6 +798,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         </span>
       </div>
 
+      {/* the clouds are yesterday's real ones: say so, near Earth */}
+      {nearest === 'Earth' && altitude >= 300 && altitude < 60000 && cloudsDate && (
+        <p className="flight-credit">
+          Clouds: NASA GIBS, VIIRS and MODIS true colour of {cloudsDate} (UTC)
+        </p>
+      )}
       {/* credit for the streamed ground data, shown while it is on screen */}
       {nearest === 'Earth' && altitude >= 0 && altitude < 300 && (
         <p className="flight-credit">
