@@ -51,6 +51,9 @@ export const GROUND: Record<number, GroundConfig> = {
 const DETAIL_KM = 60
 export const OCTAVES = 14
 const GAIN = 0.47
+/* real elevation's pixels are ~30 m: generated roughness only below this
+   wavelength (metres) is added to it */
+const FINE_DETAIL_M = 60
 
 /* ---- the same noise in JS and GLSL: integer hash, value noise */
 function hash3(x: number, y: number, z: number) {
@@ -167,6 +170,9 @@ float gHeight(vec3 d, float spacing) {
   float h = uHasRelief > 0.5 ? (texture2D(uReliefMap, uv).r - 0.5) * uRelief : 0.0;
   float land = gLand(uv);
   float detail = 0.0;
+  // (the octaves finer than real elevation data resolves, ~60 m)
+  float fine = 0.0;
+  float finest = ${FINE_DETAIL_M.toFixed(1)} / uRadiusM;
   float amp = uRough;
   float f = uDetailFreq;
   for (int k = 0; k < ${OCTAVES}; k++) {
@@ -175,18 +181,22 @@ float gHeight(vec3 d, float spacing) {
     if (shown <= 0.0) break;
     float n = gNoise(d * f + float(k) * 17.0);
     float ridge = 1.0 - abs(2.0 * n - 1.0);
-    detail += (mix(n, ridge * ridge, uRidged) - 0.5) * 2.0 * amp * shown;
+    float octave = (mix(n, ridge * ridge, uRidged) - 0.5) * 2.0 * amp * shown;
+    detail += octave;
+    if (wavelength < finest) fine += octave;
     amp *= ${GAIN};
     f *= 2.0;
   }
   // Earth: land rises gently from the shore; the sea is flat
   h += uHasSea > 0.5 ? land * (abs(detail) + uRough * 0.25) : detail;
-  // where Earth's real elevation has arrived, it takes over (with a
-  // little generated roughness below its ~30 m pixels)
+  // where Earth's real elevation has arrived, it takes over, with a
+  // little generated roughness below its ~30 m pixels (a metre or so,
+  // eased in from the shore: switched on at the waterline it stood every
+  // scrap of land in a marsh up as a cliff-sided mound)
   if (uEarthElev > 0.5) {
     float known;
     float elevation = gElevationOver(uv, spacing, known);
-    float real = elevation / uRadiusM + (elevation > 0.0 ? detail * 0.02 : 0.0);
+    float real = elevation / uRadiusM + fine * smoothstep(0.0, 3.0, elevation);
     h = mix(h, real, known);
   }
   return h * uGroundFade;
@@ -287,12 +297,16 @@ export class GroundModel {
     const [u, v] = sphereUv(d)
     let h = this.relief ? (sample(this.relief, u, v) - 0.5) * this.reliefRadii : 0
     let detail = 0
+    let fine = 0
+    const finest = FINE_DETAIL_M / (this.config.radiusKm * 1000)
     let amp = this.roughRadii
     let f = this.detailFreq
     for (let k = 0; k < OCTAVES; k += 1) {
       const n = valueNoise(d.x * f + k * 17, d.y * f + k * 17, d.z * f + k * 17)
       const ridge = 1 - Math.abs(2 * n - 1)
-      detail += ((n + (ridge * ridge - n) * this.config.ridged) - 0.5) * 2 * amp
+      const octave = ((n + (ridge * ridge - n) * this.config.ridged) - 0.5) * 2 * amp
+      detail += octave
+      if (1 / f < finest) fine += octave
       amp *= GAIN
       f *= 2
     }
@@ -301,8 +315,8 @@ export class GroundModel {
       const lat = Math.min(Math.max((v - 0.5) * Math.PI, -1.4835), 1.4835)
       const real = this.elevation(u, 0.5 + Math.asinh(Math.tan(lat)) / (2 * Math.PI))
       if (real) {
-        const value =
-          Math.max(real.height, 0) / (this.config.radiusKm * 1000) + (real.height > 0 ? detail * 0.02 : 0)
+        const shore = Math.min(Math.max(real.height / 3, 0), 1)
+        const value = Math.max(real.height, 0) / (this.config.radiusKm * 1000) + fine * shore * shore * (3 - 2 * shore)
         h += (value - h) * real.known
       }
     }

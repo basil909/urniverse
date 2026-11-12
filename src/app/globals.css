@@ -1699,7 +1699,7 @@ html.is-photo .flight-land { opacity: 0; pointer-events: none; }
   100% { opacity: 0; }
 }
 /* standing on a world, the markers step back to faint rings */
-.flight-hud.is-landed .flight-marker:not(:hover) { opacity: 0.3; }
+.flight-hud.is-landed .flight-marker:not(:hover):not(.is-hidden) { opacity: 0.3; }
 .flight-hud.is-landed .flight-marker:not(:hover) .flight-marker-label { opacity: 0; }
 .flight-marker-label.is-quiet { opacity: 0; }
 .flight-marker:hover .flight-marker-label.is-quiet { opacity: 1; }
