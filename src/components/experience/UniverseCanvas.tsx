@@ -27,6 +27,7 @@ import NightSky from './NightSky'
 import { lens } from './lens'
 import Pilot, { GroundCarry } from './Pilot'
 import NearStars, { skyHandOver } from './NearStars'
+import FocusCull from './FocusCull'
 import { getShipPass } from './shipLayer'
 import { pilot } from './pilotState'
 import {
@@ -1395,6 +1396,9 @@ function Scene({
       <WarmUp />
 
       <StarStreaks />
+
+      {/* last: the far, tiny things drawn lightly (flight) */}
+      <FocusCull />
 
 
 

@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { AU_UNITS, layout, orbitalDisplayDistance } from './orbit'
 import { simClock } from './simClock'
 import { lens } from './lens'
+import { pilot } from './pilotState'
 
 /* The small bodies: the main asteroid belt (with its Kirkwood gaps),
    Jupiter's Trojans sharing its orbit 60° ahead and behind, and the
@@ -229,6 +230,9 @@ function useBeltMaterial(color: string, size: number, opacity: number) {
     material.uniforms.uScale.value = state.size.height * ratio * 0.5
     // step back while a planet is the subject, so it never sits in a speckle
     material.uniforms.uOpacity.value = layout.trueScale ? Math.min(1, opacity * 1.8) : opacity * (1 - 0.7 * lens.closeUp)
+    // flying near a world, it is the focus: the belts step back (unless
+    // you are among the asteroids)
+    material.visible = !(pilot.active && pilot.focus && pilot.zone === '')
   })
   return material
 }

@@ -283,6 +283,44 @@ function NearStar() {
 }
 /* the quality levels, lowest first: the pixel ratio (null: the screen's
    own) and how fine the marched effects are (0 light .. 2 full) */
+/* where every body is this frame (filled by the nearest-body search),
+   for the warp's check that a step does not cross a world */
+const BODY_PLACES = Array.from({ length: BODY_COUNT }, () => new THREE.Vector3())
+const BODY_RADII = new Float64Array(BODY_COUNT)
+const _stepFrom = new THREE.Vector3()
+const _stepDir = new THREE.Vector3()
+const _oc = new THREE.Vector3()
+const _hit = new THREE.Vector3()
+/* the first world the step from -> to would enter (a little above its
+   surface; the Sun well clear of its glare), and where to stop: just
+   short of it, on the way in. null if the way is clear */
+function sweepBodies(from: THREE.Vector3, to: THREE.Vector3) {
+  _stepDir.copy(to).sub(from)
+  const length = _stepDir.length()
+  if (length < 1e-12) return null
+  _stepDir.divideScalar(length)
+  let first = Infinity
+  // false if the step starts inside this sphere (nothing to enter)
+  const test = (centre: THREE.Vector3, radius: number) => {
+    _oc.copy(from).sub(centre)
+    const b = _oc.dot(_stepDir)
+    const c = _oc.lengthSq() - radius * radius
+    if (c <= 0) return false
+    const disc = b * b - c
+    if (disc < 0) return true
+    const t = -b - Math.sqrt(disc)
+    if (t >= 0 && t <= length && t < first) first = t
+    return true
+  }
+  // a little above each world; skimming lower than that, its surface
+  for (let i = 0; i < BODY_COUNT; i += 1) {
+    if (!test(BODY_PLACES[i], BODY_RADII[i] * 1.03)) test(BODY_PLACES[i], BODY_RADII[i])
+  }
+  test(SYSTEM_OFFSET, SUN_TRUE_RADIUS * 1.6)
+  if (first === Infinity) return null
+  return _hit.copy(from).addScaledVector(_stepDir, Math.max(0, first - length * 1e-4))
+}
+
 const QUALITY_DPR: (number | null)[] = [0.75, 1, null, null]
 const QUALITY_EFFECTS = [0, 1, 1, 2]
 const _orbitM = new THREE.Matrix4()
@@ -1307,6 +1345,8 @@ export default function Pilot() {
     for (let i = 0; i < BODY_COUNT; i += 1) {
       getBodyPosition(i, simClock.jd, _bodyCenter)
       const radius = getBodyRadius(i)
+      BODY_PLACES[i].copy(_bodyCenter)
+      BODY_RADII[i] = radius
       const gap = jet.position.distanceTo(_bodyCenter) - radius
       if (gap < clearance) {
         clearance = gap
@@ -1319,6 +1359,9 @@ export default function Pilot() {
     pilot.nearest = nearest
     pilot.nearestIndex = nearestIndex
     pilot.nearestRadiusKm = nearestRadius * KM_PER_UNIT
+    // near a world (a planet, an asteroid, the Moon or a large moon): it
+    // is the focus, and far things step back
+    pilot.focus = nearestIndex >= 0 && nearestIndex < 20 && clearance < nearestRadius * 20
     pilot.clearance = clearance
     // altitude in km, at the planets' scale (the Sun is not drawn to it)
     pilot.altitudeKm = nearestIndex >= 0 ? clearance * KM_PER_UNIT : -1
@@ -1375,9 +1418,10 @@ export default function Pilot() {
     // landing, rolling out, standing and taking off fly themselves
     const auto = pilot.landState !== 'flying'
     const thrustHeld = keys.has('w') || pilot.touchThrust || pad.thrust > 0.2
-    const forwardKey = !warping && !auto && thrustHeld
     const brakeKey = keys.has('s') || pad.brake > 0.2
-    const boost = keys.has('shift') || pad.boost
+    // Shift: warp speed, anywhere, even skimming a planet
+    const boost = (keys.has('shift') || pad.boost) && !warping && !auto && !brakeKey
+    const forwardKey = !warping && !auto && (thrustHeld || boost)
     // stick-like input, -1..1: a soft centre for fine corrections, full
     // deflection for hard turns
     const shape = (v: number, dead: number) => {
@@ -1404,11 +1448,21 @@ export default function Pilot() {
     // (between the stars, thousands of AU from anything, the warp has no
     // ceiling: the nearest stars are light-years apart)
     const interstellar = clearance > 2000 * AU_UNITS
+    // Shift: up to 40 times light speed wherever you are (no ceiling
+    // between the stars); otherwise the limit follows the nearest surface
     const limit = boost
-      ? THREE.MathUtils.clamp(clearance * 1.5, SHIP_LENGTH * 2, interstellar ? Infinity : LIGHT * WARP)
+      ? interstellar
+        ? Math.max(LIGHT * WARP, clearance * 1.5)
+        : LIGHT * WARP
       : THREE.MathUtils.clamp(clearance * 0.5, SHIP_LENGTH * 0.8, LIGHT)
     const target = forwardKey ? limit : brakeKey ? 0 : Math.min(speed.current, limit)
-    speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : brakeKey ? 2.2 : 3)))
+    if (boost) {
+      // punching it: the speed multiplies, by orders of magnitude in a few
+      // seconds (from walking pace to light speed in about three)
+      speed.current = Math.min(Math.max(speed.current, SHIP_LENGTH * 20) * Math.exp(delta * 4.6), limit)
+    } else {
+      speed.current += (target - speed.current) * (1 - Math.exp(-delta * (forwardKey ? 1.4 : brakeKey ? 2.2 : 3)))
+    }
     // over the limit (closing on a world): slow at once, or at these
     // speeds the ship would sail straight past it
     if (speed.current > limit) speed.current += (limit - speed.current) * (1 - Math.exp(-delta * 9))
@@ -1483,10 +1537,22 @@ export default function Pilot() {
     _forward.set(0, 0, -1).applyQuaternion(jet.quaternion)
     if (!auto) {
       _wanted.copy(_forward).multiplyScalar(speed.current)
-      velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 3.2))
+      // at warp the ship goes where it points (no slide of millions of km)
+      velocity.current.lerp(_wanted, boost ? 1 : 1 - Math.exp(-delta * 3.2))
       // momentum carries direction, never extra speed
       if (velocity.current.length() > speed.current) velocity.current.setLength(speed.current)
+      _stepFrom.copy(jet.position)
       jet.position.addScaledVector(velocity.current, delta)
+      // at these speeds one frame can cross a planet: if the step would
+      // pass through a world (or the Sun), the ship drops out just short
+      if (velocity.current.length() * delta > clearance * 0.25) {
+        const hit = sweepBodies(_stepFrom, jet.position)
+        if (hit) {
+          jet.position.copy(hit)
+          speed.current = Math.min(speed.current, LIGHT * 0.01)
+          velocity.current.setLength(speed.current)
+        }
+      }
     }
 
     // ---- the ground: never lower than 100 km over Earth (1.6% of a
@@ -1600,7 +1666,11 @@ export default function Pilot() {
       pilot.warpOrigin.addScaledVector(_forward, 70 * pilot.warpGlow * delta)
       pilot.speed = Math.max(pilot.speed, pilot.warpGlow)
     } else {
-      pilot.warpGlow += (0 - pilot.warpGlow) * (1 - Math.exp(-delta * 4))
+      // flying fast yourself: the warp's streaks past a third of light speed
+      const c = pilot.kms / 299792.458
+      const glow = THREE.MathUtils.smoothstep(Math.log10(Math.max(c, 1e-6)), -0.5, 0.7)
+      pilot.warpGlow += (glow - pilot.warpGlow) * (1 - Math.exp(-delta * 4))
+      if (pilot.warpGlow > 0.01) pilot.warpOrigin.addScaledVector(_forward, 70 * pilot.warpGlow * delta)
     }
 
     // ---- re-entry: dense air, high speed

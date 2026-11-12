@@ -31,6 +31,8 @@ export const pilot = {
   nearestIndex: -2,
   /** among the asteroids: 'belt', 'L4' or 'L5' (Jupiter's Trojans), or '' */
   zone: '',
+  /** near a world: it is the focus; the belts and far extras step back */
+  focus: false,
   /** the nearest body's radius, km */
   nearestRadiusKm: 0,
   /** distance to the nearest surface, scene units */

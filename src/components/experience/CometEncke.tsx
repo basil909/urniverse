@@ -247,6 +247,9 @@ export default function CometEncke() {
     if (!pilot.active) return
     getBodyPosition(COMET_ID, simClock.jd, _pos)
     const distance = _pos.distanceTo(camera.position)
+    // near a world, it is the focus: a distant comet steps back
+    g.visible = !(pilot.focus && distance > 0.3 * AU_UNITS)
+    if (!g.visible) return
     const far = farScale(distance)
     g.position.copy(_pos).sub(camera.position).multiplyScalar(far).add(camera.position)
     g.scale.setScalar(far)
