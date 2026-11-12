@@ -411,11 +411,16 @@ const AIR: Record<string, Air> = {
   },
 }
 
+/* how finely the air is marched, by quality (0 light .. 2 full) */
+const AIR_VIEW_STEPS = [8, 12, 16]
+const AIR_LIGHT_STEPS = [3, 4, 6]
+
 const PHYSICAL_AIR_FRAGMENT_SHADER = /* glsl */ `
 #define PI 3.14159265
 uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform float uAirglow;
 uniform vec3 uRayleigh; uniform vec3 uMie; uniform vec3 uMieExt; uniform vec3 uMieG;
 uniform float uHR; uniform float uHM; uniform float uSun; uniform float uExaggerate;
+uniform int uViewSteps; uniform int uLightSteps;
 varying vec3 vNormal; varying vec3 vWorldPosition;
 varying vec3 vCenter; varying float vRadius;
 
@@ -457,14 +462,13 @@ void main() {
   if (t1 <= t0) discard;
 
   vec3 sunDir = normalize(uSunPosition - vCenter);
-  const int VIEW = 16;
-  const int LIGHT = 6;
-  float seg = (t1 - t0) / float(VIEW);
+  float seg = (t1 - t0) / float(uViewSteps);
   float depthR = 0.0;
   float depthM = 0.0;
   vec3 sumR = vec3(0.0);
   vec3 sumM = vec3(0.0);
-  for (int i = 0; i < VIEW; i++) {
+  for (int i = 0; i < 16; i++) {
+    if (i >= uViewSteps) break;
     vec3 p = o + d * (t0 + seg * (float(i) + 0.5));
     float h = length(p) - 1.0;
     float dR = exp(-h / hR) * seg;
@@ -475,10 +479,11 @@ void main() {
     vec2 tl = sphereHit(p, sunDir, top);
     vec2 tb = sphereHit(p, sunDir, ground * 0.9999);
     if (tb.x < 0.0 || tb.x > 1e8) {
-      float sl = tl.y / float(LIGHT);
+      float sl = tl.y / float(uLightSteps);
       float lR = 0.0;
       float lM = 0.0;
-      for (int j = 0; j < LIGHT; j++) {
+      for (int j = 0; j < 6; j++) {
+        if (j >= uLightSteps) break;
         float hq = length(p + sunDir * sl * (float(j) + 0.5)) - 1.0;
         lR += exp(-hq / hR) * sl;
         lM += exp(-hq / hM) * sl;
@@ -2086,6 +2091,8 @@ function Planet({
             uHM: { value: AIR[planet.name].hM },
             uSun: { value: AIR[planet.name].sun },
             uExaggerate: { value: 1 },
+            uViewSteps: { value: AIR_VIEW_STEPS[2] },
+            uLightSteps: { value: AIR_LIGHT_STEPS[2] },
           }
         : {}),
     }
@@ -2358,6 +2365,8 @@ function Planet({
         const away = camera.position.distanceTo(_airCenter) / (_airScale.x / shell)
         const most = (shell - 1) / (9 * Math.max(air.hR, air.hM))
         atmosphere.uExaggerate.value = THREE.MathUtils.clamp(1 + (away - 1.03) * 1.5, 1, Math.max(1, most))
+        atmosphere.uViewSteps.value = AIR_VIEW_STEPS[pilot.effects]
+        atmosphere.uLightSteps.value = AIR_LIGHT_STEPS[pilot.effects]
       }
     }
 

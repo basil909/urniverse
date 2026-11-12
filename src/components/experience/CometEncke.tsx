@@ -169,6 +169,7 @@ const _anti = new THREE.Vector3()
 const _now = new THREE.Vector3()
 const _later = new THREE.Vector3()
 const _back = new THREE.Vector3()
+const _sunward = new THREE.Vector3()
 
 export default function CometEncke() {
   const camera = useThree((state) => state.camera)
@@ -265,7 +266,7 @@ export default function CometEncke() {
     coma.current?.scale.setScalar(comaUnits)
     nucleus.current?.scale.setScalar(COMET.radiusKm / KM_PER_UNIT)
     nucleus.current?.rotateY(delta * ((2 * Math.PI) / (11.08 * 3600)) * Math.max(1, pilot.timeScale))
-    const sunward = _anti.clone().negate()
+    const sunward = _sunward.copy(_anti).negate()
     parts.nucleusMaterial.uniforms.uSun.value.copy(sunward)
     const cu = parts.comaMaterial.uniforms
     cu.uCam.value.copy(camera.position).sub(_pos).divideScalar(comaUnits)

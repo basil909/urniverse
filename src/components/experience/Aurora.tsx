@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
+import { pilot } from './pilotState'
+
 /* ============================================================
    AURORAS, UP CLOSE
    Curtains of light round each magnetic pole, where particles from the
@@ -58,6 +60,7 @@ uniform vec3 uCam; uniform vec3 uSun; uniform vec3 uAxis;
 uniform float uNight; uniform float uDay; uniform float uWidth;
 uniform float uBase; uniform float uTop; uniform float uShell;
 uniform vec3 uLow; uniform vec3 uMid; uniform vec3 uHigh; uniform float uGlow; uniform float uTime; uniform float uOn;
+uniform int uSteps;
 varying vec3 vLocal;
 
 float aHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -104,16 +107,30 @@ void main() {
   float w = uWidth * 0.0174533;
 
   vec3 color = vec3(0.0);
+  // how far from the oval a curtain can stand (its folds, the curtains
+  // either side, its own thickness)
+  float reach = (1.3 + 1.2 + 0.18) * 0.0174533 + w * 3.0;
+  float least = w * 0.35;
   float t = t0 + aHash(gl_FragCoord.xy) * w * 0.3;
   for (int i = 0; i < 110; i++) {
-    if (t >= t1) break;
+    if (t >= t1 || i >= uSteps) break;
     vec3 p = o + d * t;
     float r = length(p);
     vec3 n = p / r;
+    // first the cheap reasons there is nothing here, each with a step
+    // that cannot overshoot a curtain:
+    // below the lowest glow (the height changes no faster than the step)
+    float h0 = r - 1.0;
+    if (h0 < uBase * 0.97) { t += max(uBase * 0.97 - h0, least * r); continue; }
+    // in daylight (it fades in over some 15 degrees)
+    if (dot(n, uSun) > 0.09) { t += max(0.02 * r, least * r); continue; }
     float cm = dot(n, uAxis);
     float theta = acos(clamp(abs(cm), 0.0, 1.0));
     float phi = atan(dot(n, dusk), dot(n, mid));
     float oval = mix(uNight, uDay, 0.5 - 0.5 * cos(phi)) * 0.0174533;
+    // far from the oval (moving changes the angle to it at most ~1.3x as fast)
+    float coarse = abs(theta - oval) - reach;
+    if (coarse > 0.0) { t += max(coarse * r * 0.7, least * r); continue; }
     // three curtains, folding and drifting
     float nearest = 10.0;
     float glow = 0.0;
@@ -148,6 +165,9 @@ void main() {
   gl_FragColor = vec4(color, 1.0);
 }`
 
+/* how many steps along each line of sight, by quality (0 light .. 2 full) */
+const AURORA_STEPS = [56, 80, 110]
+
 const _inverse = new THREE.Matrix4()
 const _centre = new THREE.Vector3()
 
@@ -175,6 +195,7 @@ export default function Aurora({ look, sun, near }: { look: AuroraLook; sun: THR
         uGlow: { value: look.glow },
         uTime: { value: 0 },
         uOn: { value: 0 },
+        uSteps: { value: AURORA_STEPS[2] },
       },
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -202,6 +223,7 @@ export default function Aurora({ look, sun, near }: { look: AuroraLook; sun: THR
     const on = 1 - THREE.MathUtils.smoothstep(away, 4, 8)
     const u = material.uniforms
     u.uOn.value = on
+    u.uSteps.value = AURORA_STEPS[pilot.effects]
     if (near) near.value = on
     shellMesh.visible = on > 0.01
     if (!shellMesh.visible) return

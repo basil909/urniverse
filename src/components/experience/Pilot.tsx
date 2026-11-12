@@ -293,6 +293,10 @@ function NearStar() {
     </group>
   )
 }
+/* the quality levels, lowest first: the pixel ratio (null: the screen's
+   own) and how fine the marched effects are (0 light .. 2 full) */
+const QUALITY_DPR: (number | null)[] = [0.75, 1, null, null]
+const QUALITY_EFFECTS = [0, 1, 1, 2]
 const _orbitM = new THREE.Matrix4()
 const _featureDir = new THREE.Vector3()
 
@@ -1255,7 +1259,7 @@ export default function Pilot() {
   // automatic quality: the pixel ratio steps down when frames run long
   const setDpr = useThree((state) => state.setDpr)
   const startDpr = useRef(0)
-  const quality = useRef({ level: 2, frameTime: 1 / 60, since: 0 })
+  const quality = useRef({ level: 3, frameTime: 1 / 60, since: 0 })
   const viewDistance = useRef(VIEW_NEAR)
   const beacon = useRef<THREE.Sprite>(null)
   const beaconMaterial = useMemo(() => {
@@ -1306,7 +1310,8 @@ export default function Pilot() {
         orbit.current = null
         pilot.timeScale = 0
         if (startDpr.current) setDpr(startDpr.current)
-        quality.current.level = 2
+        quality.current.level = 3
+        pilot.effects = 2
         // back to the journey's compressed Solar System, and its camera
         layout.trueScale = false
         SYSTEM_OFFSET.copy(SYSTEM_BASE)
@@ -2085,7 +2090,9 @@ export default function Pilot() {
       }
     }
 
-    // ---- quality: lower the pixel ratio if frames run long, raise it back
+    // ---- quality: if frames run long, first the effects that march along
+    // each line of sight (air, clouds, auroras) take fewer, longer steps,
+    // then the pixel ratio comes down; both come back when there is room
     {
       const q = quality.current
       q.frameTime += (rawDelta - q.frameTime) * 0.05
@@ -2093,10 +2100,12 @@ export default function Pilot() {
       if (!startDpr.current) startDpr.current = Math.min(window.devicePixelRatio || 1, 2)
       const slow = q.frameTime > 1 / 38
       const fast = q.frameTime < 1 / 57
-      if ((slow && q.since > 2 && q.level > 0) || (fast && q.since > 6 && q.level < 2)) {
+      if ((slow && q.since > 2 && q.level > 0) || (fast && q.since > 6 && q.level < 3)) {
+        const before = QUALITY_DPR[q.level]
         q.level += slow ? -1 : 1
         q.since = 0
-        setDpr([0.75, 1, startDpr.current][q.level])
+        pilot.effects = QUALITY_EFFECTS[q.level]
+        if (QUALITY_DPR[q.level] !== before) setDpr(QUALITY_DPR[q.level] ?? startDpr.current)
       }
     }
 

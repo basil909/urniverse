@@ -82,6 +82,10 @@ export const pilot = {
   /** near the Sun: hull temperature (K), and how fierce the glare (0..1) */
   hullK: 0,
   sunHeat: 0,
+  /** how fine the effects marched along each line of sight are (air,
+      clouds, auroras): 2 full, 1 lighter, 0 lightest; lowered with the
+      pixel ratio when frames run long */
+  effects: 2,
   /** time in flight: 0 (held still), 1 (real time) or faster (T cycles) */
   timeScale: 0,
   /** orbiting the nearest world (O), and that orbit's period, minutes */

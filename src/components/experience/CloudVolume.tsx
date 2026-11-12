@@ -37,6 +37,7 @@ void main() {
 
 const FRAGMENT = /* glsl */ `
 uniform vec3 uCamRel; uniform vec3 uCam; uniform vec3 uSun; uniform float uWhich; uniform float uLight;
+uniform int uSteps; uniform int uLightSteps;
 varying vec3 vRel;
 ${CLOUD_GLSL}
 
@@ -81,7 +82,7 @@ void main() {
   t1 = min(t1, t0 + 0.06);
   if (t1 <= t0) discard;
 
-  const int STEPS = 48;
+  float steps = float(uSteps);
   float span = t1 - t0;
   float jitter = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
   float mu = dot(d, uSun);
@@ -90,11 +91,12 @@ void main() {
   vec3 color = vec3(0.0);
   float through = 1.0;
   float near = 1e9;
-  for (int i = 0; i < STEPS; i++) {
+  for (int i = 0; i < 48; i++) {
+    if (i >= uSteps) break;
     // steps short near the eye and longer further out
-    float x = (float(i) + jitter) / float(STEPS);
+    float x = (float(i) + jitter) / steps;
     float t = t0 + span * x * x;
-    float stride = span * 2.0 * max(x, 0.5 / float(STEPS)) / float(STEPS);
+    float stride = span * 2.0 * max(x, 0.5 / steps) / steps;
     vec3 p = o + d * t;
     // fine billows only up close (beyond, they would only shimmer)
     float detail = 1.0 - smoothstep(0.0008, 0.005, t);
@@ -108,7 +110,12 @@ void main() {
     float sunUp = dot(up, uSun);
     // sunlight reaching this point: through the cloud towards the Sun
     float toSun = 0.0;
-    for (int j = 0; j < 3; j++) toSun += cloudDensity(p + uSun * (0.00012 * (float(j) + 0.5) * (float(j) + 1.0)), 0.5);
+    // (fewer samples at lower quality, each standing for more cloud)
+    for (int j = 0; j < 3; j++) {
+      if (j >= uLightSteps) break;
+      toSun += cloudDensity(p + uSun * (0.00012 * (float(j) + 0.5) * (float(j) + 1.0)), 0.5);
+    }
+    toSun *= 3.0 / float(uLightSteps);
     float beer = exp(-toSun * 0.00016 * 22.0 * 6371.0);
     // the powder effect: dark edges facing away, bright sunlit rims
     float lit = beer * mix(0.55, 1.0, 1.0 - exp(-sigma * 0.0004));
@@ -160,6 +167,11 @@ function patchGeometry() {
   return geometry
 }
 
+/* how finely the cloud is marched, by quality (0 light .. 2 full) */
+const CLOUD_STEPS = [24, 34, 48]
+const CLOUD_LIGHT_STEPS = [1, 2, 3]
+const CLOUD_SHADE_STEPS = [2, 3, 5]
+
 const _inverse = new THREE.Matrix4()
 const _cam = new THREE.Vector3()
 const _c = new THREE.Vector3()
@@ -177,6 +189,8 @@ export default function CloudVolume({ sun, light }: { sun: THREE.Vector3; light:
       uCam: { value: new THREE.Vector3() },
       uSun: { value: new THREE.Vector3(1, 0, 0) },
       uLight: { value: 1 },
+      uSteps: { value: CLOUD_STEPS[2] },
+      uLightSteps: { value: CLOUD_LIGHT_STEPS[2] },
     }),
     [],
   )
@@ -228,6 +242,13 @@ export default function CloudVolume({ sun, light }: { sun: THREE.Vector3; light:
     _inverse.copy(earth.matrixWorld).invert()
     _cam.copy(state.camera.position).applyMatrix4(_inverse)
     const camR = _cam.length()
+    // only the shells a line of sight can leave by: from above the layer
+    // the top, from below the base, from inside both
+    meshes[0].visible = camR > cloudVolume.uCloudBase.value
+    meshes[1].visible = camR < cloudVolume.uCloudTop.value
+    shared.uSteps.value = CLOUD_STEPS[pilot.effects]
+    shared.uLightSteps.value = CLOUD_LIGHT_STEPS[pilot.effects]
+    cloudVolume.uShadeSteps.value = CLOUD_SHADE_STEPS[pilot.effects]
     _c.copy(_cam).normalize()
     shared.uCam.value.copy(_cam)
     shared.uC.value.copy(_c)

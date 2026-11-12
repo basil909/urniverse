@@ -22,11 +22,13 @@ export const cloudVolume = {
   uCloudTop: { value: 1 + CLOUD_TOP_KM / 6371 },
   /** 0..1: the 3D clouds are in use (flying low over Earth) */
   uCloudOn: { value: 0 },
+  /** samples for a cloud's shadow on the ground (fewer at lower quality) */
+  uShadeSteps: { value: 5 },
 }
 
 export const CLOUD_GLSL = /* glsl */ `
 uniform sampler2D uCloudMap; uniform float uCloudShift;
-uniform float uCloudBase; uniform float uCloudTop; uniform float uCloudOn;
+uniform float uCloudBase; uniform float uCloudTop; uniform float uCloudOn; uniform int uShadeSteps;
 
 float cHash(vec3 p) {
   p = fract(p * 0.3183099 + vec3(0.11, 0.17, 0.13));
@@ -82,9 +84,12 @@ float cloudShade(vec3 p, vec3 sun) {
   float t1 = -b + sqrt(ht);
   if (t1 <= max(t0, 0.0)) return 0.0;
   t0 = max(t0, 0.0);
-  float stride = (t1 - t0) / 5.0;
+  float stride = (t1 - t0) / float(uShadeSteps);
   float depth = 0.0;
-  for (int i = 0; i < 5; i++) depth += cloudDensity(p + sun * (t0 + stride * (float(i) + 0.5)), 0.4);
+  for (int i = 0; i < 5; i++) {
+    if (i >= uShadeSteps) break;
+    depth += cloudDensity(p + sun * (t0 + stride * (float(i) + 0.5)), 0.4);
+  }
   // soft: light leaks round and through the billows
   float tau = depth * stride * 6371.0 * 6.0;
   return (1.0 - exp(-tau)) * uCloudOn;
