@@ -39,8 +39,22 @@ function formatShort(km: number) {
    a kind, and each kind has its own mark and tint, so a glance tells a
    planet from a moon, a spacecraft or a star; hovering says what it is */
 type Kind = 'sun' | 'planet' | 'dwarf' | 'moon' | 'comet' | 'craft' | 'star'
-type World = { index: number; name: string; key: string; kind: Kind; what: string; parent?: number; show?: () => boolean }
-const nearAny = (...ids: number[]) => () => ids.includes(pilot.nearestIndex)
+/* which markers show: the Sun and the planets always; everything else
+   only near it (a moon at its planet, an asteroid or the comet within
+   60 million km, a spacecraft close by, the stars once past the
+   planets), so the HUD stays quiet. `show` gets the distance, km. The
+   one being warped to always shows; all of them are in the Go to list. */
+type World = {
+  index: number
+  name: string
+  key: string
+  kind: Kind
+  what: string
+  parent?: number
+  show?: (km: number) => boolean
+}
+const within = (km: number) => (distance: number) => distance < km
+const AU_KM = 1.496e8
 const STARS: [string, string][] = [
   ['Proxima Centauri', 'Red dwarf · the nearest star'],
   ['Alpha Centauri A', 'Star like the Sun · the nearest such'],
@@ -74,11 +88,11 @@ const WORLDS: World[] = [
   { index: 6, name: 'Uranus', key: '7', kind: 'planet', what: 'Ice giant · tipped on its side' },
   { index: 7, name: 'Neptune', key: '8', kind: 'planet', what: 'Ice giant · the farthest planet' },
   // the largest of the asteroid belt
-  { index: 8, name: 'Ceres', key: '9', kind: 'dwarf', what: 'Dwarf planet · the asteroid belt' },
-  { index: 9, name: 'Vesta', key: '', kind: 'dwarf', what: 'Asteroid · a giant crater at its pole' },
-  { index: 10, name: 'Pallas', key: '', kind: 'dwarf', what: 'Asteroid · on a steep orbit' },
-  { index: 11, name: 'Hygiea', key: '', kind: 'dwarf', what: 'Asteroid · almost round' },
-  { index: 12, name: 'Moon', key: '', kind: 'moon', what: 'Moon of Earth' },
+  { index: 8, name: 'Ceres', key: '9', kind: 'dwarf', what: 'Dwarf planet · the asteroid belt', show: within(6e7) },
+  { index: 9, name: 'Vesta', key: '', kind: 'dwarf', what: 'Asteroid · a giant crater at its pole', show: within(6e7) },
+  { index: 10, name: 'Pallas', key: '', kind: 'dwarf', what: 'Asteroid · on a steep orbit', show: within(6e7) },
+  { index: 11, name: 'Hygiea', key: '', kind: 'dwarf', what: 'Asteroid · almost round', show: within(6e7) },
+  { index: 12, name: 'Moon', key: '', kind: 'moon', what: 'Moon of Earth', parent: 2 },
   // the large moons: shown near their planet
   { index: 13, name: 'Io', key: '', kind: 'moon', what: 'Moon of Jupiter · volcanic', parent: 4 },
   { index: 14, name: 'Europa', key: '', kind: 'moon', what: 'Moon of Jupiter · ocean under ice', parent: 4 },
@@ -88,14 +102,14 @@ const WORLDS: World[] = [
   { index: 18, name: 'Phobos', key: '', kind: 'moon', what: 'Moon of Mars', parent: 3 },
   { index: 19, name: 'Deimos', key: '', kind: 'moon', what: 'Moon of Mars', parent: 3 },
   // a real comet, on its true orbit
-  { index: 46, name: 'Comet Encke', key: '', kind: 'comet', what: 'Comet · nearing the Sun, tails growing' },
+  { index: 46, name: 'Comet Encke', key: '', kind: 'comet', what: 'Comet · nearing the Sun, tails growing', show: within(6e7) },
   // spacecraft: near Earth (or the Moon), out past the planets, on Mars
-  { index: 20, name: 'Space Station', key: '', kind: 'craft', what: 'Spacecraft · crewed, 420 km up', show: nearAny(2, 12, 20, 21, 22) },
-  { index: 21, name: 'Hubble', key: '', kind: 'craft', what: 'Space telescope · 530 km up', show: nearAny(2, 12, 20, 21, 22) },
-  { index: 22, name: 'Webb', key: '', kind: 'craft', what: 'Space telescope · 1.5 million km out', show: nearAny(2, 12, 20, 21, 22) },
-  { index: 23, name: 'Voyager 1', key: '', kind: 'craft', what: 'Spacecraft · the farthest ever sent', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 23 },
-  { index: 24, name: 'Voyager 2', key: '', kind: 'craft', what: 'Spacecraft · in interstellar space', show: () => pilot.sunAU > 30 || pilot.nearestIndex === 24 },
-  { index: 25, name: 'Perseverance', key: '', kind: 'craft', what: 'Rover · Jezero Crater, Mars', show: nearAny(3, 25) },
+  { index: 20, name: 'Space Station', key: '', kind: 'craft', what: 'Spacecraft · crewed, 420 km up', show: within(2e5) },
+  { index: 21, name: 'Hubble', key: '', kind: 'craft', what: 'Space telescope · 530 km up', show: within(2e5) },
+  { index: 22, name: 'Webb', key: '', kind: 'craft', what: 'Space telescope · 1.5 million km out', show: within(3e6) },
+  { index: 23, name: 'Voyager 1', key: '', kind: 'craft', what: 'Spacecraft · the farthest ever sent', show: within(30 * AU_KM) },
+  { index: 24, name: 'Voyager 2', key: '', kind: 'craft', what: 'Spacecraft · in interstellar space', show: within(30 * AU_KM) },
+  { index: 25, name: 'Perseverance', key: '', kind: 'craft', what: 'Rover · Jezero Crater, Mars', show: within(2e5) },
   // the stars: once you are out beyond the planets
   ...STARS.map(([name, what], i): World => ({
     index: 26 + i,
@@ -103,7 +117,7 @@ const WORLDS: World[] = [
     key: '',
     kind: 'star',
     what,
-    show: () => pilot.sunAU > 60 || pilot.nearestIndex >= 26 || pilot.warping !== '',
+    show: () => pilot.sunAU > 60 || (pilot.nearestIndex >= 26 && pilot.nearestIndex < 46),
   })),
 ]
 
@@ -378,14 +392,17 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         element.dataset.edge = onScreen ? 'false' : 'true'
         element.dataset.side = x > width * 0.62 ? 'left' : 'right'
         // once the world itself is plainly visible, its marker steps aside;
-        // a planet's moons only show near it
+        // a planet's moons only show near it, the rest only nearby; the
+        // one being warped to always shows
         const parent = WORLDS[slot].parent
         const show = WORLDS[slot].show
+        const target = pilot.warping !== '' && pilot.warping.endsWith(WORLDS[slot].name)
         const away =
-          (parent !== undefined && pilot.nearestIndex !== parent && pilot.nearestIndex !== marker.index) ||
-          (show !== undefined && !show())
+          !target &&
+          ((parent !== undefined && pilot.nearestIndex !== parent && pilot.nearestIndex !== marker.index) ||
+            (show !== undefined && !show(marker.km)))
         element.classList.toggle('is-hidden', marker.radiusPx > 40 || away)
-        element.classList.toggle('is-target', pilot.warping !== '' && pilot.warping.endsWith(WORLDS[slot].name))
+        element.classList.toggle('is-target', target)
         const label = element.querySelector<HTMLElement>('.flight-marker-label')
         if (label) {
           const text = `${WORLDS[slot].name} · ${formatShort(marker.km)}`
