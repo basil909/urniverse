@@ -46,7 +46,9 @@ export function planWarp(
   const rel = from.clone().sub(SYSTEM_OFFSET)
   const goal = getBodyOrbitPosition(target, simClock.jd, new THREE.Vector3())
   const radius = getBodyRadius(target)
-  const standOff = target < 0 ? 6 : target === 5 ? 5.5 : 3.2
+  // close enough that a planet overfills the view behind the tiny ship
+  // (Saturn a little further, so its rings fit; the Sun further still)
+  const standOff = target < 0 ? 6 : target === 5 ? 3.4 : target < 8 ? 1.6 : 2.4
   // arrive on the near side, turned towards the Sun (the lit face)
   const fromGoal = rel.clone().sub(goal).normalize()
   const sunward = goal.lengthSq() > 0 ? goal.clone().negate().normalize().multiplyScalar(1.2) : new THREE.Vector3()

@@ -44,6 +44,7 @@ import { flyLanding } from './flightLanding'
 import { planWarp, stepWarp, type Warp } from './flightWarp'
 import { placeCamera } from './flightCamera'
 import CometEncke from './CometEncke'
+import { AsteroidField, TrojanBodies } from './AsteroidField'
 
 /* ============================================================
    FLIGHT MODE
@@ -1317,6 +1318,7 @@ export default function Pilot() {
     }
     pilot.nearest = nearest
     pilot.nearestIndex = nearestIndex
+    pilot.nearestRadiusKm = nearestRadius * KM_PER_UNIT
     pilot.clearance = clearance
     // altitude in km, at the planets' scale (the Sun is not drawn to it)
     pilot.altitudeKm = nearestIndex >= 0 ? clearance * KM_PER_UNIT : -1
@@ -1824,6 +1826,7 @@ export default function Pilot() {
       <group ref={ship} visible={false} />
       <NearStar />
       <CometEncke />
+      <TrojanBodies />
       {createPortal(
         <>
           <group ref={visual}>
@@ -1832,6 +1835,7 @@ export default function Pilot() {
           </group>
           <AirStreaks state={streaks.current} />
           <RingChunks jetRef={ship} />
+          <AsteroidField jetRef={ship} />
           <Spacecraft jetRef={ship} />
           <directionalLight ref={sunLight} color="#fff0d0" intensity={2.4} />
           <directionalLight ref={shine} intensity={0} />

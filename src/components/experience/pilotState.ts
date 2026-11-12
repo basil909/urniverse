@@ -29,6 +29,10 @@ export const pilot = {
   nearest: '',
   /** nearest planet's orbit index (-1: the Sun, -2: not flying) */
   nearestIndex: -2,
+  /** among the asteroids: 'belt', 'L4' or 'L5' (Jupiter's Trojans), or '' */
+  zone: '',
+  /** the nearest body's radius, km */
+  nearestRadiusKm: 0,
   /** distance to the nearest surface, scene units */
   clearance: Infinity,
   /** altitude above the nearest planet in km (-1 near the Sun) */

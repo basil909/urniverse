@@ -122,7 +122,41 @@ export function cometHelioAU(jd: number, out: THREE.Vector3) {
   return out.set(x, z, -y)
 }
 
-export const SPACE_BODY_COUNT = SPACECRAFT.length + NAMED_STARS.length + 1
+/* ============================================================
+   JUPITER'S TROJANS: the two largest, as places to fly to
+   Two swarms share Jupiter's orbit, 60 degrees ahead of it (L4, the
+   "Greek camp") and behind (L5, the "Trojan camp"). Their largest:
+   624 Hektor, 225 km, two lobes in contact, in L4; and 617 Patroclus,
+   in L5, really a pair (Patroclus and Menoetius, each over 100 km,
+   circling each other 680 km apart every 4.3 days; NASA's Lucy will
+   visit them in 2033). Orbits from JPL's Small-Body Database.
+============================================================ */
+export const TROJANS = [
+  { name: 'Hektor', a: 5.276986092673823, e: 0.02434489234275647, inclination: 18.14715224028094, node: 342.8018513679027, perihelionArg: 181.288859678094, meanAnomaly: 24.91385327109803, epochJd: 2461200.5, dailyMotion: 0.08130647811170628, radiusKm: 112 },
+  { name: 'Patroclus', a: 5.205975173988769, e: 0.1391467916238868, inclination: 22.06359071054631, node: 44.34968792774898, perihelionArg: 308.8377281363527, meanAnomaly: 58.67543160284279, epochJd: 2461200.5, dailyMotion: 0.08297570189160172, radiusKm: 70 },
+] as const
+export const FIRST_TROJAN_ID = COMET_ID + 1
+
+/** a Trojan's heliocentric position in AU, in scene axes */
+export function trojanHelioAU(index: number, jd: number, out: THREE.Vector3) {
+  const body = TROJANS[index]
+  let mean = (body.meanAnomaly + body.dailyMotion * (jd - body.epochJd)) * DEG
+  mean = Math.atan2(Math.sin(mean), Math.cos(mean))
+  const E = solveKepler(mean, body.e)
+  const xv = body.a * (Math.cos(E) - body.e)
+  const yv = body.a * Math.sqrt(1 - body.e * body.e) * Math.sin(E)
+  const v = Math.atan2(yv, xv)
+  const r = Math.hypot(xv, yv)
+  const u = v + body.perihelionArg * DEG
+  const N = body.node * DEG
+  const i = body.inclination * DEG
+  const x = r * (Math.cos(N) * Math.cos(u) - Math.sin(N) * Math.sin(u) * Math.cos(i))
+  const y = r * (Math.sin(N) * Math.cos(u) + Math.cos(N) * Math.sin(u) * Math.cos(i))
+  const z = r * Math.sin(u) * Math.sin(i)
+  return out.set(x, z, -y)
+}
+
+export const SPACE_BODY_COUNT = SPACECRAFT.length + NAMED_STARS.length + 1 + TROJANS.length
 
 /* a star's surface temperature from its colour (Ballesteros 2012) */
 export function starTemperature(ci: number) {
@@ -177,6 +211,7 @@ const ecliptic = (raDeg: number, decDeg: number, out: THREE.Vector3) => {
 export function spaceBodyOrbitPosition(id: number, jd: number, bodyJd: number, out: THREE.Vector3) {
   const index = id - FIRST_CRAFT_ID
   if (id === COMET_ID) return cometHelioAU(jd, out).multiplyScalar(AU_UNITS)
+  if (id >= FIRST_TROJAN_ID) return trojanHelioAU(id - FIRST_TROJAN_ID, jd, out).multiplyScalar(AU_UNITS)
   if (index >= SPACECRAFT.length) {
     const star = NAMED_STARS[index - SPACECRAFT.length]
     return out.set(star.pc[0], star.pc[1], star.pc[2]).multiplyScalar(PC_UNITS)
@@ -226,6 +261,7 @@ export function spaceBodyOrbitPosition(id: number, jd: number, bodyJd: number, o
 export function spaceBodyRadius(id: number) {
   const index = id - FIRST_CRAFT_ID
   if (id === COMET_ID) return COMET.radiusKm / KM_PER_UNIT
+  if (id >= FIRST_TROJAN_ID) return TROJANS[id - FIRST_TROJAN_ID].radiusKm / KM_PER_UNIT
   if (index >= SPACECRAFT.length) return starRadiusSolar(NAMED_STARS[index - SPACECRAFT.length]) * SUN_RADIUS_UNITS
   return SPACECRAFT[index].sizeM / 2 / 1000 / KM_PER_UNIT
 }
@@ -233,6 +269,7 @@ export function spaceBodyRadius(id: number) {
 export function spaceBodyName(id: number) {
   const index = id - FIRST_CRAFT_ID
   if (id === COMET_ID) return COMET.name
+  if (id >= FIRST_TROJAN_ID) return TROJANS[id - FIRST_TROJAN_ID].name
   if (index >= SPACECRAFT.length) return NAMED_STARS[index - SPACECRAFT.length].name
   return SPACECRAFT[index].name
 }

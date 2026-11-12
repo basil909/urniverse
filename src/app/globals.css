@@ -1682,6 +1682,9 @@ html.is-photo .flight-land { opacity: 0; pointer-events: none; }
   position: absolute;
   left: 50%;
   top: 22%;
+  white-space: pre-line;
+  text-align: center;
+  line-height: 1.9;
   transform: translateX(-50%);
   margin: 0;
   font: 500 11px / 1 var(--sans);

@@ -86,7 +86,7 @@ function mainBelt(): Particle[] {
     [2.94, 2.98],
     [3.26, 3.31],
   ]
-  while (out.length < 5200) {
+  while (out.length < 12000) {
     // denser in the middle of the belt
     const a = 2.15 + (random() + random() + random()) / 3 * 1.2
     if (gaps.some(([lo, hi]) => a > lo && a < hi)) continue
@@ -106,7 +106,7 @@ function mainBelt(): Particle[] {
 function trojans(): Particle[] {
   const random = seeded(733)
   const out: Particle[] = []
-  for (let i = 0; i < 1400; i += 1) {
+  for (let i = 0; i < 4000; i += 1) {
     const ahead = i % 2 === 0
     const spread = (random() + random() - 1) * 26 * DEG
     out.push({
@@ -175,7 +175,7 @@ void main() {
     float dist = length(mv.xyz);
     px = aLook.x * uTrueSize * uScale / dist;
     // a faint dust beyond a pixel, so the belt can still be seen
-    vAlpha = clamp(px / uPixelRatio, 0.22, 1.0);
+    vAlpha = clamp(px / uPixelRatio, 0.34, 1.0);
     float reach = 30.0 + 8.0 * log(max(dist, 1.0));
     if (dist > reach) mv.xyz *= reach / dist;
   }

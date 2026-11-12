@@ -92,6 +92,9 @@ const WORLDS: World[] = [
   { index: 9, name: 'Vesta', key: '', kind: 'dwarf', what: 'Asteroid · a giant crater at its pole', show: within(6e7) },
   { index: 10, name: 'Pallas', key: '', kind: 'dwarf', what: 'Asteroid · on a steep orbit', show: within(6e7) },
   { index: 11, name: 'Hygiea', key: '', kind: 'dwarf', what: 'Asteroid · almost round', show: within(6e7) },
+  // the largest of Jupiter's Trojans, ahead of it and behind
+  { index: 47, name: 'Hektor', key: '', kind: 'dwarf', what: 'Trojan asteroid · two lobes, ahead of Jupiter (L4)', show: within(6e7) },
+  { index: 48, name: 'Patroclus', key: '', kind: 'dwarf', what: 'Trojan asteroid · a pair, behind Jupiter (L5)', show: within(6e7) },
   { index: 12, name: 'Moon', key: '', kind: 'moon', what: 'Moon of Earth', parent: 2 },
   // the large moons: shown near their planet
   { index: 13, name: 'Io', key: '', kind: 'moon', what: 'Moon of Jupiter · volcanic', parent: 4 },
@@ -126,7 +129,7 @@ const GROUPS: { kind: Kind; title: string }[][] = [
   [
     { kind: 'sun', title: 'Our star' },
     { kind: 'planet', title: 'Planets' },
-    { kind: 'dwarf', title: 'Asteroid belt' },
+    { kind: 'dwarf', title: 'Asteroids & Trojans' },
   ],
   [
     { kind: 'moon', title: 'Moons' },
@@ -265,10 +268,27 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     let toastTimer = 0
     let lastSunAU = pilot.sunAU
     let lastWarp = ''
-    const showToast = (text: string) => {
+    let lastZone = ''
+    // notes about where you are wait their turn (arriving somewhere and
+    // entering the belt can happen at once)
+    const waiting: string[] = []
+    let showingUntil = 0
+    const next = () => {
+      const text = waiting.shift()
+      if (text === undefined) {
+        setToast('')
+        return
+      }
       setToast(text)
-      window.clearTimeout(toastTimer)
-      toastTimer = window.setTimeout(() => setToast(''), 3200)
+      showingUntil = performance.now() + 3200
+      toastTimer = window.setTimeout(next, 3200)
+    }
+    const showToast = (text: string) => {
+      waiting.push(text)
+      if (performance.now() >= showingUntil) {
+        window.clearTimeout(toastTimer)
+        next()
+      }
     }
     const hud = window.setInterval(() => {
       setNearest(pilot.nearest)
@@ -279,9 +299,32 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       // arriving: what it is
       if (lastWarp && !pilot.warping) {
         const world = worldNamed(lastWarp)
-        if (world && pilot.nearestIndex === world.index) showToast(`${capital(lastWarp)} · ${world.what}`)
+        if (world && pilot.nearestIndex === world.index) {
+          // and how big it is, in Shuttles (37.24 m long)
+          const shuttles = (pilot.nearestRadiusKm * 2) / 0.03724
+          const across =
+            shuttles >= 1e9
+              ? `${(shuttles / 1e9).toFixed(shuttles >= 1e10 ? 0 : 1)} billion`
+              : shuttles >= 1e6
+              ? `${(shuttles / 1e6).toFixed(shuttles >= 1e7 ? 0 : 1)} million`
+              : shuttles >= 1000
+                ? Math.round(shuttles).toLocaleString('en-GB')
+                : ''
+          showToast(`${capital(lastWarp)} · ${world.what}${across ? `\n${across} Shuttles across` : ''}`)
+        }
       }
       lastWarp = pilot.warping
+      // entering the asteroid belt, or one of Jupiter's Trojan swarms
+      if (pilot.zone !== lastZone && pilot.zone !== '') {
+        showToast(
+          {
+            belt: 'The asteroid belt\ndrawn far denser than it is: real asteroids are about a million km apart',
+            L4: 'Jupiter’s Trojans, 60° ahead of it (L4)\nthe Greek camp: Hektor is the largest',
+            L5: 'Jupiter’s Trojans, 60° behind it (L5)\nthe Trojan camp: Patroclus is the largest',
+          }[pilot.zone] ?? '',
+        )
+      }
+      lastZone = pilot.zone
       setLandState(pilot.landState)
       setCanLand(pilot.canLand)
       const { lat, lon } = pilot.site
