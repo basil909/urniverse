@@ -40,6 +40,7 @@ import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
 import { earthToday, loadEarthToday } from './earthToday'
+import { earthRelief, loadEarthRelief } from './earthRelief'
 import CloudVolume from './CloudVolume'
 import Aurora, { AURORA } from './Aurora'
 import { bodyFrames } from './spaceBodies'
@@ -86,7 +87,13 @@ const earthNight = {
   uCloudHeight: { value: 0.012 },
   /** the auroras drawn in 3D (up close): the painted ones step aside */
   uAurora3D: { value: 0 },
+  /** the whole globe's elevation (earthRelief.ts), for mountain shadows */
+  uRelief: { value: null as THREE.Texture | null },
+  uHasRelief: { value: 0 },
 }
+/* the Sun's direction in the cloud layer's own frame, for the storm tops */
+const cloudTops = { uSunLocal: { value: new THREE.Vector3(1, 0, 0) } }
+const _sunLocal = new THREE.Vector3()
 const EARTH_CITY_LIGHTS = new THREE.Color('#ffc27a')
 const _earthWorld = new THREE.Vector3()
 const _earthAxis = new THREE.Vector3()
@@ -126,10 +133,10 @@ function withSurfaceVaryings(shader: THREE.WebGLProgramParametersWithUniforms) {
 
 /* Earth's clouds: fine wisps that break up the soft edges up close */
 function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
-  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime })
+  Object.assign(shader.uniforms, { uSunDirView: earthNight.uSunDirView, uTime: earthNight.uTime, ...cloudTops })
   withSurfaceVaryings(shader)
   shader.fragmentShader =
-    'uniform vec3 uSunDirView; uniform float uTime;\n' +
+    'uniform vec3 uSunDirView; uniform float uTime; uniform vec3 uSunLocal;\n' +
     shader.fragmentShader
       .replace(
         '#include <alphamap_fragment>',
@@ -153,7 +160,39 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         float sunUp = dot(normalize(geometryNormal), normalize(uSunDirView));
         float day = smoothstep(-0.08, 0.25, sunUp);
         vec3 sunTint = mix(vec3(1.0, 0.55, 0.32), vec3(1.0), smoothstep(0.0, 0.3, sunUp));
-        reflectedLight.directDiffuse = diffuseColor.rgb * sunTint * day * 0.92;
+        /* storm tops: the thickest cloud stands tallest (thunderstorm
+           anvils reach 15 km), lit like a dome, and with the Sun low it
+           throws its shadow across the lower cloud beyond it */
+        vec3 P = normalize(vSurfaceP);
+        vec3 eastL = normalize(cross(vec3(0.0, 1.0, 0.0), P) + vec3(1e-6, 0.0, 0.0));
+        vec3 northL = cross(P, eastL);
+        float coslatL = max(length(P.xz), 0.15);
+        float tall = ${(15 / 6371).toFixed(7)};
+        vec2 texel = vec2(1.5 / 2560.0, 1.5 / 1280.0);
+        float hC = pow(texture2D(alphaMap, vAlphaMapUv).g, 2.5);
+        float hEast = pow(texture2D(alphaMap, vAlphaMapUv + vec2(texel.x, 0.0)).g, 2.5);
+        float hWest = pow(texture2D(alphaMap, vAlphaMapUv - vec2(texel.x, 0.0)).g, 2.5);
+        float hNorth = pow(texture2D(alphaMap, vAlphaMapUv + vec2(0.0, texel.y)).g, 2.5);
+        float hSouth = pow(texture2D(alphaMap, vAlphaMapUv - vec2(0.0, texel.y)).g, 2.5);
+        float sx = (hEast - hWest) * tall / (2.0 * texel.x * 6.28318 * coslatL);
+        float sy = (hNorth - hSouth) * tall / (2.0 * texel.y * 3.14159);
+        vec3 nL = normalize(P - eastL * sx - northL * sy);
+        float upL = dot(P, uSunLocal);
+        float low = 1.0 - smoothstep(0.25, 0.6, upL);
+        float dome = clamp(dot(nL, uSunLocal) / max(upL, 0.06), 0.25, 1.7);
+        vec3 alongL = uSunLocal - P * upL;
+        float flatL = max(length(alongL), 1e-4);
+        vec2 towardL = vec2(dot(alongL, eastL) / (6.28318 * coslatL), dot(alongL, northL) / 3.14159) / flatL;
+        float riseL = upL / flatL;
+        float shadowed = 0.0;
+        float dL = 0.0012;
+        for (int k = 0; k < 5; k++) {
+          float hk = pow(texture2D(alphaMap, vAlphaMapUv + towardL * dL).g, 2.5) * tall;
+          shadowed = max(shadowed, smoothstep(0.0, tall * 0.15, hk - (hC * tall + dL * riseL)));
+          dL *= 1.9;
+        }
+        float relief = mix(1.0, dome, low * 0.8) * (1.0 - 0.75 * shadowed * low);
+        reflectedLight.directDiffuse = diffuseColor.rgb * sunTint * day * 0.92 * relief;
         reflectedLight.indirectDiffuse = diffuseColor.rgb * 0.015;
       }`,
       )
@@ -196,6 +235,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
 uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight; uniform float uAurora3D;
+uniform sampler2D uRelief; uniform float uHasRelief;
 ` +
     shader.fragmentShader
       .replace(
@@ -273,6 +313,30 @@ uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; unifor
           vec2 shift = vec2(dot(along, east) / (6.28318 * coslat), dot(along, north) / 3.14159) * reach;
           float cover = texture2D(uClouds, vMapUv + shift - vec2(uCloudShift, 0.0)).g;
           shade = 1.0 - cover * 0.55;
+        }
+        /* mountains near the day/night line: the light comes in low, and
+           the ranges cast long shadows (marched over the globe's elevation
+           towards the Sun; the ray rises with the Sun's height and the
+           ground curves away beneath it) */
+        if (uHasRelief > 0.5 && mu > -0.02 && mu < 0.4) {
+          vec3 east = normalize(cross(normalize(uNorthView), N));
+          vec3 north = cross(N, east);
+          vec3 along = sunV - N * mu;
+          float flatLen = length(along);
+          float coslat = max(cos((vMapUv.y - 0.5) * 3.14159), 0.15);
+          vec2 toward = vec2(dot(along, east) / (6.28318 * coslat), dot(along, north) / 3.14159) / max(flatLen, 1e-4);
+          float top = ${(9000 / 6371000).toFixed(7)};
+          float h0 = texture2D(uRelief, vMapUv).r * top;
+          float rise = mu / max(flatLen, 1e-4);
+          float dark = 0.0;
+          float d = 0.0015;
+          for (int k = 0; k < 7; k++) {
+            float hk = texture2D(uRelief, vMapUv + toward * d).r * top;
+            float ray = h0 + d * rise + d * d * 0.5;
+            dark = max(dark, smoothstep(0.0, 0.00015, hk - ray));
+            d *= 1.8;
+          }
+          shade *= 1.0 - 0.85 * dark;
         }
         reflectedLight.directDiffuse *= shade;
         reflectedLight.directSpecular *= shade;
@@ -2066,9 +2130,10 @@ function Planet({
   // sharper maps once the camera has arrived (desktop only)
   const sharp = useSharpFocus(progressRef, index, FOCUS_IN)
   useSurfacePatches(index, body, SYSTEM_OFFSET)
-  // Mars's turning frame, for the rover standing on it
+  // each planet's turning frame: for the rover standing on Mars, and the
+  // launch pad and runway on Earth
   useEffect(() => {
-    if (index === 3) bodyFrames[3] = body.current
+    bodyFrames[index] = body.current
   })
   /* the Sun's position for this planet's shaders: the Sun itself, or,
      when the planet is drawn nearer than it is (far, at true scale), the
@@ -2777,6 +2842,17 @@ function EarthCloudLayer({
   }, [])
   const shown = today ?? texture
 
+  // the globe's relief, once fetched, for mountain shadows
+  useEffect(() => {
+    const ready = () => {
+      earthNight.uRelief.value = earthRelief.texture
+      earthNight.uHasRelief.value = earthRelief.texture ? 1 : 0
+    }
+    ready()
+    earthRelief.ready.add(ready)
+    return () => void earthRelief.ready.delete(ready)
+  }, [])
+
   // the ground's shadow map reads the same clouds
   useEffect(() => {
     earthNight.uClouds.value = shown
@@ -2796,8 +2872,13 @@ function EarthCloudLayer({
       const e = earth.matrixWorld.elements
       const earthRadius = Math.hypot(e[0], e[1], e[2])
       const away = state.camera.position.distanceTo(_cloudCentre) / earthRadius
-      // near Earth: fetch yesterday's real clouds
+      // near Earth: fetch yesterday's real clouds, and the globe's relief
       if (away < 12 && !earthToday.started) loadEarthToday()
+      if (away < 12 && !earthRelief.started) loadEarthRelief()
+      // the Sun's direction in the cloud layer's own frame (it turns)
+      _sunLocal.copy(sun)
+      cloud.current.worldToLocal(_sunLocal).normalize()
+      cloudTops.uSunLocal.value.copy(_sunLocal)
       const height = THREE.MathUtils.lerp(CLOUD_HEIGHT_NEAR, CLOUD_HEIGHT_FAR, THREE.MathUtils.smoothstep(away, 1.25, 3))
       cloud.current.scale.setScalar(radius * (1 + height))
       earthNight.uCloudHeight.value = height

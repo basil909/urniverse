@@ -3,7 +3,7 @@ import * as THREE from 'three'
 /* ============================================================
    TODAY'S CLOUDS
    Earth's weather as it really was yesterday: NASA's daily true-colour
-   imagery (GIBS: the VIIRS cameras on NOAA-20 and Suomi NPP, and MODIS on
+   imagery (GIBS: the VIIRS cameras on NOAA-20 and NOAA-21, and MODIS on
    Aqua), stitched into one global map, 2560 x 1280 (about 16 km a pixel),
    and turned into a cloud map: a pixel is cloud where it is bright and
    colourless (deserts are bright but coloured; snow and sea ice read as
@@ -16,7 +16,7 @@ import * as THREE from 'three'
 
 const LAYERS = [
   'VIIRS_NOAA20_CorrectedReflectance_TrueColor',
-  'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+  'VIIRS_NOAA21_CorrectedReflectance_TrueColor',
   'MODIS_Aqua_CorrectedReflectance_TrueColor',
 ]
 const LEVEL = 2 // tiles of 512 px covering 72 degrees

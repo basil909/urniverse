@@ -297,6 +297,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [goTo, setGoTo] = useState(false)
   const [controls, setControls] = useState(false)
   const [cloudsDate, setCloudsDate] = useState('')
+  const [missionClock, setMissionClock] = useState(0)
   const goToOpen = useRef(false)
   const controlsOpen = useRef(false)
   useEffect(() => {
@@ -316,6 +317,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     let lastSunAU = pilot.sunAU
     let lastWarp = ''
     let lastZone = ''
+    let lastNote = ''
     // notes about where you are wait their turn (arriving somewhere and
     // entering the belt can happen at once)
     const waiting: string[] = []
@@ -380,6 +382,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setSite(`${Math.abs(lat).toFixed(1)}° ${lat < 0 ? 'S' : 'N'}, ${Math.abs(lon).toFixed(1)}° ${lon < 0 ? 'W' : 'E'}`)
       setImmersion(pilot.immersion)
       setCloudsDate(earthToday.date)
+      setMissionClock(pilot.missionClock)
+      // a mission's events, each in turn
+      if (pilot.missionNote !== lastNote && pilot.missionNote) showToast(pilot.missionNote)
+      lastNote = pilot.missionNote
       setHullK(pilot.hullK)
       // crossing the heliopause, where the Sun's wind meets the galaxy's
       if (lastSunAU < 120 && pilot.sunAU >= 120) showToast('Leaving the heliosphere: interstellar space begins')
@@ -773,6 +779,16 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
               ? `Orbiting ${nearest} · ${formatSpeed(kms)} · once round every ${formatPeriod(orbitMinutes)}`
             : immersion > 0
               ? `Inside ${nearest}’s clouds · ${pressure < 10 ? pressure.toFixed(1) : Math.round(pressure)} bar${immersion > 0.9 ? ' · the pressure turns you back' : ''}`
+            : landState === 'launching'
+              ? [
+                  `Launch · T+ ${Math.floor(missionClock / 60)}:${String(Math.floor(missionClock % 60)).padStart(2, '0')}`,
+                  formatAltitude(altitude),
+                  formatSpeed(kms),
+                ].filter(Boolean).join(' · ')
+            : landState === 'returning'
+              ? [`Re-entry · ${Math.round(missionClock).toLocaleString('en-GB')} km to Kennedy`, formatAltitude(altitude), formatSpeed(kms)]
+                  .filter(Boolean)
+                  .join(' · ')
             : landState === 'descending'
               ? [`Coming down to ${nearest}`, formatAltitude(altitude), formatSpeed(kms), 'W aborts'].filter(Boolean).join(' · ')
             : landState === 'landing'
@@ -882,6 +898,29 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       )}
       {goTo && (
         <nav className="flight-goto" aria-label="Go to">
+          <section className="flight-goto-missions">
+            <h3>Shuttle missions</h3>
+            <div>
+              <button
+                type="button"
+                onClick={() => {
+                  pilot.missionRequest = 'launch'
+                  setGoTo(false)
+                }}
+              >
+                Launch from Kennedy <span>pad 39A, to orbit</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  pilot.missionRequest = 'return'
+                  setGoTo(false)
+                }}
+              >
+                Fly home to Kennedy <span>re-entry, glide, runway 15</span>
+              </button>
+            </div>
+          </section>
           {GROUPS.map((column) => (
             <div key={column[0].kind}>
               {column.map((group) => (

@@ -1844,6 +1844,32 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   from { opacity: 0; transform: translateY(6px); }
 }
 .flight-goto-group { margin-bottom: 14px; color: var(--kind); }
+/* the missions: across the top of the list */
+.flight-goto-missions {
+  grid-column: 1 / -1;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+.flight-goto-missions h3 {
+  margin-bottom: 8px;
+  font: 500 9.5px / 1 var(--sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.flight-goto-missions div { display: flex; flex-wrap: wrap; gap: 8px; }
+.flight-goto-missions button {
+  padding: 7px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-1);
+  font: 500 12.5px / 1.2 var(--sans);
+  cursor: pointer;
+}
+.flight-goto-missions button:hover { border-color: rgba(255, 255, 255, 0.3); }
+.flight-goto-missions button span { margin-left: 6px; font-size: 11px; color: var(--text-3); }
 .flight-goto-group h3 {
   display: flex;
   align-items: center;

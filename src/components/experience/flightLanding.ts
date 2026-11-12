@@ -84,6 +84,7 @@ export function flyLanding(frame: LandingFrame) {
     pilot.landRequest = false
     if (pilot.canLand) {
       pilot.landState = onGround && groundHere * KM_PER_UNIT < 20 ? 'landing' : 'descending'
+      pilot.runwayApproach = false
       // the heading: as the ship moves, or as it points
       heading.current.copy(velocity.current.lengthSq() > 1e-16 ? velocity.current : shipForward)
     } else if (pilot.landState === 'descending' || pilot.landState === 'landing') {
@@ -91,8 +92,11 @@ export function flyLanding(frame: LandingFrame) {
       speed.current = velocity.current.length()
     }
   }
+  // (a mission, launching or returning, flies itself: not this)
+  const mission = pilot.landState === 'launching' || pilot.landState === 'returning'
   if (
     pilot.landState !== 'flying' &&
+    !mission &&
     (warping || pilot.warpRequest !== null || !landable || (pilot.landState !== 'descending' && !onGround))
   ) {
     pilot.landState = 'flying'
@@ -128,8 +132,14 @@ export function flyLanding(frame: LandingFrame) {
     if (pilot.landState === 'landing') {
       // the glide: sink rate falls with height (a 20-25 degree slope,
       // flattening to a gentle flare), speed bleeds off to touchdown
-      const down = 0.0025 + km * 0.5
-      const along = Math.min(2.5, 0.083 + km * 0.9)
+      // a runway approach (flying home to Kennedy) is the Shuttle's own:
+      // 155 m/s down a 19 degree slope, the pull-up some 600 m up, 100 m/s
+      // at touchdown; L anywhere else is a quicker, steeper glide
+      const runway = pilot.runwayApproach
+      const along = runway ? 0.1 + 0.055 * THREE.MathUtils.smoothstep(km, 0.05, 0.6) : Math.min(2.5, 0.083 + km * 0.9)
+      const down = runway
+        ? along * THREE.MathUtils.lerp(0.022, 0.34, THREE.MathUtils.smoothstep(km, 0.03, 0.6))
+        : 0.0025 + km * 0.5
       flyHeading(heading.current, _groundUp, steerX, delta)
       _wanted.copy(heading.current).multiplyScalar(along).addScaledVector(_groundUp, -down).divideScalar(KM_PER_UNIT)
       velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 2.5))
@@ -204,5 +214,6 @@ export function flyLanding(frame: LandingFrame) {
   }
   // landing and taking off: the true speed (the flying limit, which is
   // small this near the ground, does not apply)
-  if (pilot.landState !== 'flying') pilot.kms = velocity.current.length() * KM_PER_UNIT
+  // (a mission gives its own: the true speed, not the sped-up motion)
+  if (pilot.landState !== 'flying' && !mission) pilot.kms = velocity.current.length() * KM_PER_UNIT
 }

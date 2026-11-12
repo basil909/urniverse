@@ -45,8 +45,12 @@ float cNoise(vec3 p) {
     f.z);
 }
 
-/* cover from the map, where the weather has drifted to */
+/* cover from the map, where the weather has drifted to; read a little
+   off its true place by noise some 20 km across, so a map pixel (the
+   real-cloud map's are 16 km) never shows as a square cloud */
 float cloudCoverAt(vec3 dir) {
+  vec3 w = dir * 320.0;
+  dir = normalize(dir + (vec3(cNoise(w), cNoise(w + 5.2), cNoise(w + 9.7)) - 0.5) * 0.006);
   float u = fract(atan(dir.z, -dir.x) / 6.2831853 + 1.0 - uCloudShift);
   float v = 1.0 - acos(clamp(dir.y, -1.0, 1.0)) / 3.14159265;
   return texture2D(uCloudMap, vec2(u, v)).g;

@@ -42,6 +42,7 @@ import {
 import { sunVisibility } from './sunVisibility'
 import { KM_PER_UNIT, LIGHT, LOWEST, SHIP_LENGTH, WARP } from './flightShip'
 import { flyLanding } from './flightLanding'
+import { launchCamera, newMission, stack, startLaunch, startReturn, stepLaunch, stepReturn } from './flightMission'
 import { planWarp, stepWarp, type Warp } from './flightWarp'
 import { placeCamera } from './flightCamera'
 import CometEncke from './CometEncke'
@@ -289,6 +290,7 @@ function NearStar() {
 const BODY_PLACES = Array.from({ length: BODY_COUNT }, () => new THREE.Vector3())
 const BODY_RADII = new Float64Array(BODY_COUNT)
 const _stepFrom = new THREE.Vector3()
+const _lookAlong = new THREE.Vector3()
 const _stepDir = new THREE.Vector3()
 const _oc = new THREE.Vector3()
 const _hit = new THREE.Vector3()
@@ -966,6 +968,10 @@ const SHUTTLE_URL = '/models/space-shuttle.glb'
 type ShuttleModel = {
   body: THREE.Mesh
   engines: { position: THREE.Vector3; radius: number }[]
+  /** the launch stack, in the orbiter's units: the external tank and the
+      two solid rocket boosters (with where each booster's nozzle is) */
+  tank: THREE.Mesh | null
+  boosters: { mesh: THREE.Mesh; nozzle: THREE.Vector3; radius: number }[]
 }
 
 function useShuttle() {
@@ -985,6 +991,8 @@ function useShuttle() {
         const tile = new THREE.Color('#1d1f24')
         const metal = new THREE.Color('#6a707a')
         const parts: THREE.BufferGeometry[] = []
+        // the launch stack's parts, kept for the launch from Kennedy
+        const stackParts: THREE.BufferGeometry[] = []
         const engineBoxes = new Map<string, THREE.Box3>()
         // whole groups that belong to the tank and boosters: any node one
         // of whose parts uses their materials (some mix in a plain one)
@@ -1026,8 +1034,18 @@ function useShuttle() {
           const mesh = object as THREE.Mesh
           if (!mesh.isMesh) return
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-          // the external tank and solid rocket boosters stay on the pad
-          if (inLaunchStack(mesh) || materials.some((m) => m.name.startsWith('shuttlesrbsande'))) return
+          // the external tank and solid rocket boosters: kept apart (they
+          // fly only on the launch, and fall away)
+          if (inLaunchStack(mesh) || materials.some((m) => m.name.startsWith('shuttlesrbsande'))) {
+            let piece = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld)
+            if (piece.index) piece = piece.toNonIndexed()
+            if (!piece.getAttribute('normal')) piece.computeVertexNormals()
+            for (const name of Object.keys(piece.attributes)) {
+              if (!['position', 'normal'].includes(name)) piece.deleteAttribute(name)
+            }
+            stackParts.push(piece)
+            return
+          }
           const isWindow = materials.some((m) => WINDOW_MATERIALS.has(m.name))
           let geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld)
           if (geometry.index) geometry = geometry.toNonIndexed()
@@ -1083,7 +1101,54 @@ function useShuttle() {
             }
           })
         parts.forEach((part) => part.dispose())
-        built = { body, engines }
+        // the stack, in the orbiter's units, sorted triangle by triangle
+        // (the file mixes them in its pieces): the tank (8.4 m across, on
+        // the middle line), or a booster (centred some 6.5 m to either side)
+        const buckets = [0, 1, 2].map(() => ({ position: [] as number[], normal: [] as number[] }))
+        stackParts.forEach((piece) => {
+          piece.translate(-center.x, -center.y, -center.z)
+          piece.scale(1 / length, 1 / length, 1 / length)
+          const position = piece.getAttribute('position')
+          const normal = piece.getAttribute('normal')
+          for (let t = 0; t + 2 < position.count; t += 3) {
+            const x = (position.getX(t) + position.getX(t + 1) + position.getX(t + 2)) / 3
+            const which = x < -0.12 ? 1 : x > 0.12 ? 2 : 0
+            for (let k = 0; k < 3; k += 1) {
+              buckets[which].position.push(position.getX(t + k), position.getY(t + k), position.getZ(t + k))
+              buckets[which].normal.push(normal.getX(t + k), normal.getY(t + k), normal.getZ(t + k))
+            }
+          }
+        })
+        const build = (bucket: { position: number[]; normal: number[] }, tone: THREE.Color) => {
+          if (!bucket.position.length) return null
+          const geometry = new THREE.BufferGeometry()
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(bucket.position, 3))
+          geometry.setAttribute('normal', new THREE.Float32BufferAttribute(bucket.normal, 3))
+          const colors = new Float32Array(bucket.position.length)
+          for (let i = 0; i < colors.length; i += 3) colors.set([tone.r, tone.g, tone.b], i)
+          geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+          return geometry
+        }
+        const tankGeometry = build(buckets[0], new THREE.Color('#b8622c'))
+        const sideGeometries = [build(buckets[1], new THREE.Color('#e6e4dc')), build(buckets[2], new THREE.Color('#e6e4dc'))]
+        const stackMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.05 })
+        const tank = tankGeometry ? new THREE.Mesh(tankGeometry, stackMaterial) : null
+        const boosters = sideGeometries
+          .filter((geometry): geometry is THREE.BufferGeometry => geometry !== null)
+          .map((geometry) => {
+            const mesh = new THREE.Mesh(geometry, stackMaterial)
+            mesh.geometry.computeBoundingBox()
+            const box = mesh.geometry.boundingBox!
+            const size = box.getSize(new THREE.Vector3())
+            // the nozzle: at the booster's tail (the orbiter's tail is +z)
+            return {
+              mesh,
+              nozzle: new THREE.Vector3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.max.z),
+              radius: Math.min(size.x, size.y) * 0.45,
+            }
+          })
+        stackParts.forEach((piece) => piece.dispose())
+        built = { body, engines, tank, boosters }
         setModel(built)
       },
       undefined,
@@ -1125,6 +1190,15 @@ function mergeGeometries(parts: THREE.BufferGeometry[]) {
 
 function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: number } }) {
   const flames = useRef<THREE.Group[]>([])
+  const boosterFlames = useRef<THREE.Group[]>([])
+  const fire = useMemo(
+    () =>
+      new THREE.MeshBasicMaterial({
+        color: '#ffc46b', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+      }),
+    [],
+  )
+  useEffect(() => () => fire.dispose(), [fire])
   const look = useMemo(
     () => ({
       outer: new THREE.MeshBasicMaterial({
@@ -1147,7 +1221,7 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     },
     [look],
   )
-  useFrame((state) => {
+  useFrame((state, delta) => {
     const t = thrust.current
     const time = state.clock.elapsedTime
     const flicker = 0.92 + Math.sin(time * 47) * 0.05 + Math.sin(time * 29) * 0.03
@@ -1156,10 +1230,61 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     })
     look.outer.opacity = 0.15 + t * 0.5
     look.core.opacity = 0.3 + t * 0.65
+    // the launch stack: on the ship, then falling away when it separates
+    // (the boosters back and out, the tank down from the belly, tumbling)
+    if (stack.boosterGone >= 0) stack.boosterGone += delta
+    if (stack.tankGone >= 0) stack.tankGone += delta
+    const boosterOn = stack.attached && stack.boosterGone < 0
+    const tankOn = stack.attached && stack.tankGone < 0
+    model.boosters.forEach((booster, i) => {
+      const gone = stack.boosterGone
+      booster.mesh.visible = boosterOn || (gone >= 0 && gone < 30)
+      const side = i === 0 ? -1 : 1
+      if (boosterOn) {
+        booster.mesh.position.set(0, 0, 0)
+        booster.mesh.rotation.set(0, 0, 0)
+      } else if (gone >= 0) {
+        booster.mesh.position.set(side * 0.25 * gone, -0.1 * gone, 0.6 * gone * gone)
+        booster.mesh.rotation.set(0.15 * gone, 0, side * 0.1 * gone)
+      }
+      const flame = boosterFlames.current[i]
+      if (flame) {
+        flame.visible = boosterOn && stack.boosterFire > 0
+        flame.scale.set(booster.radius * 1.3, booster.radius * (7 + 0.8 * flicker), booster.radius * 1.3)
+      }
+    })
+    if (model.tank) {
+      const gone = stack.tankGone
+      model.tank.visible = tankOn || (gone >= 0 && gone < 30)
+      if (tankOn) {
+        model.tank.position.set(0, 0, 0)
+        model.tank.rotation.set(0, 0, 0)
+      } else if (gone >= 0) {
+        model.tank.position.set(0, -0.12 * gone, 0.05 * gone * gone)
+        model.tank.rotation.set(0.04 * gone, 0.02 * gone, 0)
+      }
+    }
+    fire.opacity = 0.75 + 0.15 * flicker
   })
   return (
     <group>
       <primitive object={model.body} />
+      {model.tank && <primitive object={model.tank} />}
+      {model.boosters.map((booster, i) => (
+        <group key={`booster-${i}`}>
+          <primitive object={booster.mesh} />
+          <group
+            position={booster.nozzle}
+            rotation={[Math.PI / 2, 0, 0]}
+            ref={(group) => {
+              if (group) boosterFlames.current[i] = group
+            }}
+          >
+            <mesh geometry={look.outerGeometry} material={fire} />
+            <mesh geometry={look.coreGeometry} material={look.core} />
+          </group>
+        </group>
+      ))}
       {model.engines.map((engine, i) => (
         <group
           key={i}
@@ -1214,6 +1339,8 @@ export default function Pilot() {
   const landedAt = useRef(new THREE.Vector3())
   const landedTurn = useRef(new THREE.Quaternion())
   const liftTime = useRef(0)
+  // a mission: the launch from Kennedy, or the flight home there
+  const mission = useRef(newMission())
   // the heading along the ground while landing, rolling out and taking off
   const heading = useRef(new THREE.Vector3())
   const heat = useRef(0)
@@ -1573,6 +1700,28 @@ export default function Pilot() {
     if (height < minimum && !auto) jet.position.copy(_bodyPos).addScaledVector(_axis, minimum)
 
     // ---- landing, as the Shuttle does it, flown for you. (flightLanding.ts)
+    // ---- missions (flightMission.ts): launch from Kennedy, fly home there
+    if (pilot.missionRequest) {
+      if (pilot.missionRequest === 'launch') startLaunch(mission.current)
+      else startReturn(mission.current)
+      pilot.missionRequest = null
+      warp.current = null
+      pilot.warping = ''
+    }
+    if (pilot.landState === 'launching' || pilot.landState === 'returning') {
+      if (pilot.warpRequest !== null) {
+        // warping away calls the mission off
+        pilot.landState = 'flying'
+        stack.attached = false
+      } else {
+        const frame = { jet, velocity, speed, heading, memory: mission.current, delta }
+        if (pilot.landState === 'launching') {
+          stepLaunch(frame)
+          // the main engines at full throttle all the way up, until cut-off
+          thrust.current = mission.current.time < 510 ? 1 : 0.05
+        } else stepReturn(frame)
+      }
+    }
     flyLanding({
       jet,
       velocity,
@@ -1681,7 +1830,7 @@ export default function Pilot() {
     {
       const air = nearestIndex >= 0 ? AIR[nearestIndex] : undefined
       let target = 0
-      if (air && !warp.current && pilot.altitudeKm >= 0) {
+      if (air && !warp.current && pilot.altitudeKm >= 0 && pilot.landState !== 'launching') {
         const density = air.density * Math.exp(-pilot.altitudeKm / air.height)
         const v = pilot.kms
         const load = density * v * v * v
@@ -1693,6 +1842,12 @@ export default function Pilot() {
     }
 
     // ---- the cameras (flightCamera.ts)
+    // re-entering, the nose is held high: the camera follows the way the
+    // ship is going instead, so you see where it is headed
+    const lookAlong =
+      pilot.landState === 'returning' && velocity.current.lengthSq() > 0
+        ? _lookAlong.copy(velocity.current).normalize()
+        : _forward
     placeCamera({
       camera,
       jet,
@@ -1703,7 +1858,7 @@ export default function Pilot() {
       camOffset,
       orbitAngle,
       flyby,
-      forward: _forward,
+      forward: lookAlong,
       levelUp: _levelUp,
       centre: _bodyPos,
       nearestRadius,
@@ -1713,6 +1868,9 @@ export default function Pilot() {
       pitchRate,
       delta,
     })
+
+    // the launch from Kennedy: watched from the ground at first
+    if (pilot.landState === 'launching' && mission.current.time < 35) launchCamera(camera, jet)
 
     // ---- the ship's layer: the ship one unit long at the origin, seen by
     // a camera placed as the real one is, in ship lengths

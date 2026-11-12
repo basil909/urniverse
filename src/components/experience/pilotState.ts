@@ -29,6 +29,14 @@ export const pilot = {
   nearest: '',
   /** nearest planet's orbit index (-1: the Sun, -2: not flying) */
   nearestIndex: -2,
+  /** landing on a runway (flying home to Kennedy): the Shuttle's real approach */
+  runwayApproach: false,
+  /** a mission asked for (the Go to list): launch from Kennedy, or fly home there */
+  missionRequest: null as null | 'launch' | 'return',
+  /** the latest mission event to show, and the mission clock (launch: T+ s;
+      return: km to go) */
+  missionNote: '',
+  missionClock: 0,
   /** among the asteroids: 'belt', 'L4' or 'L5' (Jupiter's Trojans), or '' */
   zone: '',
   /** near a world: it is the focus; the belts and far extras step back */
