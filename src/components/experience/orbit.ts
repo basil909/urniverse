@@ -131,6 +131,7 @@ export const PLANETS: readonly PlanetDefinition[] = [
     textureUrl:
       'https://assets.science.nasa.gov/dynamicimage/assets/science/cds/3d/resources/image/jupiter/preview.webp?w=2048',
     atmosphereColor: '#e1cba8',
+    rings: true,
     type: 'gas',
   },
   {

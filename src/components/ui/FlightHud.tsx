@@ -124,6 +124,48 @@ const WORLDS: World[] = [
   })),
 ]
 
+/* the controls, as the card (H) lists them */
+const CONTROLS: [string, [string[], string][]][] = [
+  [
+    'Fly',
+    [
+      [['Mouse'], 'Steer: point away from the centre ring'],
+      [['←', '→', '↑', '↓'], 'Turn and pitch (A, D turn too)'],
+      [['Q', 'E'], 'Roll'],
+      [['W', 'Click'], 'Speed up (the speed holds)'],
+      [['S'], 'Slow down; stop a warp'],
+      [['Shift'], 'Warp speed, while held'],
+    ],
+  ],
+  [
+    'Go places',
+    [
+      [['1–8'], 'A planet (0 the Sun, 9 Ceres)'],
+      [['G'], 'Go to: every world, by kind'],
+      [['Marker'], 'Click one to warp there'],
+    ],
+  ],
+  [
+    'Land and orbit',
+    [
+      [['L'], 'Land on the world below: the ship lands itself'],
+      [['W'], 'Abort a landing, or take off'],
+      [['O'], 'Orbit at this height'],
+    ],
+  ],
+  [
+    'View and time',
+    [
+      [['V'], 'Camera: chase, fly-by, orbit'],
+      [['C', 'Scroll'], 'Pull the camera back'],
+      [['P'], 'Hide everything (photo)'],
+      [['K'], 'Save a picture'],
+      [['T'], 'Time: held, real, faster'],
+      [['Esc'], 'Leave flight'],
+    ],
+  ],
+]
+
 /* the "Go to" list: every world, by kind */
 const GROUPS: { kind: Kind; title: string }[][] = [
   [
@@ -252,14 +294,17 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const heatGlare = useRef<HTMLDivElement>(null)
   const [hullK, setHullK] = useState(0)
   const [goTo, setGoTo] = useState(false)
+  const [controls, setControls] = useState(false)
   const goToOpen = useRef(false)
+  const controlsOpen = useRef(false)
   useEffect(() => {
     goToOpen.current = goTo
+    controlsOpen.current = controls
     if (goTo) {
       pilot.steer.x = 0
       pilot.steer.y = 0
     }
-  }, [goTo])
+  }, [goTo, controls])
 
   useEffect(() => {
     const coarse = window.matchMedia('(pointer: coarse)').matches
@@ -476,7 +521,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (goToOpen.current) setGoTo(false)
+        else if (controlsOpen.current) setControls(false)
         else onLand()
+        return
+      }
+      if (event.key.toLowerCase() === 'h' && !event.repeat) {
+        setControls((open) => !open)
+        setGoTo(false)
         return
       }
       if (event.key.toLowerCase() === 'g' && !event.repeat) {
@@ -563,6 +614,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     let dragFrom: { x: number; y: number } | null = null
     const onMove = (event: PointerEvent) => {
       if (goToOpen.current) return
+      // reaching for a marker or a button should not turn the ship
+      if (event.pointerType === 'mouse' && (event.target as Element).closest?.('button, .flight-goto, .flight-controls')) {
+        pilot.steer.x = 0
+        pilot.steer.y = 0
+        guide.current?.classList.remove('is-on')
+        return
+      }
       if (event.pointerType === 'mouse') {
         pilot.steer.x = (event.clientX / window.innerWidth) * 2 - 1
         pilot.steer.y = (event.clientY / window.innerHeight) * 2 - 1
@@ -589,6 +647,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
     }
     const onBlur = () => resetPilotInput()
+    // the pointer leaving the window lets go of the stick
+    const onLeave = (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse') return
+      pilot.steer.x = 0
+      pilot.steer.y = 0
+      guide.current?.classList.remove('is-on')
+    }
     // the scroll wheel pulls the camera back (or in), smoothly
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
@@ -598,6 +663,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
     window.addEventListener('pointermove', onMove)
+    document.documentElement.addEventListener('pointerleave', onLeave)
     window.addEventListener('pointerdown', onDown)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
@@ -616,6 +682,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('pointermove', onMove)
+      document.documentElement.removeEventListener('pointerleave', onLeave)
       window.removeEventListener('pointerdown', onDown)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
@@ -737,7 +804,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
         {touch
           ? 'Drag to steer · hold Thrust to fly · tap a world to warp there'
-          : 'Steer with the mouse or arrows · W or click to fly · click a world, 1–8 or G to warp · L land · O orbit · T time · V camera · P photo · Esc exits'}
+          : 'Steer with the mouse · W or click to speed up, S to slow · G go to · L land · H all controls'}
       </p>
 
       {touch && (
@@ -753,17 +820,55 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         </button>
       )}
 
-      <button type="button" className="flight-land" onClick={onLand}>
-        Land
-      </button>
-      <button
-        type="button"
-        className={`flight-goto-button ${goTo ? 'is-open' : ''}`}
-        aria-expanded={goTo}
-        onClick={() => setGoTo((open) => !open)}
-      >
-        Go to <kbd>G</kbd>
-      </button>
+      <div className="flight-actions">
+        {/* leaves flight, back to where you were (landing on a world is L) */}
+        <button type="button" className="flight-land" onClick={onLand}>
+          Exit <kbd>Esc</kbd>
+        </button>
+        <button
+          type="button"
+          className={`flight-goto-button ${goTo ? 'is-open' : ''}`}
+          aria-expanded={goTo}
+          onClick={() => {
+            setGoTo((open) => !open)
+            setControls(false)
+          }}
+        >
+          Go to <kbd>G</kbd>
+        </button>
+        <button
+          type="button"
+          className={`flight-goto-button ${controls ? 'is-open' : ''}`}
+          aria-expanded={controls}
+          onClick={() => {
+            setControls((open) => !open)
+            setGoTo(false)
+          }}
+        >
+          Controls <kbd>H</kbd>
+        </button>
+      </div>
+      {controls && (
+        <div className="flight-controls" role="dialog" aria-label="Controls">
+          {CONTROLS.map(([title, rows]) => (
+            <section key={title}>
+              <h3>{title}</h3>
+              <dl>
+                {rows.map(([keys, what]) => (
+                  <div key={what}>
+                    <dt>
+                      {keys.map((k) => (
+                        <kbd key={k}>{k}</kbd>
+                      ))}
+                    </dt>
+                    <dd>{what}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ))}
+        </div>
+      )}
       {goTo && (
         <nav className="flight-goto" aria-label="Go to">
           {GROUPS.map((column) => (

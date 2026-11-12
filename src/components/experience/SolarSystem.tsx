@@ -409,6 +409,56 @@ const AIR: Record<string, Air> = {
     hM: 11 / 3389.5,
     sun: 13,
   },
+  // above the cloud deck (the sphere drawn is the cloud tops): a thick
+  // haze of sulfuric acid droplets, yellowed by an unknown absorber
+  Venus: {
+    rayleigh: [1.3, 3.1, 7.7],
+    mie: [860, 790, 600],
+    mieExt: [910, 915, 985],
+    mieG: [0.7, 0.7, 0.72],
+    hR: 15.9 / 6052,
+    hM: 4 / 6052,
+    sun: 14,
+  },
+  // the giants: hydrogen above the cloud tops (scale heights of tens of
+  // km), Jupiter and Saturn under a tan haze that drinks blue light,
+  // Uranus and Neptune clear and blue at the limb
+  Jupiter: {
+    rayleigh: [6, 14, 35],
+    mie: [120, 108, 75],
+    mieExt: [130, 130, 142],
+    mieG: [0.65, 0.65, 0.65],
+    hR: 27 / 69911,
+    hM: 40 / 69911,
+    sun: 16,
+  },
+  Saturn: {
+    rayleigh: [3, 7, 18],
+    mie: [90, 82, 60],
+    mieExt: [95, 95, 103],
+    mieG: [0.65, 0.65, 0.65],
+    hR: 59.5 / 58232,
+    hM: 70 / 58232,
+    sun: 16,
+  },
+  Uranus: {
+    rayleigh: [12, 28, 70],
+    mie: [6, 6, 6],
+    mieExt: [7, 7, 7],
+    mieG: [0.6, 0.6, 0.6],
+    hR: 27.7 / 25559,
+    hM: 27.7 / 25559,
+    sun: 18,
+  },
+  Neptune: {
+    rayleigh: [16, 38, 95],
+    mie: [5, 5, 5],
+    mieExt: [6, 6, 6],
+    mieG: [0.6, 0.6, 0.6],
+    hR: 19.7 / 24764,
+    hM: 19.7 / 24764,
+    sun: 18,
+  },
 }
 
 /* how finely the air is marched, by quality (0 light .. 2 full) */
@@ -1270,8 +1320,9 @@ void main() {
   if (uPlanet == 3) {
     color = mix(color, vec3(0.92, 0.66, 0.48) * light * uLight, pow(1.0 - facing, 2.4) * 0.42);
   }
-  /* Mars's air is worked out in its shell; the rest keep a soft rim */
-  if (uPlanet != 3) color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
+  /* the air over Venus, Mars and the giants is worked out in their
+     shells (real scattering); only the airless keep a soft rim */
+  if (uPlanet == 0) color += uAtmosphereColor * rim * light * (uType == 2 ? 0.20 : 0.45);
 
   gl_FragColor = vec4(max(color, vec3(0.003)), 1.0);
 
@@ -3527,16 +3578,178 @@ function Hotspots({
 }
 
 /* Uranus's rings: [radius, width, opacity], in planet radii */
-const URANUS_RINGS: [number, number, number][] = [
-  [1.65, 0.005, 0.12],
-  [1.67, 0.005, 0.12],
-  [1.75, 0.005, 0.14],
-  [1.79, 0.005, 0.14],
-  [1.84, 0.004, 0.1],
-  [1.86, 0.005, 0.14],
-  [1.9, 0.006, 0.16],
-  [2.0, 0.016, 0.28],
-]
+/* ============================================================
+   THE FAINT RINGS: Jupiter's, Uranus's and Neptune's
+   Each band: inner and outer edge (planet radii), opacity, and how dusty
+   it is (0: dark icy boulders, Uranus's narrow rings; 1: fine dust,
+   Jupiter's and Neptune's, which shine out when lit from behind, as
+   Voyager saw them looking back past the planet). Lit by the Sun, dimmer
+   seen from the unlit face, in the planet's shadow where it falls.
+   Neptune's outermost, Adams, is gathered into four bright arcs
+   (Courage, Liberte, Egalite, Fraternite).
+============================================================ */
+type RingBand = [number, number, number, number]
+const FAINT_RINGS: Record<string, { bands: RingBand[]; color: string; arcs?: number }> = {
+  // halo, main ring, the Amalthea and Thebe gossamer rings
+  Jupiter: {
+    color: '#c8a888',
+    bands: [
+      [1.29, 1.71, 0.025, 1],
+      [1.72, 1.81, 0.16, 1],
+      [1.81, 2.54, 0.022, 1],
+      [2.54, 3.11, 0.012, 1],
+    ],
+  },
+  // 6, 5, 4, alpha, beta, eta, gamma, delta, epsilon (narrow, dark), and
+  // the faint dusty nu and mu rings far out
+  Uranus: {
+    color: '#9aa4a6',
+    bands: [
+      [1.637, 1.641, 0.22, 0],
+      [1.652, 1.656, 0.22, 0],
+      [1.666, 1.67, 0.22, 0],
+      [1.75, 1.755, 0.3, 0],
+      [1.786, 1.791, 0.3, 0],
+      [1.846, 1.849, 0.18, 0],
+      [1.863, 1.866, 0.3, 0],
+      [1.909, 1.913, 0.32, 0],
+      [1.99, 2.012, 0.55, 0],
+      [2.58, 2.71, 0.03, 1],
+      [3.37, 4.04, 0.02, 1],
+    ],
+  },
+  // Galle, Le Verrier, Lassell, Arago, Adams (with its arcs)
+  Neptune: {
+    color: '#a9a39c',
+    arcs: 10,
+    bands: [
+      [1.66, 1.74, 0.05, 1],
+      [2.146, 2.151, 0.3, 1],
+      [2.151, 2.31, 0.035, 1],
+      [2.308, 2.312, 0.12, 1],
+      [2.539, 2.543, 0.35, 1],
+    ],
+  },
+}
+
+const FAINT_RING_VERTEX = /* glsl */ `
+varying vec3 vLocal; varying vec3 vWorld; varying vec3 vNormalW;
+void main() {
+  vLocal = position;
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vWorld = w.xyz;
+  vNormalW = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0));
+  gl_Position = projectionMatrix * viewMatrix * w;
+}`
+const FAINT_RING_FRAGMENT = /* glsl */ `
+uniform vec4 uBands[12]; uniform int uCount; uniform vec3 uColor; uniform float uArcs;
+uniform vec3 uSun; uniform vec3 uCenter; uniform float uRadius; uniform float uLight;
+varying vec3 vLocal; varying vec3 vWorld; varying vec3 vNormalW;
+void main() {
+  float r = length(vLocal.xy);
+  float a = 0.0;
+  float dust = 0.0;
+  float px = fwidth(r);
+  for (int i = 0; i < 12; i++) {
+    if (i >= uCount) break;
+    vec4 b = uBands[i];
+    // soft edges, never thinner than a pixel (thin rings fade instead)
+    float halfWidth = max((b.y - b.x) * 0.5, px * 0.5);
+    float mid = (b.x + b.y) * 0.5;
+    float inBand = 1.0 - smoothstep(halfWidth - px, halfWidth + px, abs(r - mid));
+    float k = b.z * inBand * min(1.0, (b.y - b.x) / max(px, 1e-6));
+    // Neptune's Adams ring: four arcs within some 40 degrees
+    if (uArcs > 0.0 && i == uCount - 1) {
+      float lon = atan(vLocal.y, vLocal.x) * 57.2958;
+      float l = mod(lon + 360.0, 360.0);
+      float bright = exp(-pow((l - 247.0) / 4.0, 2.0)) + exp(-pow((l - 256.0) / 2.5, 2.0)) + exp(-pow((l - 263.0) / 4.0, 2.0)) * 1.2 + exp(-pow((l - 275.0) / 5.0, 2.0)) * 1.3;
+      k *= 0.25 + uArcs * bright;
+    }
+    a += k;
+    dust = max(dust, b.w * step(0.001, k));
+  }
+  a = clamp(a, 0.0, 0.85);
+  if (a < 0.001) discard;
+  vec3 toSun = normalize(uSun - vWorld);
+  vec3 toEye = normalize(cameraPosition - vWorld);
+  float sunSide = dot(vNormalW, toSun);
+  float eyeSide = dot(vNormalW, toEye);
+  // seen from the face the Sun lights, or through the ring from the other
+  float face = sunSide * eyeSide > 0.0 ? 1.0 : 0.35;
+  // fine dust throws the light forward: bright when backlit
+  float forward = pow(max(dot(-toEye, toSun), 0.0), 6.0);
+  float glow = mix(1.0, 1.0 + forward * 14.0, dust) * mix(0.6, 1.0, abs(sunSide));
+  // the planet's shadow
+  vec3 oc = vWorld - uCenter;
+  float b = dot(oc, toSun);
+  float shade = (b < 0.0 && dot(oc, oc) - b * b < uRadius * uRadius) ? 0.06 : 1.0;
+  vec3 color = uColor * glow * face * shade * uLight;
+  gl_FragColor = vec4(color * a, a * 0.7);
+}`
+
+function FaintRings({
+  planet,
+  radius,
+  sun,
+  sunlight,
+}: {
+  planet: string
+  radius: number
+  sun: THREE.Vector3
+  sunlight?: { strength: number }
+}) {
+  const look = FAINT_RINGS[planet]
+  const outer = Math.max(...look.bands.map((band) => band[1]))
+  const inner = Math.min(...look.bands.map((band) => band[0]))
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uBands: {
+            value: Array.from({ length: 12 }, (_, i) => {
+              const band = look.bands[i] ?? [0, 0, 0, 0]
+              return new THREE.Vector4(band[0], band[1], band[2], band[3])
+            }),
+          },
+          uCount: { value: look.bands.length },
+          uColor: { value: new THREE.Color(look.color) },
+          uArcs: { value: look.arcs ?? 0 },
+          uSun: { value: sun },
+          uCenter: { value: new THREE.Vector3() },
+          uRadius: { value: 1 },
+          uLight: { value: 1 },
+        },
+        vertexShader: FAINT_RING_VERTEX,
+        fragmentShader: FAINT_RING_FRAGMENT,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
+        toneMapped: false,
+      }),
+    [look, sun],
+  )
+  useEffect(() => () => material.dispose(), [material])
+  const mesh = useRef<THREE.Mesh>(null)
+  useFrame(() => {
+    const ring = mesh.current
+    const parent = ring?.parent
+    if (!ring || !parent) return
+    // the planet: its centre and true radius, from the ring's own frame
+    ring.getWorldPosition(material.uniforms.uCenter.value)
+    ring.getWorldScale(_faintScale)
+    material.uniforms.uRadius.value = _faintScale.x
+    material.uniforms.uLight.value = sunlight?.strength ?? 1
+  })
+  return (
+    <mesh ref={mesh} material={material} rotation={[Math.PI / 2, 0, 0]} scale={radius}>
+      <ringGeometry args={[inner, outer, 256, 1]} />
+    </mesh>
+  )
+}
+const _faintScale = new THREE.Vector3()
 
 function PlanetRings({
   planet,
@@ -3551,10 +3764,7 @@ function PlanetRings({
   sunlight?: { strength: number; tint: THREE.Color }
   sharp?: boolean
 }) {
-  const isSaturn = planet.name === 'Saturn'
-  const isUranus = planet.name === 'Uranus'
-
-  if (isSaturn)
+  if (planet.name === 'Saturn')
     return (
       <SaturnRing
         radius={radius}
@@ -3563,80 +3773,7 @@ function PlanetRings({
         sharp={sharp}
       />
     )
-  const isNeptune = planet.name === 'Neptune'
-
-  // Uranus: a set of narrow, dark rings (6, 5, 4, alpha, beta, eta, gamma,
-  // delta, and the widest, epsilon), not one bright band
-  if (isUranus) {
-    return (
-      <>
-        {URANUS_RINGS.map(([at, width, opacity]) => (
-          <mesh key={at} rotation={[Math.PI / 2, 0, 0]}>
-            <ringGeometry args={[radius * at, radius * (at + width), 160]} />
-            <meshBasicMaterial
-              color="#8a9496"
-              transparent
-              opacity={opacity}
-              side={THREE.DoubleSide}
-              depthWrite={false}
-            />
-          </mesh>
-        ))}
-      </>
-    )
-  }
-
-  // Neptune has thin, faint rings: a broad band read as a dark hole
-  const outer = isSaturn
-    ? radius * 2.65
-    : isUranus
-      ? radius * 1.68
-      : radius * 1.64
-  const inner = isSaturn
-    ? radius * 1.35
-    : isUranus
-      ? radius * 1.63
-      : radius * 1.6
-
-  return (
-    <>
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <ringGeometry args={[inner, outer, 128]} />
-        <meshBasicMaterial
-          color={
-            isSaturn
-              ? '#c8b48d'
-              : isUranus
-                ? '#a9c2c9'
-                : '#7d8ea6'
-          }
-          transparent
-          opacity={
-            isSaturn
-              ? 0.48
-              : isUranus
-                ? 0.42
-                : 0.2
-          }
-          side={THREE.DoubleSide}
-          depthWrite={false}
-        />
-      </mesh>
-
-      {isNeptune && (
-        <mesh rotation={[Math.PI / 2, 0, 0]}>
-          <ringGeometry
-            args={[radius * 1.78, radius * 1.86, 128]}
-          />
-          <meshBasicMaterial
-            color="#5d718d"
-            transparent
-            opacity={0.12}
-            side={THREE.DoubleSide}
-            depthWrite={false}
-          />
-        </mesh>
-      )}
-    </>
-  )
+  if (FAINT_RINGS[planet.name] && planetUniforms?.uSunPosition)
+    return <FaintRings planet={planet.name} radius={radius} sun={planetUniforms.uSunPosition.value} sunlight={sunlight} />
+  return null
 }
