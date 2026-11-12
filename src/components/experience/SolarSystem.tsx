@@ -498,6 +498,12 @@ void main() {
   float mu = dot(d, sunDir);
   vec3 light = (sumR * bR * (3.0 / (16.0 * PI)) * (1.0 + mu * mu) + sumM * bMs * miePhase(mu, uMieG)) * uSun * uLight;
   vec3 through = exp(-(bR * depthR + bMe * depthM));
+  // the eye adapts: standing in the air the sky is the brightest thing in
+  // view; from space the sunlit ground is, and the thin veil of air over
+  // it is faint beside it (as in photographs from orbit), so the planet
+  // keeps its true colours instead of looking washed out
+  float fromSpace = smoothstep(0.002, 0.03, camR - 1.0);
+  light *= mix(1.0, 0.3, fromSpace);
   // a soft exposure on brightness alone, so the colours keep their hue
   // (a sunset stays orange-red instead of washing to yellow)
   float lum = dot(light, vec3(0.2126, 0.7152, 0.0722));
