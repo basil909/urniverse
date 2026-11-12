@@ -459,7 +459,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       const insetX = 46
       const insetTop = 64
       const insetBottom = 104
-      const placed: { x: number; y: number; km: number; label: HTMLElement }[] = []
+      const placed: { x: number; y: number; km: number; label: HTMLElement; quiet: boolean }[] = []
+      // close to a world, the rest of the sky goes quiet: worlds beyond its
+      // own neighbourhood (its moons, its craft) keep their mark, and their
+      // name comes back when you turn to look at them
+      const neighbourhood = Math.max(pilot.nearestRadiusKm * 400, 3e6)
+      const lookRadius = Math.min(width, height) * 0.18
       pilot.markers.forEach((marker) => {
         const slot = WORLDS.findIndex((world) => world.index === marker.index)
         const element = markerRefs.current[slot]
@@ -500,13 +505,21 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           !target &&
           ((parent !== undefined && pilot.nearestIndex !== parent && pilot.nearestIndex !== marker.index) ||
             (show !== undefined && !show(marker.km)))
-        element.classList.toggle('is-hidden', marker.radiusPx > 40 || away)
+        // nothing shows through the world you are near; moons, craft,
+        // asteroids and the comet only where you can see them (no arrow at
+        // the edge), and close to a world, far worlds neither
+        const kind = WORLDS[slot].kind
+        const far = pilot.focus && marker.km > neighbourhood
+        const unseen = !target && (marker.behind || (!onScreen && (far || (kind !== 'planet' && kind !== 'sun'))))
+        const hidden = marker.radiusPx > 40 || away || unseen
+        element.classList.toggle('is-hidden', hidden)
         element.classList.toggle('is-target', target)
         const label = element.querySelector<HTMLElement>('.flight-marker-label')
-        if (label) {
+        if (label && !hidden) {
           const text = `${WORLDS[slot].name} · ${formatShort(marker.km)}`
           if (label.textContent !== text) label.textContent = text
-          placed.push({ x, y, km: marker.km, label })
+          const looking = onScreen && Math.hypot(x - width / 2, y - height / 2) < lookRadius
+          placed.push({ x, y, km: marker.km, label, quiet: far && !target && !looking })
         }
       })
       // named features on the ground below
@@ -522,8 +535,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       // nearest keeps its name
       placed.sort((a, b) => a.km - b.km)
       placed.forEach((item, i) => {
-        const crowded = placed.slice(0, i).some((other) => Math.abs(other.x - item.x) < 90 && Math.abs(other.y - item.y) < 16)
-        item.label.classList.toggle('is-quiet', crowded)
+        const crowded = placed
+          .slice(0, i)
+          .some((other) => !other.quiet && Math.abs(other.x - item.x) < 90 && Math.abs(other.y - item.y) < 16)
+        item.label.classList.toggle('is-quiet', item.quiet || crowded)
       })
     }
     frame = requestAnimationFrame(place)

@@ -2,7 +2,8 @@ import * as THREE from 'three'
 
 /* where each world is on screen, for the HUD (written by the scene each
    frame): x, y in -1..1 (y up), whether it is ahead of the camera, its
-   distance in km and its radius on screen in pixels */
+   distance in km, its radius on screen in pixels, and whether the world
+   you are near stands between it and you */
 export type FlightMarker = {
   name: string
   index: number // -1: the Sun
@@ -11,6 +12,7 @@ export type FlightMarker = {
   ahead: boolean
   km: number
   radiusPx: number
+  behind: boolean
 }
 
 /* Shared state for the flight mode (the little jet): written by the page

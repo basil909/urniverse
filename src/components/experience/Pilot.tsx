@@ -684,6 +684,7 @@ const _bodyQuat = new THREE.Quaternion()
 const _bodyPosDummy = new THREE.Vector3()
 const _bodyScaleDummy = new THREE.Vector3()
 const _markerDir = new THREE.Vector3()
+const _occluder = new THREE.Vector3()
 const _camForward = new THREE.Vector3()
 
 const BODY_NAMES = Array.from({ length: BODY_COUNT + 1 }, (_, i) => getBodyName(i - 1))
@@ -2012,8 +2013,12 @@ export default function Pilot() {
     const halfFov = THREE.MathUtils.degToRad(camera.fov) / 2
     const halfHeight = size.height / 2
     if (pilot.markers.length !== BODY_COUNT + 1) {
-      pilot.markers = BODY_NAMES.map((name, i) => ({ name, index: i - 1, x: 0, y: 0, ahead: false, km: 0, radiusPx: 0 }))
+      pilot.markers = BODY_NAMES.map((name, i) => ({ name, index: i - 1, x: 0, y: 0, ahead: false, km: 0, radiusPx: 0, behind: false }))
     }
+    // the world you are near hides what lies beyond it (from just under
+    // the camera's height, so a low camera keeps its horizon)
+    getBodyPosition(nearestIndex, simClock.jd, _occluder).sub(camera.position)
+    const occluderRadius = Math.min(getBodyRadius(nearestIndex), _occluder.length() * 0.9995)
     pilot.markers.forEach((marker) => {
       getBodyPosition(marker.index, simClock.jd, _bodyCenter)
       const radius = getBodyRadius(marker.index)
@@ -2022,6 +2027,15 @@ export default function Pilot() {
       _markerDir.divideScalar(distance)
       marker.ahead = _markerDir.dot(_camForward) > 0
       marker.km = Math.max(0, distance - radius) * KM_PER_UNIT
+      marker.behind = false
+      if (marker.index !== nearestIndex) {
+        const along = _occluder.dot(_markerDir)
+        const miss = _occluder.lengthSq() - along * along
+        if (along > 0 && miss < occluderRadius * occluderRadius) {
+          const enter = along - Math.sqrt(occluderRadius * occluderRadius - miss)
+          marker.behind = enter < distance - Math.max(radius, occluderRadius * 0.002)
+        }
+      }
       marker.radiusPx = (Math.atan(radius / Math.max(distance, radius)) / halfFov) * halfHeight
       _markerDir.add(camera.position).project(camera)
       marker.x = _markerDir.x
