@@ -6,12 +6,17 @@ import * as THREE from 'three'
    imagery (GIBS: the VIIRS cameras on NOAA-20 and NOAA-21, and MODIS on
    Aqua), stitched into one global map, 2560 x 1280 (about 16 km a pixel),
    and turned into a cloud map: a pixel is cloud where it is bright and
-   colourless (deserts are bright but coloured; snow and sea ice read as
-   cloud, as they are white anyway). Where no satellite saw the ground in
-   daylight (the gaps between their passes, the polar night) the usual
-   cloud map fills in. Fetched only when the camera comes near Earth.
-   The result feeds the cloud layer, the clouds' shadows, the 3D clouds
-   flying low, and the mist you fly through.
+   colourless (deserts are bright but coloured). Snow is bright and
+   colourless too: NASA's own daily snow map from the same VIIRS cameras
+   (NDSI snow cover, made with a proper cloud mask, about 500 m a pixel,
+   read at two to each of ours) says where the white was snow, so it is
+   taken out of the clouds and kept as a snow map of its own: real snow
+   on the mountains and the plains, as it lay yesterday. (Sea ice still
+   reads as cloud.) Where no satellite saw the ground in daylight (the
+   gaps between their passes, the polar night) the usual cloud map fills
+   in. Fetched only when the camera comes near Earth. The result feeds
+   the cloud layer, the clouds' shadows, the 3D clouds flying low, the
+   mist you fly through, and the snow on the ground.
 ============================================================ */
 
 const LAYERS = [
@@ -23,12 +28,18 @@ const LEVEL = 2 // tiles of 512 px covering 72 degrees
 const WIDTH = 2560
 const HEIGHT = 1280
 const FALLBACK = '/textures/hd/earth-clouds.webp'
+/* NASA's daily snow maps (NDSI snow cover), from both VIIRS cameras: two
+   passes, so cloud over one is often clear in the other */
+const SNOW_LAYERS = ['VIIRS_NOAA20_NDSI_Snow_Cover', 'VIIRS_NOAA21_NDSI_Snow_Cover']
+const SNOW_LEVEL = 3 // tiles of 512 px covering 36 degrees: 2 x 2 pixels to each of the map's
 
 type Sampler = { width: number; height: number; data: Uint8ClampedArray }
 
 export const earthToday = {
   /** the map, once ready */
   texture: null as THREE.CanvasTexture | null,
+  /** yesterday's snow on the ground (0..1 cover, in each channel), once ready */
+  snow: null as THREE.CanvasTexture | null,
   /** the day it shows (YYYY-MM-DD, UTC), once ready */
   date: '',
   sampler: null as Sampler | null,
@@ -85,6 +96,94 @@ async function layerPixels(layer: string, date: string) {
   return context.getImageData(0, 0, WIDTH, HEIGHT).data
 }
 
+/* the snow map's colour scale back to its value: NDSI x 100 (1..100) where
+   snow was seen, 0 elsewhere (no snow, cloud, water, night: transparent) */
+function ndsiOf(g: number, b: number, a: number) {
+  if (a < 128) return 0
+  if (g > 225) return b - 127 // 1..20
+  if (g > 195) return b - 107 // 21..40
+  if (g > 165) return b - 87 // 41..60
+  if (g > 140) return b - 67 // 61..80
+  return 90 // 81..100
+}
+
+/* one camera's snow, per cell of our map: the share of its pixels where
+   snow was seen, and the ground's snow cover (the fraction of the ground
+   white, from NDSI as NASA's own snow products estimate it) */
+async function snowCells(layer: string, date: string) {
+  const seen = new Float32Array(WIDTH * HEIGHT)
+  const cover = new Float32Array(WIDTH * HEIGHT)
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 512
+  const context = canvas.getContext('2d', { willReadFrequently: true })!
+  let any = false
+  const jobs: Promise<void>[] = []
+  for (let row = 0; row < 5; row += 1) {
+    for (let col = 0; col < 10; col += 1) {
+      const url = `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/${layer}/default/${date}/500m/${SNOW_LEVEL}/${row}/${col}.png`
+      jobs.push(
+        fetch(url)
+          .then((response) => (response.ok ? response.blob() : null))
+          .then((blob) => (blob ? createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }) : null))
+          .then((bitmap) => {
+            if (!bitmap) return
+            any = true
+            context.clearRect(0, 0, 512, 512)
+            context.drawImage(bitmap, 0, 0)
+            bitmap.close()
+            const data = context.getImageData(0, 0, 512, 512).data
+            for (let y = 0; y < 256; y += 1) {
+              for (let x = 0; x < 256; x += 1) {
+                let count = 0
+                let white = 0
+                for (let k = 0; k < 4; k += 1) {
+                  const i = ((y * 2 + (k >> 1)) * 512 + x * 2 + (k & 1)) * 4
+                  const ndsi = ndsiOf(data[i + 1], data[i + 2], data[i + 3])
+                  if (ndsi <= 0) continue
+                  count += 1
+                  white += Math.min(1, Math.max(0, 0.0145 * ndsi - 0.01))
+                }
+                if (count === 0) continue
+                const cell = (row * 256 + y) * WIDTH + col * 256 + x
+                // in the warm low latitudes a lone snowy pixel is more
+                // likely a cloud's bright edge: there, snow must fill half
+                const lat = 90 - ((cell / WIDTH) | 0) * (180 / HEIGHT)
+                if (Math.abs(lat) < 30 && count < 2) continue
+                seen[cell] = count / 4
+                cover[cell] = white / 4
+              }
+            }
+          })
+          .catch(() => {}),
+      )
+    }
+  }
+  await Promise.all(jobs)
+  return any ? { seen, cover } : null
+}
+
+/* a snowfield's few unseen pixels (a wisp of cloud, a lake) are filled
+   from round about: each cell takes at least 0.6 of its neighbours' most */
+function soften(values: Float32Array) {
+  const out = new Float32Array(values.length)
+  for (let y = 0; y < HEIGHT; y += 1) {
+    for (let x = 0; x < WIDTH; x += 1) {
+      let most = 0
+      for (let dy = -1; dy <= 1; dy += 1) {
+        const yy = Math.min(HEIGHT - 1, Math.max(0, y + dy))
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const xx = (x + dx + WIDTH) % WIDTH
+          most = Math.max(most, values[yy * WIDTH + xx])
+        }
+      }
+      const i = y * WIDTH + x
+      out[i] = Math.max(values[i], most * 0.6)
+    }
+  }
+  return out
+}
+
 async function fallbackPixels() {
   const bitmap = await tileImage(FALLBACK)
   if (!bitmap) return null
@@ -103,10 +202,34 @@ export function loadEarthToday() {
   earthToday.started = true
   // yesterday (UTC): the latest day the satellites have finished
   const date = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-  Promise.all([...LAYERS.map((layer) => layerPixels(layer, date)), fallbackPixels()])
-    .then((all) => {
-      const layers = all.slice(0, LAYERS.length) as Uint8ClampedArray[]
-      const fallback = all[LAYERS.length] as Uint8ClampedArray | null
+  Promise.all([
+    Promise.all(LAYERS.map((layer) => layerPixels(layer, date))),
+    fallbackPixels(),
+    Promise.all(SNOW_LAYERS.map((layer) => snowCells(layer, date))),
+  ])
+    .then(([layers, fallback, snowLayers]) => {
+      // snow: what either camera saw
+      const snows = snowLayers.filter((snow) => snow !== null)
+      let snowSeen: Float32Array | null = null
+      let snowCover: Float32Array | null = null
+      let snowNear: Float32Array | null = null
+      if (snows.length) {
+        const seenBoth = new Float32Array(WIDTH * HEIGHT)
+        const coverBoth = new Float32Array(WIDTH * HEIGHT)
+        for (const snow of snows) {
+          for (let i = 0; i < WIDTH * HEIGHT; i += 1) {
+            seenBoth[i] = Math.max(seenBoth[i], snow.seen[i])
+            coverBoth[i] = Math.max(coverBoth[i], snow.cover[i])
+          }
+        }
+        snowSeen = soften(seenBoth)
+        snowCover = coverBoth
+        snowNear = soften(coverBoth)
+      }
+      // the snow on the ground: as seen, and where the snow map has a gap
+      // (a wisp of cloud over the snowfield, or its cloud mask too eager
+      // over snow) but the picture is white beside a snowfield, snow
+      const paint = snowCover ? new Float32Array(WIDTH * HEIGHT) : null
       const canvas = document.createElement('canvas')
       canvas.width = WIDTH
       canvas.height = HEIGHT
@@ -127,8 +250,14 @@ export function loadEarthToday() {
           cloud = smoothstep(0.3, 0.72, lum) * (1 - smoothstep(0.1, 0.28, sat))
           break
         }
+        if (paint && snowCover && snowNear) {
+          const cell = i >> 2
+          paint[cell] = snowCover[cell] > 0 ? snowCover[cell] : cloud > 0.5 ? snowNear[cell] : 0
+        }
         if (cloud < 0) cloud = fallback ? fallback[i + 1] / 255 : 0
         else seen += 1
+        // where the white was snow, it is not cloud
+        if (snowSeen) cloud *= 1 - smoothstep(0.1, 0.6, snowSeen[i >> 2])
         const value = Math.round(cloud * 255)
         out.data[i] = value
         out.data[i + 1] = value
@@ -144,6 +273,26 @@ export function loadEarthToday() {
       texture.anisotropy = 4
       texture.needsUpdate = true
       earthToday.texture = texture
+      if (paint) {
+        const snowCanvas = document.createElement('canvas')
+        snowCanvas.width = WIDTH
+        snowCanvas.height = HEIGHT
+        const snowContext = snowCanvas.getContext('2d')!
+        const snowData = snowContext.createImageData(WIDTH, HEIGHT)
+        for (let i = 0; i < WIDTH * HEIGHT; i += 1) {
+          const value = Math.round(paint[i] * 255)
+          snowData.data[i * 4] = value
+          snowData.data[i * 4 + 1] = value
+          snowData.data[i * 4 + 2] = value
+          snowData.data[i * 4 + 3] = 255
+        }
+        snowContext.putImageData(snowData, 0, 0)
+        const snow = new THREE.CanvasTexture(snowCanvas)
+        snow.wrapS = THREE.RepeatWrapping
+        snow.anisotropy = 4
+        snow.needsUpdate = true
+        earthToday.snow = snow
+      }
       earthToday.date = date
       earthToday.sampler = { width: WIDTH, height: HEIGHT, data: out.data }
       earthToday.ready.forEach((listener) => listener())

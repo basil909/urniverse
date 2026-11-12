@@ -90,6 +90,9 @@ const earthNight = {
   /** the whole globe's elevation (earthRelief.ts), for mountain shadows */
   uRelief: { value: null as THREE.Texture | null },
   uHasRelief: { value: 0 },
+  /** yesterday's snow on the ground (earthToday.ts) */
+  uSnow: { value: null as THREE.Texture | null },
+  uHasSnow: { value: 0 },
 }
 /* the Sun's direction in the cloud layer's own frame, for the storm tops */
 const cloudTops = { uSunLocal: { value: new THREE.Vector3(1, 0, 0) } }
@@ -235,7 +238,7 @@ function maskLightsToNightSide(shader: THREE.WebGLProgramParametersWithUniforms)
   shader.fragmentShader =
     `uniform vec3 uSunDirView; uniform vec3 uNorthView; uniform sampler2D uClouds;
 uniform float uHasClouds; uniform float uCloudShift; uniform float uTime; uniform float uCloudHeight; uniform float uAurora3D;
-uniform sampler2D uRelief; uniform float uHasRelief;
+uniform sampler2D uRelief; uniform float uHasRelief; uniform sampler2D uSnow; uniform float uHasSnow;
 ` +
     shader.fragmentShader
       .replace(
@@ -248,6 +251,12 @@ uniform sampler2D uRelief; uniform float uHasRelief;
         vec4 earthPatch = patched(diffuseColor.rgb, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, vMapUv, uPatchGain);
         diffuseColor.rgb = earthPatch.rgb;
         earthStreamed = earthPatch.a;
+      }
+      /* yesterday's snow, where the satellites saw it: the maps' ground
+         is snow-free summer */
+      if (uHasSnow > 0.5) {
+        float snow = smoothstep(0.04, 0.7, texture2D(uSnow, vMapUv).g);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.66, 0.72), snow);
       }
       #endif`,
       )
@@ -2870,6 +2879,11 @@ function EarthCloudLayer({
     return () => void earthRelief.ready.delete(ready)
   }, [])
 
+  // yesterday's snow, painted on the ground, once ready
+  useEffect(() => {
+    earthNight.uSnow.value = today ? earthToday.snow : null
+    earthNight.uHasSnow.value = today && earthToday.snow ? 1 : 0
+  }, [today])
   // the ground's shadow map reads the same clouds
   useEffect(() => {
     earthNight.uClouds.value = shown

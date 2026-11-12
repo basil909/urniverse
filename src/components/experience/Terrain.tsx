@@ -11,6 +11,7 @@ import { aimEarthGround, earthElevation, earthGround, releaseEarthGround } from 
 import { sphereUv } from './groundState'
 import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, shipShadow } from './groundState'
 import { CLOUD_GLSL, cloudVolume } from './clouds'
+import { earthToday } from './earthToday'
 
 /* The patch of ground under the ship (see groundState.ts). A child of the
    planet's sphere, so it turns with it; its vertices are placed on the
@@ -152,6 +153,34 @@ ${GROUND_GLSL}
 ${CLOSE_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
 ${CLOUD_GLSL}
+uniform sampler2D uSnow; uniform float uHasSnow;
+/* Earth: yesterday's snow (NASA's map, some 16 km a pixel: the share of
+   the ground white), laid on the ground as snow lies. Within a few km
+   the share sets a snow line: where 30% is white, the highest 30% of the
+   ground round about; on steep rock it does not stay; dark ground (rock,
+   forest) shows through first, and its edge breaks into drifts. */
+float snowHere(vec2 uv, vec3 d, float slope, vec3 base) {
+  float cover = texture2D(uSnow, uv).g;
+  if (cover < 0.01) return 0.0;
+  float known;
+  float e = gElevation(uv, known);
+  // the ground's heights some 6 km round about
+  float cosLat = max(cos((uv.y - 0.5) * 3.14159265), 0.05);
+  vec2 off = vec2(1e-3 / (6.28318531 * cosLat), 1e-3 / 3.14159265);
+  float k;
+  float e1 = gElevation(uv + vec2(off.x, 0.0), k);
+  float e2 = gElevation(uv - vec2(off.x, 0.0), k);
+  float e3 = gElevation(uv + vec2(0.0, off.y), k);
+  float e4 = gElevation(uv - vec2(0.0, off.y), k);
+  float around = (e + e1 + e2 + e3 + e4) * 0.2;
+  float spread = max(max(max(e, e1), max(e2, max(e3, e4))) - min(min(e, e1), min(e2, min(e3, e4))), 300.0) * 0.5;
+  float line = around + spread * (1.0 - 2.0 * cover);
+  float above = known > 0.5 ? (e - line) / spread : cover * 2.0 - 1.0;
+  float drifts = gNoise(d * 2100.0) * 0.65 + gNoise(d * 9000.0) * 0.35 - 0.5;
+  float dark = clamp(dot(base, vec3(0.3, 0.5, 0.2)) / 0.12, 0.0, 1.0);
+  float s = above * 2.0 + drifts * 1.2 - smoothstep(0.1, 0.32, slope) * 2.5 + (dark - 0.5) * 0.8;
+  return smoothstep(-0.25, 0.25, s) * smoothstep(0.02, 0.1, cover);
+}
 void main() {
   vec3 d = normalize(vDir);
   vec2 uv = gUv(d);
@@ -179,6 +208,11 @@ void main() {
   base *= 1.0 + cd.y * (uEarth > 0.5 ? 0.12 : 0.3) * land;
   float slope = 1.0 - dot(n, d);
   base = mix(base, base * vec3(0.8, 0.76, 0.72), smoothstep(0.03, 0.2, slope) * land);
+  if (uEarth > 0.5 && uHasSnow > 0.5) {
+    // (a little of the ground's own light and dark stays, under thin snow)
+    float lum = clamp(dot(base, vec3(0.3, 0.5, 0.2)) / 0.12, 0.0, 1.0);
+    base = mix(base, vec3(0.58, 0.62, 0.68) * (0.84 + 0.16 * lum), snowHere(uv, d, slope, base) * land);
+  }
   float sunUp = dot(d, uSunL);
   float day = smoothstep(-0.12, 0.08, sunUp);
   float lit = max(dot(n, uSunL), 0.0) * smoothstep(-0.05, 0.05, sunUp);
@@ -353,6 +387,8 @@ export default function Terrain({
           uCracks: { value: index === 14 ? 1 : 0 },
           uNight: { value: null as THREE.Texture | null },
           uHasNight: { value: 0 },
+          uSnow: { value: null as THREE.Texture | null },
+          uHasSnow: { value: 0 },
           ...surfacePatch,
           ...shipShadow,
           ...cloudVolume,
@@ -448,6 +484,9 @@ export default function Terrain({
     const lights = night?.() ?? null
     u.uNight.value = lights
     u.uHasNight.value = lights ? 1 : 0
+    // yesterday's snow
+    u.uSnow.value = earth ? earthToday.snow : null
+    u.uHasSnow.value = earth && earthToday.snow ? 1 : 0
     body.getWorldScale(_scale)
     u.uWorldRadius.value = _scale.x
     _sun.copy(sunPosition).applyMatrix4(ground.inverse).normalize()
