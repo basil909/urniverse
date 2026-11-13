@@ -3863,7 +3863,10 @@ function Hotspots({
    it is (0: dark icy boulders, Uranus's narrow rings; 1: fine dust,
    Jupiter's and Neptune's, which shine out when lit from behind, as
    Voyager saw them looking back past the planet). Lit by the Sun, dimmer
-   seen from the unlit face, in the planet's shadow where it falls.
+   seen from the unlit face. The dusty rings are all but transparent (a
+   millionth of the light stopped): they only add light, so in the
+   planet's shadow they fade from sight rather than darken what lies
+   behind; the shadow's edge is as soft as the Sun is wide there.
    Neptune's outermost, Adams, is gathered into four bright arcs
    (Courage, Liberte, Egalite, Fraternite).
 ============================================================ */
@@ -3922,7 +3925,7 @@ void main() {
 }`
 const FAINT_RING_FRAGMENT = /* glsl */ `
 uniform vec4 uBands[12]; uniform int uCount; uniform vec3 uColor; uniform float uArcs;
-uniform vec3 uSun; uniform vec3 uCenter; uniform float uRadius; uniform float uLight;
+uniform vec3 uSun; uniform vec3 uCenter; uniform float uRadius; uniform float uLight; uniform float uSunAng;
 varying vec3 vLocal; varying vec3 vWorld; varying vec3 vNormalW;
 void main() {
   float r = length(vLocal.xy);
@@ -3954,16 +3957,22 @@ void main() {
   float sunSide = dot(vNormalW, toSun);
   float eyeSide = dot(vNormalW, toEye);
   // seen from the face the Sun lights, or through the ring from the other
-  float face = sunSide * eyeSide > 0.0 ? 1.0 : 0.35;
+  // (eased across, as the Sun is near the ring plane at the equinoxes)
+  float face = mix(0.35, 1.0, smoothstep(-0.01, 0.01, sunSide * sign(eyeSide)));
   // fine dust throws the light forward: bright when backlit
   float forward = pow(max(dot(-toEye, toSun), 0.0), 6.0);
   float glow = mix(1.0, 1.0 + forward * 14.0, dust) * mix(0.6, 1.0, abs(sunSide));
-  // the planet's shadow
+  // the planet's shadow: how far the line to the Sun passes from the
+  // planet's centre, against its radius, softened over the penumbra (the
+  // Sun's width, seen from here, times the distance behind the planet)
   vec3 oc = vWorld - uCenter;
   float b = dot(oc, toSun);
-  float shade = (b < 0.0 && dot(oc, oc) - b * b < uRadius * uRadius) ? 0.06 : 1.0;
+  float miss = sqrt(max(dot(oc, oc) - b * b, 0.0));
+  float soft = max(-b * uSunAng, fwidth(miss));
+  float shade = b >= 0.0 ? 1.0 : smoothstep(uRadius - soft, uRadius + soft, miss);
   vec3 color = uColor * glow * face * shade * uLight;
-  gl_FragColor = vec4(color * a, a * 0.7);
+  // dusty rings only add light; dense ones (Uranus's) also hide a little
+  gl_FragColor = vec4(color * a, a * 0.7 * (1.0 - dust));
 }`
 
 function FaintRings({
@@ -3997,6 +4006,8 @@ function FaintRings({
           uCenter: { value: new THREE.Vector3() },
           uRadius: { value: 1 },
           uLight: { value: 1 },
+          // the Sun's angular radius there (radians)
+          uSunAng: { value: SUN_ANGLE_1AU / (PLANETS.find((entry) => entry.name === planet)?.distanceAU ?? 1) },
         },
         vertexShader: FAINT_RING_VERTEX,
         fragmentShader: FAINT_RING_FRAGMENT,
