@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 
+import { runSkyJob } from './skyJobs'
+
 /* ============================================================
    SHARP CLOUDS UNDER THE CAMERA
    Earth's global cloud map (earthToday.ts) is 16 km a pixel: from the
@@ -10,12 +12,11 @@ import * as THREE from 'three'
    over the global map: 2 km a pixel from orbit, 1 km below 150 km,
    500 m below 30 km. A patch is 4 x 4 tiles (36, 18 or 9 degrees
    across); a new one is built when you near its edge or change height,
-   and the old one stays until it is ready. Desktop only.
+   and the old one stays until it is ready; the pixel work is done in a
+   worker (skyPixels.ts). Desktop only.
    Texture channels: G is cloud (0 where unseen), B is 1 where seen.
 ============================================================ */
 
-const TC_LAYERS = ['VIIRS_NOAA20_CorrectedReflectance_TrueColor', 'VIIRS_NOAA21_CorrectedReflectance_TrueColor']
-const SNOW_LAYERS = ['VIIRS_NOAA20_NDSI_Snow_Cover', 'VIIRS_NOAA21_NDSI_Snow_Cover']
 const TILE = 512
 const SPAN = 4
 const SIZE = TILE * SPAN
@@ -51,8 +52,8 @@ type Patch = {
   cols: number
   /** u0, v0 (from the south), width, height */
   rect: [number, number, number, number]
-  texture: THREE.CanvasTexture | null
-  data: Uint8ClampedArray | null
+  texture: THREE.Texture | null
+  data: Uint8Array | null
 }
 
 let shown: Patch | null = null
@@ -67,21 +68,6 @@ function allowed() {
     typeof createImageBitmap === 'function' &&
     (memory === undefined || memory >= 4)
   return allowedHere
-}
-
-const smoothstep = (a: number, b: number, x: number) => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
-
-async function bitmapOf(url: string) {
-  try {
-    const response = await fetch(url)
-    if (!response.ok) return null
-    return await createImageBitmap(await response.blob(), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })
-  } catch {
-    return null
-  }
 }
 
 const levelFor = (altitudeKm: number) => (altitudeKm > 150 ? 5 : altitudeKm > 30 ? 6 : 7)
@@ -107,72 +93,16 @@ function inside(patch: Patch, lon: number, lat: number) {
 }
 
 async function build(patch: Patch, date: string) {
-  const canvas = document.createElement('canvas')
-  canvas.width = SIZE
-  canvas.height = SIZE
-  const context = canvas.getContext('2d', { willReadFrequently: true })!
-  const out = context.createImageData(SIZE, SIZE)
-  for (let i = 3; i < out.data.length; i += 4) out.data[i] = 255
-  const tile = document.createElement('canvas')
-  tile.width = TILE
-  tile.height = TILE
-  const tileContext = tile.getContext('2d', { willReadFrequently: true })!
-  const read = (bitmap: ImageBitmap | null) => {
-    if (!bitmap) return null
-    tileContext.clearRect(0, 0, TILE, TILE)
-    tileContext.drawImage(bitmap, 0, 0)
-    bitmap.close()
-    return tileContext.getImageData(0, 0, TILE, TILE).data
-  }
-  const jobs: Promise<void>[] = []
-  for (let ty = 0; ty < SPAN; ty += 1) {
-    for (let tx = 0; tx < SPAN; tx += 1) {
-      const row = patch.row0 + ty
-      const col = (patch.col0 + tx) % patch.cols
-      const urls = [
-        ...TC_LAYERS.map((layer) => `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/${layer}/default/${date}/250m/${patch.level}/${row}/${col}.jpg`),
-        ...SNOW_LAYERS.map((layer) => `https://gibs.earthdata.nasa.gov/wmts/epsg4326/best/${layer}/default/${date}/500m/${patch.level}/${row}/${col}.png`),
-      ]
-      jobs.push(
-        Promise.all(urls.map(bitmapOf)).then((bitmaps) => {
-          // decoded one after another (one small canvas between them)
-          const pictures = bitmaps.slice(0, TC_LAYERS.length).map(read)
-          const snows = bitmaps.slice(TC_LAYERS.length).map(read)
-          for (let y = 0; y < TILE; y += 1) {
-            for (let x = 0; x < TILE; x += 1) {
-              const i = (y * TILE + x) * 4
-              let cloud = -1
-              for (const data of pictures) {
-                if (!data) continue
-                const r = data[i]
-                const g = data[i + 1]
-                const b = data[i + 2]
-                if (r + g + b < 12) continue // no data here
-                const max = Math.max(r, g, b)
-                const min = Math.min(r, g, b)
-                const sat = max > 0 ? (max - min) / max : 0
-                cloud = smoothstep(0.3, 0.72, (r + g + b) / 765) * (1 - smoothstep(0.1, 0.28, sat))
-                break
-              }
-              const o = ((ty * TILE + y) * SIZE + tx * TILE + x) * 4
-              if (cloud < 0) continue // unseen: the global map shows
-              // the white was snow, not cloud
-              for (const snow of snows) if (snow && snow[i + 3] > 128) cloud = 0
-              out.data[o + 1] = Math.round(cloud * 255)
-              out.data[o + 2] = 255
-            }
-          }
-        }),
-      )
-    }
-  }
-  await Promise.all(jobs)
-  context.putImageData(out, 0, 0)
-  const texture = new THREE.CanvasTexture(canvas)
+  // worked out in the worker (skyPixels.ts); rows from the south
+  const data = await runSkyJob<Uint8Array>({ type: 'patch', level: patch.level, row0: patch.row0, col0: patch.col0, cols: patch.cols, date })
+  const texture = new THREE.DataTexture(data, SIZE, SIZE, THREE.RGBAFormat, THREE.UnsignedByteType)
+  texture.magFilter = THREE.LinearFilter
+  texture.minFilter = THREE.LinearMipmapLinearFilter
+  texture.generateMipmaps = true
   texture.anisotropy = 4
   texture.needsUpdate = true
   patch.texture = texture
-  patch.data = out.data
+  patch.data = data
 }
 
 function show(patch: Patch | null) {
@@ -223,7 +153,7 @@ export function patchCover(u: number, v: number) {
   const y = (v - v0) / h
   if (x > 1 || y < 0 || y > 1) return null
   const px = Math.min(SIZE - 1, Math.floor(x * SIZE))
-  const py = Math.min(SIZE - 1, Math.floor((1 - y) * SIZE))
+  const py = Math.min(SIZE - 1, Math.floor(y * SIZE))
   const i = (py * SIZE + px) * 4
   if (patch.data[i + 2] < 128) return null
   return patch.data[i + 1] / 255

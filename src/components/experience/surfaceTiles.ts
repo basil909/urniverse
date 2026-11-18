@@ -198,6 +198,16 @@ function remember(url: string, bitmap: ImageBitmap) {
 
 type Layout = { source: Source; z: number; c0: number; r0: number; n: number; cols: number; rows: number }
 
+/* the renderer, for uploading a tile into its own corner of a patch's
+   texture (set by the patches' frame hook) */
+let tileRenderer: THREE.WebGLRenderer | null = null
+export function setTileRenderer(renderer: THREE.WebGLRenderer) {
+  tileRenderer = renderer
+}
+/* tiles uploaded into place per frame, at most */
+const TILES_PER_FRAME = 3
+const _tilePlace = new THREE.Vector2()
+
 export class PatchLayer {
   private canvas = document.createElement('canvas')
   private context: CanvasRenderingContext2D
@@ -205,6 +215,10 @@ export class PatchLayer {
   private layout: Layout | null = null
   private rect = new THREE.Vector4()
   private dirty = false
+  /* the whole canvas must go up (a new patch); else only the tiles that
+     arrived, each into its own corner of the texture */
+  private full = true
+  private arrived: { bitmap: ImageBitmap; x: number; y: number }[] = []
   private sinceUpload = 0
   private inFlight = new Map<string, AbortController>()
   private queue: { url: string; slotX: number; slotY: number; distance: number }[] = []
@@ -252,6 +266,8 @@ export class PatchLayer {
 
     // redraw from what is already here, and ask for the rest, nearest first
     this.context.clearRect(0, 0, CANVAS, CANVAS)
+    this.full = true
+    this.dropArrived()
     const wanted = new Set<string>()
     this.queue = []
     for (let y = 0; y < n; y += 1) {
@@ -315,10 +331,11 @@ export class PatchLayer {
         .then((bitmap) => {
           this.inFlight.delete(job.url)
           remember(job.url, bitmap)
-          // still the same patch? draw it in its slot
+          // still the same patch? draw it in its slot, and send just it up
           if (this.layout === layout) {
             this.draw(bitmap, job.slotX, job.slotY)
             this.dirty = true
+            this.sendUp(bitmap, job.slotX, job.slotY, layout)
           }
         })
         .catch((error: unknown) => {
@@ -328,22 +345,57 @@ export class PatchLayer {
     }
   }
 
-  /* each frame: fetch, and upload what has arrived (not too often: a
-     2048-pixel upload costs a few milliseconds) */
+  /* a tile, turned the way the texture's rows run (bottom up), queued to
+     go up into its own corner */
+  private sendUp(bitmap: ImageBitmap, x: number, y: number, layout: Layout | null) {
+    if (!tileRenderer || this.full || bitmap.width !== CANVAS / (layout?.n ?? 1)) return
+    createImageBitmap(bitmap, { imageOrientation: 'flipY' })
+      .then((flipped) => {
+        if (this.layout === layout && !this.full) this.arrived.push({ bitmap: flipped, x, y })
+        else flipped.close()
+      })
+      .catch(() => {
+        this.full = true
+      })
+  }
+
+  private dropArrived() {
+    this.arrived.forEach((tile) => tile.bitmap.close())
+    this.arrived = []
+  }
+
+  /* each frame: fetch, and upload what has arrived. A whole 2048-pixel
+     canvas (16 MB) only for a new patch, and not too often; otherwise
+     each new tile alone, into its corner, a few a frame */
   update(delta: number) {
     this.fetchMore()
     this.sinceUpload += delta
-    if (this.dirty && this.sinceUpload >= UPLOAD_GAP) {
-      this.dirty = false
-      this.sinceUpload = 0
-      this.texture.needsUpdate = true
-      // the rectangle changes with the pixels, never before them
-      this.rectUniform.value.copy(this.rect)
-      this.textureUniform.value = this.texture
+    if (this.full || !tileRenderer) {
+      if (this.dirty && this.sinceUpload >= UPLOAD_GAP) {
+        this.dirty = false
+        this.full = false
+        this.sinceUpload = 0
+        this.dropArrived()
+        this.texture.needsUpdate = true
+        // the rectangle changes with the pixels, never before them
+        this.rectUniform.value.copy(this.rect)
+        this.textureUniform.value = this.texture
+      }
+      return
     }
+    const size = CANVAS / (this.layout?.n ?? 1)
+    for (let k = 0; k < TILES_PER_FRAME && this.arrived.length; k += 1) {
+      const tile = this.arrived.shift()!
+      const source = new THREE.Texture(tile.bitmap)
+      tileRenderer.copyTextureToTexture(source, this.texture, null, _tilePlace.set(tile.x * size, CANVAS - (tile.y + 1) * size))
+      tile.bitmap.close()
+    }
+    if (!this.arrived.length) this.dirty = false
   }
 
   hide() {
+    this.dropArrived()
+    this.full = true
     this.rectUniform.value.set(0, 0, 0, 0)
     this.inFlight.forEach((controller) => controller.abort())
     this.inFlight.clear()
@@ -357,6 +409,7 @@ export class PatchLayer {
   setColorSpace(space: THREE.ColorSpace) {
     if (this.texture.colorSpace === space) return
     this.texture.colorSpace = space
+    this.full = true
     this.dirty = true
   }
 
@@ -425,6 +478,7 @@ let owner = -1
 export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | null>, sunPosition: THREE.Vector3) {
   const gl = useThree((state) => state.gl)
   useFrame((state, delta) => {
+    setTileRenderer(gl)
     const source = SOURCES[index]
     const mesh = body.current
     if (!source || !mesh) return

@@ -82,6 +82,9 @@ class ElevationLayer {
   readonly rect = new THREE.Vector4()
   private layout: { z: number; c0: number; r0: number; count: number } | null = null
   private dirty = false
+  /* the whole texture must go up (a new patch, or never yet); else only
+     the rows the arrived tiles changed */
+  private full = true
   private sinceUpload = 0
   private inFlight = new Map<string, AbortController>()
   private queue: { url: string; x: number; y: number; distance: number }[] = []
@@ -113,6 +116,8 @@ class ElevationLayer {
     const c0 = Math.round(colF - SPAN / 2)
     const r0 = THREE.MathUtils.clamp(Math.round(rowF - SPAN / 2), 0, Math.max(0, count - SPAN))
     this.layout = { z, c0, r0, count }
+    this.full = true
+    this.texture.clearUpdateRanges()
     this.known.fill(0)
     this.half.fill(0)
     const wanted = new Set<string>()
@@ -154,6 +159,8 @@ class ElevationLayer {
         this.half[i * 2] = THREE.DataUtils.toHalfFloat(h)
         this.half[i * 2 + 1] = 0x3c00 // 1.0
       }
+      // (only this tile's part of each row goes up)
+      if (!this.full) this.texture.addUpdateRange((row * SIZE + slotX * TILE) * 2, TILE * 2)
     }
     this.dirty = true
   }
@@ -177,9 +184,11 @@ class ElevationLayer {
         })
     }
     this.sinceUpload += delta
-    if (this.dirty && this.sinceUpload >= UPLOAD_GAP) {
+    if (this.dirty && this.sinceUpload >= (this.full ? UPLOAD_GAP : 0.05)) {
       this.dirty = false
       this.sinceUpload = 0
+      if (this.full) this.texture.clearUpdateRanges()
+      this.full = false
       this.texture.needsUpdate = true
       this.rectUniform.value.copy(this.rect)
       this.textureUniform.value = this.texture
