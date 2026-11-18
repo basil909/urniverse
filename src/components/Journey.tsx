@@ -22,6 +22,9 @@ import { pilot } from './experience/pilotState'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
+import { lens } from './experience/lens'
+import { getPlanetHeliocentricAU, julianDate } from './experience/orbit'
+import { formatKm } from './ui/WorldLive'
 
 
 
@@ -430,6 +433,25 @@ const JOURNEY: Chapter[] = [
     ],
     accent: '#c3b4ff',
   },
+  {
+    id: 'local-group',
+    label: 'LOCAL GROUP',
+    eyebrow: '12 · THE LOCAL GROUP',
+    title: 'One galaxy among many.',
+    description: 'The Milky Way has company. With the Andromeda Galaxy, 2.5 million light-years away, and the smaller Triangulum Galaxy, it leads a family of more than 80 galaxies, most of them faint dwarfs, spread across some 10 million light-years: the Local Group. Andromeda and the Milky Way are drawing closer.',
+    facts: [
+      'The Andromeda Galaxy is the most distant thing most people can see with the naked eye.',
+      'The light you see from Andromeda left it 2.5 million years ago.',
+      'The Large and Small Magellanic Clouds orbit the Milky Way and are visible from the southern hemisphere.',
+      'The Local Group is one small part of the Laniakea Supercluster of about 100,000 galaxies.',
+    ],
+    stats: [
+      { value: '2.5M', label: 'LY TO ANDROMEDA' },
+      { value: '80+', label: 'GALAXIES' },
+      { value: '10M', label: 'LY ACROSS' },
+    ],
+    accent: '#b4a6ff',
+  },
 ]
 
 
@@ -481,10 +503,58 @@ function brief(text: string) {
   return out.trim()
 }
 
+/* each chapter's address (…/#saturn), so a chapter can be linked to */
+const CHAPTER_SLUG: Record<string, string> = {
+  beyond: 'pale-blue-dot',
+  galaxy: 'milky-way',
+  'local-group': 'local-group',
+}
+const slugOf = (chapter: Chapter) => CHAPTER_SLUG[chapter.id] ?? chapter.id
+/* the section a link points to (1 = the first chapter), or null */
+function sectionFromHash(hash: string) {
+  const slug = decodeURIComponent(hash.replace(/^#/, '')).toLowerCase()
+  if (!slug) return null
+  const index = JOURNEY.findIndex((chapter) => slugOf(chapter) === slug)
+  return index >= 0 ? index + 1 : null
+}
+
+/* Each hop between neighbouring worlds, as it really is today: how far
+   apart they are and how long light takes to cross. Shown while the
+   camera flies it (in a second; light needs minutes or hours). */
+const WORLD_OF: Record<string, number> = {
+  sun: -1,
+  mercury: 0,
+  venus: 1,
+  earth: 2,
+  mars: 3,
+  jupiter: 4,
+  saturn: 5,
+  uranus: 6,
+  neptune: 7,
+}
+function legInto(chapterIndex: number) {
+  const to = JOURNEY[chapterIndex]
+  const from = JOURNEY[chapterIndex - 1]
+  if (!to || !from || WORLD_OF[to.id] === undefined || WORLD_OF[from.id] === undefined) return null
+  const jd = julianDate(new Date())
+  const at = (world: number) => (world < 0 ? [0, 0, 0] : getPlanetHeliocentricAU(world, jd))
+  const a = at(WORLD_OF[from.id])
+  const b = at(WORLD_OF[to.id])
+  const km = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 149_597_870.7
+  const seconds = km / 299_792.458
+  const minutes = Math.floor(seconds / 60)
+  const light =
+    minutes >= 60
+      ? `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+      : `${minutes} min ${Math.round(seconds - minutes * 60)} s`
+  return { from: titleCase(from.label), to: titleCase(to.label), distance: formatKm(km), light }
+}
+
 /* how the chapters beyond the planets are named in the panel and on its button */
 const PANEL_TITLE: Record<string, string> = {
   beyond: 'The Pale Blue Dot',
   galaxy: 'The Milky Way',
+  'local-group': 'The Local Group',
 }
 const panelTitle = (chapter: Chapter) => PANEL_TITLE[chapter.id] ?? titleCase(chapter.label)
 const moreAbout = (chapter: Chapter) =>
@@ -522,6 +592,7 @@ const GRADE_BY_SECTION = [
   '#6f8fe8', // Neptune
   '#6a7fd8', // beyond
   '#8b80ec', // Milky Way
+  '#7f76e0', // Local Group
   '#a7a7c8', // return
 ]
 
@@ -650,6 +721,14 @@ export default function Journey() {
   const updateRef = useRef<(() => void) | null>(null)
   // stepping chapters from the panel: open it again on arrival
   const reopenAfter = useRef(false)
+  // straight to a chapter, no glide (a link opened)
+  const jumpToRef = useRef<((index: number) => void) | null>(null)
+  // a link's chapter has been reached (or there was none): from then on
+  // the address follows the journey
+  const linkedRef = useRef(false)
+  // the hop just flown: shown for a few seconds
+  const [leg, setLeg] = useState<ReturnType<typeof legInto>>(null)
+  const lastLegSection = useRef(0)
 
   const frame = useRef<number | null>(null)
   const lastSection = useRef(0)
@@ -717,9 +796,10 @@ export default function Journey() {
       snapping = true
       glideTargetRef.current = Math.abs(target - lastRest) > 1 ? target : null
       lenis.scrollTo(to * unit(), {
-        // the pull-back from the Pale Blue Dot to the galaxy takes its time
+        // the pull-backs (the Pale Blue Dot to the galaxy, the galaxy to the
+        // Local Group, and home again) take their time
         duration:
-          (target === 11 && lastRest === 10) || (target === 10 && lastRest === 11)
+          (Math.min(target, lastRest) >= 10 && Math.abs(target - lastRest) === 1) || (lastRest === 12 && target === 13)
             ? 3.4
             : Math.min(2.6, 0.95 + 0.55 * distance),
         easing: easeInOutSine,
@@ -737,6 +817,11 @@ export default function Journey() {
       })
     }
     snapToRef.current = snapTo
+    jumpToRef.current = (index: number) => {
+      const target = Math.max(0, Math.min(TOTAL_SECTIONS - 1, index))
+      lenis.scrollTo(restPoint(target) * unit(), { immediate: true, force: true })
+      lastRest = target
+    }
 
     lenis.options.virtualScroll = ({ deltaX, deltaY, event }) => {
       if (snapping) return true // locked: Lenis cancels the event
@@ -800,6 +885,7 @@ export default function Journey() {
       window.clearTimeout(settleTimer)
       cancelAnimationFrame(raf)
       snapToRef.current = null
+      jumpToRef.current = null
       lenisRef.current = null
       lenis.destroy()
     }
@@ -912,6 +998,66 @@ export default function Journey() {
 
   const scrollToStart = () => goToSection(1)
 
+  /* A link to a chapter (…/#saturn): once the loading screen has lifted,
+     go straight there. After that the address follows the journey, and
+     the browser's back and forward move between chapters. */
+  useEffect(() => {
+    const target = sectionFromHash(window.location.hash)
+    if (target === null) {
+      linkedRef.current = true
+      return
+    }
+    let timer = 0
+    const arrive = () => {
+      if (!lens.revealed) {
+        timer = window.setTimeout(arrive, 120)
+        return
+      }
+      if (jumpToRef.current) jumpToRef.current(target)
+      else goToSection(target)
+      linkedRef.current = true
+    }
+    arrive()
+    const onHash = () => {
+      const next = sectionFromHash(window.location.hash)
+      if (next !== null) goToSection(next)
+    }
+    window.addEventListener('hashchange', onHash)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('hashchange', onHash)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // a hop between neighbours (not a long glide past several): its caption
+  useEffect(() => {
+    const previous = lastLegSection.current
+    lastLegSection.current = section
+    if (glideTargetRef.current !== null || Math.abs(section - previous) !== 1) {
+      setLeg(null)
+      return
+    }
+    // (going back, the hop is the one between the same two worlds)
+    const next = legInto(Math.max(section, previous) - 1)
+    if (!next) {
+      setLeg(null)
+      return
+    }
+    setLeg(section > previous ? next : { ...next, from: next.to, to: next.from })
+    const timer = window.setTimeout(() => setLeg(null), 4200)
+    return () => window.clearTimeout(timer)
+  }, [section])
+
+  useEffect(() => {
+    if (!linkedRef.current) return
+    const chapter = section >= 1 && section <= JOURNEY.length ? JOURNEY[section - 1] : null
+    const hash = chapter ? `#${slugOf(chapter)}` : ''
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, '', hash || window.location.pathname + window.location.search)
+    }
+  }, [section])
+
   useEffect(() => {
     setToday(
       new Date().toLocaleDateString(undefined, {
@@ -1011,7 +1157,20 @@ export default function Journey() {
         open={detailOpen}
         name={activeChapter ? panelTitle(activeChapter) : ''}
         eyebrow={activeChapter ? `${chapterNo(active + 1)} · About` : 'About'}
-        sky={activeChapter?.id === 'galaxy' ? 'galaxy' : activeChapter?.id === 'beyond' ? 'distances' : undefined}
+        sky={
+          activeChapter?.id === 'galaxy'
+            ? 'galaxy'
+            : activeChapter?.id === 'beyond'
+              ? 'distances'
+              : activeChapter?.id === 'local-group'
+                ? 'local-group'
+                : undefined
+        }
+        link={
+          activeChapter && typeof window !== 'undefined'
+            ? `${window.location.origin}${window.location.pathname}#${slugOf(activeChapter)}`
+            : undefined
+        }
         previous={active > 0 ? panelStep(active - 1) : undefined}
         next={active >= 0 ? panelStep(active + 1) : undefined}
         detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
@@ -1106,6 +1265,29 @@ export default function Journey() {
           </button>
         ))}
       </nav>
+
+      {/* the hop just flown, as it really is today */}
+      <AnimatePresence>
+        {leg && !flying && (
+          <motion.div
+            key={`${leg.from}-${leg.to}`}
+            className="leg"
+            role="status"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.5, ease: EASE_OUT_EXPO }}
+          >
+            <span className="leg-route">
+              {leg.from} <i aria-hidden="true">→</i> {leg.to}
+            </span>
+            <span className="leg-figures">
+              {leg.distance} apart today · light takes <b>{leg.light}</b>
+            </span>
+            <span className="leg-beam" aria-hidden="true" />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* BOTTOM HUD */}
       <footer className="hud-bottom" aria-hidden="true">

@@ -6,7 +6,7 @@
    button says otherwise; coloured by the text.
 ============================================================ */
 
-export type IconName = 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust'
+export type IconName = 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check'
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // the orbiter from above, nose up: the fly button
@@ -68,6 +68,18 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <path d="M7 12.6l5-5 5 5" />
       <path d="M7 17.8l5-5 5 5" />
+    </>
+  ),
+  // two links of a chain: copy a link
+  link: (
+    <>
+      <path d="M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3-3a3.6 3.6 0 0 0-5.1-5.1l-1.1 1.1" />
+      <path d="M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3 3a3.6 3.6 0 0 0 5.1 5.1l1.1-1.1" />
+    </>
+  ),
+  check: (
+    <>
+      <path d="M5.4 12.6l4.2 4.2 9-9.6" />
     </>
   ),
 }

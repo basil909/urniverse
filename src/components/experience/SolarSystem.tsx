@@ -66,6 +66,7 @@ import Comet from './Comet'
 import Cutaway from './Cutaway'
 import { cutaway } from './cutawayState'
 import { BitmapTextureLoader } from './textures'
+import { WORLD_DETAILS } from '../../data/worlds'
 import {
   SHARP_EARTH_MAPS,
   SHARP_PLANET_MAPS,
@@ -752,6 +753,34 @@ function focusedPlanetIndex(progress: number) {
 type Hotspot = { name: string; fact: string; lat: number; lon: number }
 
 const HOTSPOTS: Record<number, Hotspot[]> = {
+  0: [
+    {
+      name: 'Caloris Basin',
+      fact: 'An impact basin about 1,550 km across, ringed by mountains 2 km high. The blow was so strong it jumbled the ground on the far side of the planet.',
+      lat: 30.5,
+      lon: -170.2,
+    },
+    {
+      name: 'Hokusai',
+      fact: 'A young crater, about 114 km across, with bright rays of debris that stretch for more than 1,000 km.',
+      lat: 57.8,
+      lon: 16.8,
+    },
+  ],
+  1: [
+    {
+      name: 'Maxwell Montes',
+      fact: 'Beneath the clouds: the highest mountains on Venus, about 11 km tall, mapped by radar. Their peaks are coated in a frost of metal compounds.',
+      lat: 65.2,
+      lon: 3.3,
+    },
+    {
+      name: 'Aphrodite Terra',
+      fact: 'Beneath the clouds: a highland about the size of Africa, cut by deep rifts and volcanoes.',
+      lat: -5.8,
+      lon: 104.8,
+    },
+  ],
   2: [
     {
       name: 'Himalayas',
@@ -792,6 +821,48 @@ const HOTSPOTS: Record<number, Hotspot[]> = {
       fact: 'A storm wider than Earth, observed continuously for at least 190 years.',
       lat: -21.1,
       lon: -46.4,
+    },
+    {
+      name: 'Polar cyclones',
+      fact: 'Juno found the poles crowded with cyclones, each about as wide as the United States: eight in a ring round one at the north pole, five or six round the south.',
+      lat: 84,
+      lon: 30,
+    },
+  ],
+  5: [
+    {
+      name: 'The hexagon',
+      fact: 'A six-sided jet stream round the north pole, each side wider than Earth. It has held its shape since Voyager first saw it in 1981.',
+      lat: 80,
+      lon: 0,
+    },
+    {
+      name: 'Equatorial jet',
+      fact: 'Winds along the equator reach about 1,800 km/h, among the fastest in the Solar System.',
+      lat: 2,
+      lon: 60,
+    },
+  ],
+  6: [
+    {
+      name: 'North polar haze',
+      fact: 'Uranus lies on its side, so each pole gets 42 years of sunlight. The sunlit pole wears a pale cap of haze.',
+      lat: 72,
+      lon: 0,
+    },
+  ],
+  7: [
+    {
+      name: 'Methane clouds',
+      fact: 'Bright streaks of methane ice ride high above the blue haze, in winds of up to 2,000 km/h.',
+      lat: -28,
+      lon: 20,
+    },
+    {
+      name: 'South pole',
+      fact: 'In summer for decades, it is about 10 °C warmer than the rest of the planet: warm enough for methane to leak out into space.',
+      lat: -75,
+      lon: -40,
     },
   ],
 }
@@ -2951,6 +3022,7 @@ function Planet({
               sunlight={sunlight}
               tilt={poleQuaternion}
               sunAU={planet.distanceAU}
+              focus={{ index, progressRef }}
             />
           )}
         </group>
@@ -3403,6 +3475,19 @@ type MoonShadowUniforms = {
 }
 
 const _moonScale = new THREE.Vector3()
+const _tagMoon = new THREE.Vector3()
+const _tagPlanet = new THREE.Vector3()
+const _tagToMoon = new THREE.Vector3()
+const _tagToPlanet = new THREE.Vector3()
+
+/* a moon's one-line story, from the deep-dive panel's notes */
+function moonNote(name: string) {
+  for (const detail of Object.values(WORLD_DETAILS)) {
+    const moon = detail.moons?.find((entry) => entry.name === name)
+    if (moon) return moon.note
+  }
+  return null
+}
 
 function MoonSystem({
   system,
@@ -3411,8 +3496,11 @@ function MoonSystem({
   sunlight,
   tilt,
   sunAU = 1,
+  focus,
 }: {
   system: MoonSystemSpec
+  /* while this planet is the chapter's subject, its moons are named */
+  focus?: { index: number; progressRef: RefObject<number> }
   planetRadius: number
   shadowUniforms?: MoonShadowUniforms
   sunlight?: { strength: number; tint: THREE.Color }
@@ -3464,6 +3552,12 @@ function MoonSystem({
     [system, sunlight],
   )
   const hazes = useRef<(THREE.Mesh | null)[]>([])
+  const tags = useRef<(HTMLDivElement | null)[]>([])
+  const notes = useMemo(() => system.moons.map((moon) => moonNote(moon.name)), [system])
+  const [openTag, setOpenTag] = useState<number | null>(null)
+  const openTagRef = useRef<number | null>(null)
+  openTagRef.current = openTag
+  const camera = useThree((state) => state.camera)
   const bodyGetters = useMemo(() => system.moons.map((_, i) => () => bodies.current[i] ?? null), [system])
   const time = useRef(0)
 
@@ -3527,6 +3621,38 @@ function MoonSystem({
       }
     })
 
+    // the names: shown while the planet is the subject, hidden behind it
+    if (focus) {
+      const focused = focusedPlanetIndex(focus.progressRef.current ?? 0) === focus.index && !pilot.active
+      if (!focused && openTagRef.current !== null) {
+        openTagRef.current = null
+        setOpenTag(null)
+      }
+      const planet = arms.current[0]?.parent
+      system.moons.forEach((_, i) => {
+        const tag = tags.current[i]
+        const body = bodies.current[i]
+        if (!tag || !body) return
+        let shown = focused && cutaway.planet !== focus.index
+        if (shown && planet) {
+          body.getWorldPosition(_tagMoon)
+          planet.getWorldPosition(_tagPlanet)
+          planet.getWorldScale(_satScale)
+          _tagToMoon.copy(_tagMoon).sub(camera.position)
+          _tagToPlanet.copy(_tagPlanet).sub(camera.position)
+          const behind = _tagToMoon.length() > _tagToPlanet.length()
+          const apart = _tagToMoon.normalize().angleTo(_tagToPlanet.normalize())
+          const planetAngle = Math.asin(Math.min(1, (planetRadius * _satScale.x * 1.04) / camera.position.distanceTo(_tagPlanet)))
+          if (behind && apart < planetAngle) shown = false
+        }
+        const opacity = shown ? '1' : '0'
+        if (tag.style.opacity !== opacity) tag.style.opacity = opacity
+        tag.style.pointerEvents = shown ? 'auto' : 'none'
+        const button = tag.firstElementChild as HTMLButtonElement | null
+        if (button) button.tabIndex = shown ? 0 : -1
+      })
+    }
+
     // tell the planet where its moons are, so they can cast shadows on it
     if (shadowUniforms) {
       let count = 0
@@ -3584,6 +3710,31 @@ function MoonSystem({
                 lightTint={sunlight?.tint ?? MOON_LIGHT_TINT}
                 srgb
               />
+            )}
+            {focus && (
+              <Html position={[0, 1.6, 0]} center zIndexRange={[6, 0]} style={{ pointerEvents: 'none' }}>
+                <div
+                  ref={(element) => {
+                    tags.current[i] = element
+                  }}
+                  className={`moon-tag ${openTag === i ? 'is-open' : ''}`}
+                  style={{ opacity: 0 }}
+                >
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-expanded={openTag === i}
+                    onClick={() => setOpenTag(openTag === i ? null : i)}
+                  >
+                    {moon.name}
+                  </button>
+                  {notes[i] && (
+                    <div className="moon-tag-card" role="note">
+                      {notes[i]}
+                    </div>
+                  )}
+                </div>
+              </Html>
             )}
             {moon.haze && (
               <mesh

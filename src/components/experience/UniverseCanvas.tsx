@@ -23,6 +23,7 @@ import Galaxy, {
   GALAXY_TILT,
 } from './Galaxy'
 import Starfield from './Starfield'
+import LocalGroup, { LOCAL_GROUP_VIEW } from './LocalGroup'
 import NightSky from './NightSky'
 import { lens } from './lens'
 import Pilot, { GroundCarry } from './Pilot'
@@ -341,7 +342,9 @@ function getRestPose(
           ? BEYOND
           : chapter === 11
             ? GALAXY_VIEW
-            : RETURN
+            : chapter === 12
+              ? LOCAL_GROUP_VIEW
+              : RETURN
 
   outPos.copy(fixed.position)
   outTarget.copy(fixed.target)
@@ -408,10 +411,17 @@ function CinematicCamera({
     const progress = progressRef.current
 
     const safeProgress = Number.isFinite(progress)
-      ? THREE.MathUtils.clamp(progress, 0, 12.999999)
+      ? THREE.MathUtils.clamp(progress, 0, 13.999999)
       : 0
 
-    const chapter = Math.min(12, Math.floor(safeProgress))
+    const chapter = Math.min(13, Math.floor(safeProgress))
+
+    // the Local Group: Andromeda is 2,600 units out, past the usual reach
+    const reach = safeProgress > 11.5 && safeProgress < 13.25 ? LOCAL_GROUP_VIEW.reach + 600 : 2000
+    if (camera.far !== reach) {
+      camera.far = reach
+      camera.updateProjectionMatrix()
+    }
     const local = THREE.MathUtils.clamp(
       safeProgress - chapter,
       0,
@@ -468,6 +478,10 @@ function CinematicCamera({
     )
     if (chapter === 11 && camera.aspect < 1) {
       _currTarget.copy(GALAXY_VIEW.portraitTarget)
+    }
+    if (chapter === 12 && camera.aspect < 1) {
+      _currPos.copy(LOCAL_GROUP_VIEW.portraitPosition)
+      _currTarget.copy(LOCAL_GROUP_VIEW.portraitTarget)
     }
 
     if (chapter > 0 && local < BLEND) {
@@ -1177,7 +1191,7 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
       return
     }
     // cinematic: the Pale Blue Dot (10) holds still, like a photograph
-    const wideView = (chapter === 0 || chapter === 1 || chapter === 12) && !pilot.active
+    const wideView = (chapter === 0 || chapter === 1 || chapter === 13) && !pilot.active
     const target = reducedMotion ? 0 : wideView ? WIDE_VIEW_RATE : CLOSE_UP_RATE
     simClock.rate += (target - simClock.rate) * (1 - Math.exp(-delta * 1.5))
     simClock.jd += simClock.rate * step
@@ -1344,7 +1358,7 @@ function MilkyWaySky({
     sphere.current.position.copy(camera.position)
     // full inside the Solar System; fade out once we have left the galaxy
     const chapter = Math.floor(progressRef.current ?? 0)
-    const target = material.uniforms.uMap.value ? (chapter === 11 ? 0.15 : SKY_BRIGHTNESS) : 0
+    const target = material.uniforms.uMap.value ? (chapter === 11 || chapter === 12 ? 0.15 : SKY_BRIGHTNESS) : 0
     const u = material.uniforms.uIntensity
     u.value += (target - u.value) * (1 - Math.exp(-delta * 2))
   })
@@ -1498,6 +1512,8 @@ function Scene({
       <Suspense fallback={<LoadingUniverse />}>
 
         <Galaxy progressRef={progressRef} />
+
+        <LocalGroup progressRef={progressRef} />
 
       </Suspense>
 

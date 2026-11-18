@@ -2,7 +2,8 @@
 
 import { useMemo } from 'react'
 
-import { voyagerFromSunAU } from './WorldLive'
+import { craftFromSunAU, FAR_CRAFT, voyagerFromSunAU } from './WorldLive'
+import { getPlanetEclipticAU, julianDate, PLANETS } from '../experience/orbit'
 
 /* Line drawings for the two chapters beyond the planets, in the same quiet
    style as the planets' size and orbit drawings:
@@ -156,6 +157,84 @@ export function DistanceLadder() {
         })}
       </svg>
       <figcaption>How far is far: each step along the line is ten times farther than the last.</figcaption>
+    </figure>
+  )
+}
+
+/* Where our farthest spacecraft are today, seen from above the planets'
+   plane. Distance from the Sun on a squeezed (logarithmic) scale, so the
+   inner planets and the Voyagers fit in one drawing; directions true. */
+export function SpacecraftMap() {
+  const drawing = useMemo(() => {
+    const now = new Date()
+    const jd = julianDate(now)
+    const C = 120
+    const R = 104
+    const MAX = Math.log10(1 + 200 / 0.6)
+    const radius = (au: number) => (R * Math.log10(1 + au / 0.6)) / MAX
+    const at = (au: number, lonDeg: number) => {
+      const a = (lonDeg * Math.PI) / 180
+      const r = radius(au)
+      // ecliptic longitude counter-clockwise, 0 to the right
+      return [C + r * Math.cos(a), C - r * Math.sin(a)] as const
+    }
+    const planets = [2, 4, 5, 7].map((index) => {
+      const [x, y] = getPlanetEclipticAU(index, jd)
+      const au = Math.hypot(x, y)
+      const lon = (Math.atan2(y, x) * 180) / Math.PI
+      return { name: PLANETS[index].name, ring: radius(PLANETS[index].distanceAU), at: at(au, lon) }
+    })
+    const craft = FAR_CRAFT.map((entry) => {
+      const au = craftFromSunAU(entry, now)
+      return { name: entry.name, au, at: at(au, entry.lon) }
+    })
+    return { C, planets, craft, heliopause: radius(120), kuiper: [radius(30), radius(50)] as const }
+  }, [])
+  const { C } = drawing
+
+  return (
+    <figure className="world-figure sky-figure">
+      <svg
+        className="craft-map"
+        viewBox="0 0 240 240"
+        role="img"
+        aria-label={`Seen from above, where the farthest spacecraft are today: ${drawing.craft
+          .map((c) => `${c.name} about ${Math.round(c.au)} AU from the Sun`)
+          .join(', ')}.`}
+      >
+        <circle cx={C} cy={C} r={(drawing.kuiper[0] + drawing.kuiper[1]) / 2} className="craft-kuiper" strokeWidth={drawing.kuiper[1] - drawing.kuiper[0]} />
+        <circle cx={C} cy={C} r={drawing.heliopause} className="craft-heliopause" />
+        <text x={C} y={C - drawing.heliopause - 4} textAnchor="middle" className="sky-tick">Heliopause</text>
+        {drawing.planets.map((planet) => (
+          <g key={planet.name}>
+            <circle cx={C} cy={C} r={planet.ring} className="world-orbit" />
+            <circle cx={planet.at[0]} cy={planet.at[1]} r={1.6} className="sky-mark" />
+          </g>
+        ))}
+        <circle cx={C} cy={C} r={2.6} className="world-sun" />
+        {drawing.craft.map((craft) => {
+          // Voyager 2 and New Horizons head the same way: their names go
+          // on opposite sides
+          const left = craft.name === 'New Horizons' ? true : craft.name === 'Voyager 2' ? false : craft.at[0] < C
+          const x = craft.at[0] + (left ? -6 : 6)
+          return (
+            <g key={craft.name}>
+              <line x1={C} y1={C} x2={craft.at[0]} y2={craft.at[1]} className="sky-measure" />
+              <circle cx={craft.at[0]} cy={craft.at[1]} r={2.6} className="world-here" />
+              <text x={x} y={craft.at[1] - 1} textAnchor={left ? 'end' : 'start'} className="sky-label is-here">
+                {craft.name}
+              </text>
+              <text x={x} y={craft.at[1] + 7} textAnchor={left ? 'end' : 'start'} className="sky-tick">
+                {Math.round(craft.au)} AU
+              </text>
+            </g>
+          )
+        })}
+        <text x={C + drawing.planets[3].ring + 3} y={C + 3} className="sky-tick">Neptune</text>
+      </svg>
+      <figcaption>
+        Where our farthest spacecraft are today, seen from above. Distances are squeezed so all fit; directions are true. Neptune is 30 AU out.
+      </figcaption>
     </figure>
   )
 }

@@ -2314,3 +2314,300 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   .detail-live-dot { animation: none; }
   .detail-bar-inner { transition: none; }
 }
+
+/* copy a link to this chapter, beside the close button */
+.detail-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  font: 500 12.5px / 1 var(--sans);
+  color: var(--text-2);
+  transition: border-color 0.25s, color 0.25s, background 0.25s;
+}
+.detail-link .icon { width: 15px; height: 15px; }
+.detail-link:hover,
+.detail-link:focus-visible {
+  border-color: rgba(255, 255, 255, 0.6);
+  color: var(--text-1);
+}
+.detail-link.is-copied {
+  border-color: color-mix(in srgb, var(--planet-accent) 60%, transparent);
+  color: var(--planet-accent);
+}
+.detail-head .detail-link + .detail-close { margin-left: 0; }
+
+/* "You, on Mars": your weight and age there */
+.you-there {
+  margin: 0 0 1.75rem;
+  padding: 16px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
+.you-there h3 {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--text-1);
+}
+.you-there-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 12px;
+}
+.you-there-inputs label {
+  display: grid;
+  gap: 5px;
+  font: 500 11px / 1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.you-there-inputs input {
+  width: 110px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  font: 400 16px / 1 var(--sans);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.2s, background 0.2s;
+}
+.you-there-inputs input:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--planet-accent) 70%, transparent);
+  background: rgba(255, 255, 255, 0.07);
+}
+.you-there-result {
+  margin-top: 12px;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.you-there-result strong {
+  font-weight: 500;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.you-there-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+/* "In your sky tonight" */
+.tonight {
+  margin: 0 0 1.75rem;
+  padding: 16px 18px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(40, 60, 120, 0.12), transparent 70%);
+}
+.tonight h3 {
+  font: 500 11px / 1 var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--planet-accent);
+}
+.tonight-headline {
+  margin-top: 10px;
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1.2;
+  color: var(--text-1);
+}
+.tonight-detail {
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.tonight-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px 16px;
+  margin-top: 12px;
+}
+.tonight-rows dt {
+  font: 500 10.5px / 1 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tonight-rows dd {
+  margin-top: 4px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-1);
+}
+.tonight-place {
+  margin-top: 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+.tonight-place button {
+  margin-left: 2px;
+  color: var(--planet-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.tonight-place button:disabled { opacity: 0.6; }
+
+/* the journey's moons, named while their planet is the subject */
+.moon-tag {
+  position: relative;
+  transition: opacity 0.35s linear;
+}
+.moon-tag > button {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font: 500 10.5px / 1 var(--sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: rgba(226, 232, 244, 0.82);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.95);
+  transition: color 0.2s, background 0.2s;
+}
+.moon-tag > button:hover,
+.moon-tag > button:focus-visible,
+.moon-tag.is-open > button {
+  color: var(--text-1);
+  background: rgba(8, 10, 16, 0.55);
+}
+.moon-tag-card {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  width: 220px;
+  transform: translate(-50%, 4px);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 0.9);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.25s, transform 0.3s var(--ease), visibility 0.25s;
+}
+.moon-tag:hover .moon-tag-card,
+.moon-tag:focus-within .moon-tag-card,
+.moon-tag.is-open .moon-tag-card {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+.detail-link-field {
+  width: 100%;
+  margin: 12px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font: 400 12.5px / 1.3 var(--sans);
+  color: var(--text-1);
+}
+
+/* the hop between neighbouring worlds, as it really is today */
+.leg {
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  z-index: 40;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 32px);
+  padding: 9px 16px 11px;
+  translate: -50% 0;
+  border: 1px solid var(--surface-edge);
+  border-radius: 14px;
+  background: var(--surface);
+  -webkit-backdrop-filter: var(--surface-blur);
+  backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light), var(--surface-shadow);
+  overflow: hidden;
+  pointer-events: none;
+  text-align: center;
+}
+.leg-route {
+  font: 500 10.5px / 1 var(--sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--planet-accent);
+}
+.leg-route i { font-style: normal; opacity: 0.7; }
+.leg-figures {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-2);
+}
+.leg-figures b { font-weight: 500; color: var(--text-1); }
+/* a pulse of light crossing the gap */
+.leg-beam {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--planet-accent) 50%, transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: leg-beam 1.8s var(--ease) both;
+}
+@keyframes leg-beam {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .leg-beam { animation: none; background-position: 50% 0; }
+}
+@media (max-width: 640px) {
+  .leg { bottom: 22px; }
+}
+
+/* where the farthest spacecraft are */
+.sky-figure .craft-map { max-width: 340px; margin-inline: auto; }
+.craft-map text { font-size: 6.6px; }
+.craft-kuiper {
+  fill: none;
+  stroke: color-mix(in srgb, var(--planet-accent) 10%, transparent);
+}
+.craft-heliopause {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 0.6;
+  stroke-dasharray: 2 2.5;
+}
+
+/* the Local Group's galaxies, named */
+.galaxy-label {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  text-align: center;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.95);
+  transition: opacity 0.3s linear;
+}
+.galaxy-label b {
+  font-family: var(--serif);
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text-1);
+}
+.galaxy-label span {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+/* long notes wrap rather than run off a narrow screen */
+.galaxy-label span { max-width: 150px; white-space: normal; line-height: 1.35; }

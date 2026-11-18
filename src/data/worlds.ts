@@ -438,4 +438,46 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
     ],
     source: 'Figures: NASA, ESA (Gaia) and the Event Horizon Telescope collaboration.',
   },
+
+  'local-group': {
+    travel: { kmPerSecond: 110, sentence: 'The Milky Way and Andromeda have drawn {km} closer since you opened this page.' },
+    glance: [
+      { label: 'Members', value: 'More than 80 galaxies, mostly dwarfs' },
+      { label: 'Size', value: 'About 10 million light-years across' },
+      { label: 'Largest', value: 'Andromeda, then the Milky Way, then Triangulum' },
+      { label: 'Andromeda', value: '2.5 million light-years away, about 220,000 across' },
+      { label: 'Closing speed', value: 'About 110 km/s, Andromeda towards us' },
+      { label: 'Triangulum', value: '2.7 million light-years away' },
+      { label: 'Magellanic Clouds', value: '163,000 and 206,000 light-years away' },
+      { label: 'Part of', value: 'The Laniakea Supercluster' },
+    ],
+    sections: [
+      {
+        heading: 'Andromeda',
+        body: 'The largest galaxy of the group, a spiral of perhaps a trillion stars. On a dark night it is a faint, elongated smudge in the constellation Andromeda: the most distant thing most people can see with their own eyes. The light reaching you tonight left it 2.5 million years ago.',
+      },
+      {
+        heading: 'Drawing closer',
+        body: 'Andromeda and the Milky Way are approaching at about 110 km/s. Recent measurements with Gaia and Hubble give about even odds that the two merge within the next 10 billion years into one large galaxy. Even then, stars are so far apart that almost none would collide.',
+      },
+      {
+        heading: 'Our satellites',
+        body: 'The Large and Small Magellanic Clouds, visible from the southern hemisphere, orbit the Milky Way, trailing a stream of gas. The Large Cloud is massive enough to tug the Milky Way’s disc. Closer still, the Sagittarius dwarf galaxy is being torn apart and absorbed.',
+      },
+      {
+        heading: 'Beyond',
+        body: 'The Local Group lies on the outskirts of the Virgo Supercluster, itself part of the Laniakea Supercluster of about 100,000 galaxies, one of millions of such structures in a universe of hundreds of billions of galaxies.',
+      },
+    ],
+    missionsHeading: 'Milestones',
+    missions: [
+      { year: '964', name: 'Abd al-Rahman al-Sufi', note: 'Records Andromeda as a “little cloud” in his Book of Fixed Stars.' },
+      { year: '1519', name: 'Magellan’s voyage', note: 'Its chronicler describes the two Clouds of the southern sky.' },
+      { year: '1925', name: 'Edwin Hubble', note: 'Shows Andromeda is a galaxy far beyond the Milky Way.' },
+      { year: '1936', name: 'The Local Group', note: 'Hubble names our family of galaxies.' },
+      { year: '2012', name: 'Hubble Space Telescope', note: 'Measures Andromeda’s sideways motion: it is heading for us.' },
+      { year: '2025', name: 'Gaia and Hubble', note: 'A fresh study puts the odds of a merger at about one in two.' },
+    ],
+    source: 'Figures: NASA, ESA and published surveys of the Local Group.',
+  },
 }

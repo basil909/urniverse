@@ -464,12 +464,12 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     // constellations only in the opening, wide view (and the return)
     const progress = progressRef.current ?? 0
     const chapter = Math.floor(progress)
-    const wide = (chapter === 0 || chapter === 12) && !pilot.active
+    const wide = (chapter === 0 || chapter === 13) && !pilot.active
     linesOn.current += ((wide ? 1 : 0) - linesOn.current) * (1 - Math.exp(-delta * 1.5))
     lineMaterial.uniforms.uOpacity.value = linesOn.current * 0.09
     // the nebulae glow fully in the wide views, softer behind close-ups,
     // and fade once we have left the galaxy (the finale)
-    const deepTarget = chapter === 11 ? 0.05 : wide ? 0.2 : 0.13
+    const deepTarget = chapter === 11 || chapter === 12 ? 0.05 : wide ? 0.2 : 0.13
     deepLevel.current += (deepTarget - deepLevel.current) * (1 - Math.exp(-delta * 1.5))
     deepMaterial.uniforms.uOpacity.value = deepLevel.current
     const names = linesOn.current > 0.05

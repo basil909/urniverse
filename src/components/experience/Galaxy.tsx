@@ -41,8 +41,8 @@ const BAR_HALF = 7
 const ARM_WIND = 1 / Math.tan((12.5 * Math.PI) / 180)
 /* the Sun: 26,000 ly out, about 0.92 rad round from the Perseus arm, which
    puts the Sagittarius arm just inside it (see the notes above) */
-const SUN_RADIUS = GALAXY_RADIUS * 0.56
-const SUN_ANGLE = BAR_ANGLE + ARM_WIND * Math.log(SUN_RADIUS / BAR_HALF) + 0.92
+export const SUN_RADIUS = GALAXY_RADIUS * 0.56
+export const SUN_ANGLE = BAR_ANGLE + ARM_WIND * Math.log(SUN_RADIUS / BAR_HALF) + 0.92
 
 // Far backdrop, upper right of the intro view, so it never sits behind the Sun
 export const GALAXY_POSITION: [number, number, number] = [48, 30, -125]
@@ -760,7 +760,8 @@ export default function Galaxy({
     const progress = progressRef ? progressRef.current ?? 0 : 11.5
     const fade =
       THREE.MathUtils.smoothstep(progress, 11.0, 11.12) *
-      (1 - THREE.MathUtils.smoothstep(progress, 12.0, 12.12))
+      // (and stays, small, in the Local Group chapter)
+      (1 - THREE.MathUtils.smoothstep(progress, 13.0, 13.12))
     galaxy.current.visible = fade > 0.001
     glowStrength.current = 0.6 * fade
     glowMaterial.uniforms.uStrength.value = glowStrength.current

@@ -35,6 +35,18 @@ function voyagerPositionAU(date: Date): [number, number, number] {
   ]
 }
 
+/* the farthest spacecraft, all coasting outwards in straight lines: their
+   distance from the Sun on a date (AU, roughly), and the direction they
+   head (ecliptic longitude and latitude, degrees) */
+export const FAR_CRAFT = [
+  { name: 'Voyager 1', au: 172.3, perYear: 3.57, lon: 256, lat: 35, epoch: Date.UTC(2026, 10, 15) },
+  { name: 'Voyager 2', au: 144.0, perYear: 3.25, lon: 291, lat: -39, epoch: Date.UTC(2026, 10, 15) },
+  { name: 'New Horizons', au: 65.4, perYear: 2.91, lon: 291, lat: 1.5, epoch: Date.UTC(2026, 10, 15) },
+] as const
+export function craftFromSunAU(craft: (typeof FAR_CRAFT)[number], date: Date) {
+  return craft.au + ((date.getTime() - craft.epoch) / (365.25 * 86400000)) * craft.perYear
+}
+
 const distance = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 export function formatKm(km: number) {

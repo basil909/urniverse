@@ -6,7 +6,7 @@
    visitor turns it on. */
 
 /* chord voicings per section (intro, Sun, 8 planets, Pale Blue Dot,
-   Milky Way, return), in Hz */
+   Milky Way, Local Group, return), in Hz */
 const CHORDS: number[][] = [
   [73.42, 110.0, 174.61, 329.63], // intro: D minor, open
   [65.41, 98.0, 164.81, 293.66], // Sun: warm C
@@ -20,6 +20,7 @@ const CHORDS: number[][] = [
   [92.5, 138.59, 220.0, 329.63], // Neptune: cool F-sharp
   [73.42, 110.0, 164.81, 369.99], // Pale Blue Dot: D, add 9
   [55.0, 82.41, 123.47, 277.18], // Milky Way: wide and low
+  [49.0, 73.42, 110.0, 246.94], // Local Group: lower still, open
   [73.42, 110.0, 174.61, 329.63], // return
 ]
 

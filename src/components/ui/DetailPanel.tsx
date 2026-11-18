@@ -7,7 +7,10 @@ import { DETAIL_SOURCE, type WorldDetail } from '../../data/worlds'
 import type { Layer } from '../../data/interiors'
 import WorldGraphics from './WorldGraphics'
 import WorldLive from './WorldLive'
-import { DistanceLadder, GalaxyMap } from './SkyGraphics'
+import { DistanceLadder, GalaxyMap, SpacecraftMap } from './SkyGraphics'
+import Icon from './Icon'
+import YouThere from './YouThere'
+import TonightSky from './TonightSky'
 
 /* A quiet, scrollable deep-dive for the current world. It sits over the
    text column, scrolls on its own (data-lenis-prevent keeps the page
@@ -34,6 +37,7 @@ export default function DetailPanel({
   scaleNote,
   previous,
   next,
+  link,
 }: {
   open: boolean
   name: string
@@ -50,12 +54,47 @@ export default function DetailPanel({
   /* orbit index for the drawings (-1: the Sun); none for other chapters */
   worldIndex?: number
   /* the chapters beyond the planets: their own drawing and live figures */
-  sky?: 'distances' | 'galaxy'
+  sky?: 'distances' | 'galaxy' | 'local-group'
   previous?: PanelStep
   next?: PanelStep
+  /* this chapter's address, to copy and share */
+  link?: string
 }) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const [scrolled, setScrolled] = useState(false)
+  const [copied, setCopied] = useState(false)
+  // where copying is not allowed: the link, shown selected to copy by hand
+  const [manual, setManual] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 2000)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+  useEffect(() => setManual(false), [name])
+  const copyLink = () => {
+    if (!link) return
+    const fallback = () => {
+      // the old way: a hidden field, selected and copied
+      const field = document.createElement('textarea')
+      field.value = link
+      field.setAttribute('readonly', '')
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.appendChild(field)
+      field.select()
+      let ok = false
+      try {
+        ok = document.execCommand('copy')
+      } catch {
+        ok = false
+      }
+      field.remove()
+      if (ok) setCopied(true)
+      else setManual(true)
+    }
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(link).then(() => setCopied(true), fallback)
+    else fallback()
+  }
 
   useEffect(() => {
     if (!open) return
@@ -117,6 +156,18 @@ export default function DetailPanel({
                 {name}
               </h2>
             </div>
+            {link && (
+              <button
+                type="button"
+                className={`detail-link ${copied ? 'is-copied' : ''}`}
+                onClick={copyLink}
+                aria-label={copied ? 'Link copied' : `Copy a link to ${name}`}
+                title={copied ? 'Copied' : 'Copy link'}
+              >
+                <Icon name={copied ? 'check' : 'link'} />
+                <span aria-live="polite">{copied ? 'Copied' : 'Link'}</span>
+              </button>
+            )}
             <button
               ref={closeButton}
               type="button"
@@ -127,6 +178,17 @@ export default function DetailPanel({
               ×
             </button>
           </div>
+
+          {manual && link && (
+            <input
+              className="detail-link-field"
+              readOnly
+              value={link}
+              aria-label="Link to this chapter"
+              autoFocus
+              onFocus={(event) => event.currentTarget.select()}
+            />
+          )}
 
           {onToggleInside && (
             <button
@@ -155,9 +217,20 @@ export default function DetailPanel({
           {description && <p className="detail-lede">{description}</p>}
 
           <WorldLive where={live} name={name} travel={detail.travel} />
+          {worldIndex !== undefined && <YouThere index={worldIndex} name={name} />}
+          {sky === 'galaxy' ? (
+            <TonightSky what="galaxy" />
+          ) : sky === 'local-group' ? (
+            <TonightSky what="andromeda" />
+          ) : worldIndex === -1 ? (
+            <TonightSky what="sun" />
+          ) : worldIndex !== undefined && worldIndex !== 2 ? (
+            <TonightSky what={worldIndex} />
+          ) : null}
 
           {sky === 'galaxy' && <GalaxyMap />}
           {sky === 'distances' && <DistanceLadder />}
+          {sky === 'distances' && <SpacecraftMap />}
           {worldIndex !== undefined && <WorldGraphics index={worldIndex} name={name} />}
           {scaleNote && <p className="detail-scale">{scaleNote}</p>}
 
