@@ -8,12 +8,20 @@ import * as THREE from 'three'
 /* ============================================================
    PROCEDURAL GALAXY
 
-   Visual model:
-   - Central bulge & dense galactic core
-   - Four spiral arms with logarithmic curvature
-   - Stellar temperature variation (O/B/A/F/G/K/M types)
-   - Dark galactic dust lanes for volumetric depth
-   - Star clusters & faint outer halo
+   Drawn after the Milky Way as it is mapped today (a disc 100,000
+   light-years across, so one unit is about 2,270 light-years):
+   - a small round bulge inside a long central bar, reaching about
+     16,000 light-years each way and lying some 20 degrees from the line
+     between the Sun and the centre
+   - four arms wound at a pitch of about 12.5 degrees: two major ones
+     (Scutum-Centaurus and Perseus) starting from the ends of the bar and
+     rich in stars, two fainter ones between them (Norma and Sagittarius)
+   - the Sun 26,000 light-years out, in the Orion Spur: a short minor arm
+     between the Sagittarius arm (about 1,200 ly inside) and the Perseus
+     arm (about 2 kpc outside)
+   - star colours by population: the bulge, bar and halo old, orange and
+     yellow; the arms and the spur young, with the hot blue stars
+   - dark dust along the inner edge of the arms; a faint outer halo
 ============================================================ */
 
 const STAR_COUNT = 30000
@@ -27,6 +35,14 @@ const BAR_ANGLE = 0.45
 const BAR_COS = Math.cos(BAR_ANGLE)
 const BAR_SIN = Math.sin(BAR_ANGLE)
 export const GALAXY_RADIUS = 22
+/* the bar's half-length: about 16,000 light-years */
+const BAR_HALF = 7
+/* the arms' pitch, about 12.5 degrees: how far they wind per step out */
+const ARM_WIND = 1 / Math.tan((12.5 * Math.PI) / 180)
+/* the Sun: 26,000 ly out, about 0.92 rad round from the Perseus arm, which
+   puts the Sagittarius arm just inside it (see the notes above) */
+const SUN_RADIUS = GALAXY_RADIUS * 0.56
+const SUN_ANGLE = BAR_ANGLE + ARM_WIND * Math.log(SUN_RADIUS / BAR_HALF) + 0.92
 
 // Far backdrop, upper right of the intro view, so it never sits behind the Sun
 export const GALAXY_POSITION: [number, number, number] = [48, 30, -125]
@@ -63,11 +79,41 @@ function seededRandom(seed: number) {
    - Dust lanes
 ============================================================ */
 
+/* arms 0 and 2 are the major arms, leaving the ends of the bar */
 function getArmAngle(radius: number, arm: number) {
   return (
+    BAR_ANGLE +
     (arm / ARM_COUNT) * Math.PI * 2 +
-    Math.log(radius / 3 + 1) * 3.2
+    ARM_WIND * Math.log(Math.max(radius, BAR_HALF * 0.85) / BAR_HALF)
   )
+}
+
+/* the Orion Spur: a short arc through the Sun, wound like the arms */
+function getSpurPoint(u: number) {
+  return { radius: SUN_RADIUS * Math.exp(u / ARM_WIND), angle: SUN_ANGLE + u }
+}
+
+/* a star's colour by its population: young (arms, spur) has the hot blue
+   stars; old (bulge, bar, halo) has none */
+const STAR_COLOURS: [number, number, number][] = [
+  [0.55, 0.73, 1.0], // O, B
+  [0.76, 0.88, 1.0], // A
+  [1.0, 0.94, 0.8], // F, G
+  [1.0, 0.72, 0.48], // K
+  [1.0, 0.48, 0.32], // M
+]
+const POPULATIONS = {
+  young: [0.18, 0.22, 0.35, 0.17, 0.08],
+  disc: [0.06, 0.12, 0.42, 0.25, 0.15],
+  old: [0, 0.02, 0.33, 0.4, 0.25],
+}
+function starColour(roll: number, mix: number[]) {
+  let sum = 0
+  for (let i = 0; i < mix.length; i += 1) {
+    sum += mix[i]
+    if (roll < sum) return STAR_COLOURS[i]
+  }
+  return STAR_COLOURS[STAR_COLOURS.length - 1]
 }
 
 /* ============================================================
@@ -190,7 +236,6 @@ const glowVertexShader = /* glsl */ `
 const glowFragmentShader = /* glsl */ `
   uniform float uStrength;
   uniform float uRadius;
-  uniform float uTwist;
   varying vec2 vPos;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -211,13 +256,21 @@ const glowFragmentShader = /* glsl */ `
     float theta = atan(-vPos.y, vPos.x);
     /* the arms wander a little, so they are not perfect curves */
     float wander = (fbm(vPos * 0.32 + 7.0) - 0.5) * 0.9;
-    float spiral = theta - log(r / 3.0 + 1.0) * uTwist + wander;
+    float spiral = theta - ${BAR_ANGLE.toFixed(4)} - ${ARM_WIND.toFixed(4)} * log(max(r, ${(BAR_HALF * 0.85).toFixed(2)}) / ${BAR_HALF.toFixed(1)}) + wander;
     float wave = cos(4.0 * spiral);
-    float arms = pow(0.5 + 0.5 * wave, 3.0);
+    /* the two major arms (from the bar's ends) brighter than the two between */
+    float major = 0.5 + 0.5 * cos(2.0 * spiral);
+    float arms = pow(0.5 + 0.5 * wave, 3.0) * mix(0.45, 1.0, major);
+    /* they begin at the ends of the bar */
+    arms *= smoothstep(${(BAR_HALF * 0.7).toFixed(2)}, ${(BAR_HALF * 1.05).toFixed(2)}, r);
+    /* the Orion Spur, through the Sun's place */
+    float u = atan(sin(theta - ${SUN_ANGLE.toFixed(4)}), cos(theta - ${SUN_ANGLE.toFixed(4)}));
+    float spurR = ${SUN_RADIUS.toFixed(3)} * exp(u / ${ARM_WIND.toFixed(4)});
+    arms += 0.55 * exp(-pow(r - spurR, 2.0) / 0.35) * (1.0 - smoothstep(0.26, 0.42, abs(u)));
     /* clumpy along their length, like real arms */
     arms *= 0.45 + 0.9 * fbm(vPos * 0.8 + 1.3);
     /* dust lanes trail just inside each arm, broken into filaments */
-    float lanes = pow(0.5 + 0.5 * cos(4.0 * spiral - 0.6), 8.0) * smoothstep(2.5, 6.0, r);
+    float lanes = pow(0.5 + 0.5 * cos(4.0 * spiral - 0.6), 8.0) * smoothstep(${(BAR_HALF * 0.8).toFixed(2)}, ${(BAR_HALF * 1.2).toFixed(2)}, r) * mix(0.55, 1.0, major);
     lanes *= smoothstep(0.3, 0.7, fbm(vPos * 1.4 + 5.0));
 
     float mottle = 0.7 + 0.6 * fbm(vPos * 0.45 + 3.0);
@@ -229,7 +282,8 @@ const glowFragmentShader = /* glsl */ `
     vec2 axis = vec2(${BAR_COS.toFixed(4)}, ${BAR_SIN.toFixed(4)});
     float along = dot(inPlane, axis);
     float across = dot(inPlane, vec2(-axis.y, axis.x));
-    core += vec3(1.0, 0.84, 0.62) * exp(-(along * along) / 14.0 - (across * across) / 1.1) * 0.55;
+    /* the bar: long, with soft square ends */
+    core += vec3(1.0, 0.8, 0.56) * exp(-pow(abs(along) / ${BAR_HALF.toFixed(1)}, 4.0) - (across * across) / 1.4) * 0.5;
     vec3 disc = vec3(0.62, 0.72, 1.0) * exp(-r / 9.0) * (0.12 + 0.55 * arms) * mottle;
     vec3 light = (core + disc) * (1.0 - lanes * 0.75) * edge;
 
@@ -260,12 +314,11 @@ export default function Galaxy({
 
   /* "You are here": partway out along an arm, like the Sun's position
      about 26,000 light-years from the centre of a ~50,000 ly radius disc */
-  const sunAnchor = useMemo<[number, number, number]>(() => {
-    const radius = GALAXY_RADIUS * 0.56
-    // on the side of the disc that faces the left of the screen in the finale
-    const angle = getArmAngle(radius, 1) + 0.28 + Math.PI
-    return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
-  }, [])
+  const sunAnchor = useMemo<[number, number, number]>(
+    // (on the side of the disc that faces the left of the screen in the finale)
+    () => [Math.cos(SUN_ANGLE) * SUN_RADIUS, 0, Math.sin(SUN_ANGLE) * SUN_RADIUS],
+    [],
+  )
 
   const dpr = useThree(
     (state) => state.viewport.dpr
@@ -277,364 +330,88 @@ export default function Galaxy({
 
   const starGeometry = useMemo(() => {
     const random = seededRandom(193847)
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(STAR_COUNT * 3)
+    const colors = new Float32Array(STAR_COUNT * 3)
+    const color = new THREE.Color()
+    // a bell-shaped spread about the mid-plane
+    const bell = () => (random() + random() + random() - 1.5) / 3
 
-    const geometry =
-      new THREE.BufferGeometry()
-
-    const positions =
-      new Float32Array(
-        STAR_COUNT * 3
-      )
-
-    const colors =
-      new Float32Array(
-        STAR_COUNT * 3
-      )
-
-    const color =
-      new THREE.Color()
-
-    for (
-      let i = 0;
-      i < STAR_COUNT;
-      i++
-    ) {
+    for (let i = 0; i < STAR_COUNT; i++) {
       const i3 = i * 3
+      const population = random()
+      let x = 0
+      let y = 0
+      let z = 0
+      let mix = POPULATIONS.disc
 
-      const population =
-        random()
-
-      let radius = 0
-      let angle = 0
-      let verticalSpread = 0
-
-      /* ------------------------------------------------------
-         CENTRAL BULGE
-      ------------------------------------------------------ */
-
-      if (population < 0.16) {
-        radius =
-          Math.pow(
-            random(),
-            1.8
-          ) * 6.0
-
-        angle =
-          random() *
-          Math.PI *
-          2
-
-        verticalSpread = 1.1
-      }
-
-      /* ------------------------------------------------------
-         SPIRAL ARMS
-      ------------------------------------------------------ */
-
-      else if (population < 0.82) {
-        radius =
-          3 +
-          Math.pow(
-            random(),
-            0.78
-          ) *
-            (GALAXY_RADIUS - 3)
-
-        const arm =
-          Math.floor(
-            random() *
-              ARM_COUNT
-          )
-
-        const spiral =
-          getArmAngle(
-            radius,
-            arm
-          )
-
-        const turbulence =
-          (random() - 0.5) *
-          (0.16 + radius * 0.028)
-
-        const cloudOffset =
-          (random() - 0.5) *
-          0.18
-
-        angle =
-          spiral +
-          turbulence +
-          cloudOffset
-
-        verticalSpread =
-          0.32 +
-          radius * 0.018
-      }
-
-      /* ------------------------------------------------------
-         OUTER DISK
-      ------------------------------------------------------ */
-
-      else if (population < 0.96) {
-        radius =
-          7 +
-          Math.pow(
-            random(),
-            0.55
-          ) *
-            16
-
-        angle =
-          random() *
-          Math.PI *
-          2
-
-        verticalSpread =
-          0.42 +
-          radius * 0.015
-      }
-
-      /* ------------------------------------------------------
-         SPHERICAL / OBLATE HALO
-      ------------------------------------------------------ */
-
-      else {
-        const haloRadius =
-          6 +
-          Math.pow(
-            random(),
-            1.5
-          ) *
-            26
-
-        const theta =
-          random() *
-          Math.PI *
-          2
-
-        const phi =
-          Math.acos(
-            2 * random() - 1
-          )
-
-        positions[i3] =
-          haloRadius *
-          Math.sin(phi) *
-          Math.cos(theta)
-
-        positions[i3 + 1] =
-          haloRadius *
-          Math.cos(phi) *
-          0.6
-
-        positions[i3 + 2] =
-          haloRadius *
-          Math.sin(phi) *
-          Math.sin(theta)
-
-        /* ----------------------------------------------------
-           HALO STAR COLOUR
-        ---------------------------------------------------- */
-
-        const stellarType =
-          random()
-
-        if (stellarType > 0.92) {
-          color.setRGB(
-            0.55,
-            0.73,
-            1.0,
-            THREE.SRGBColorSpace
-          )
-        } else if (
-          stellarType > 0.78
-        ) {
-          color.setRGB(
-            0.76,
-            0.88,
-            1.0,
-            THREE.SRGBColorSpace
-          )
-        } else if (
-          stellarType > 0.35
-        ) {
-          color.setRGB(
-            1.0,
-            0.94,
-            0.80,
-            THREE.SRGBColorSpace
-          )
-        } else if (
-          stellarType > 0.12
-        ) {
-          color.setRGB(
-            1.0,
-            0.72,
-            0.48,
-            THREE.SRGBColorSpace
-          )
-        } else {
-          color.setRGB(
-            1.0,
-            0.48,
-            0.32,
-            THREE.SRGBColorSpace
-          )
-        }
-
-        const luminosity =
-          0.45 +
-          Math.pow(
-            random(),
-            2.5
-          ) *
-            0.75
-
-        colors[i3] =
-          color.r *
-          luminosity
-
-        colors[i3 + 1] =
-          color.g *
-          luminosity
-
-        colors[i3 + 2] =
-          color.b *
-          luminosity
-
-        continue
-      }
-
-      /* ------------------------------------------------------
-         SMALL POSITION VARIATION
-      ------------------------------------------------------ */
-
-      radius +=
-        (random() - 0.5) *
-        0.18
-
-      positions[i3] =
-        Math.cos(angle) *
-        radius
-
-      /*
-        Bell-shaped vertical distribution.
-
-        This concentrates stars near
-        the galactic mid-plane instead
-        of producing a box-like spread.
-      */
-      positions[i3 + 1] =
-        (
-          random() +
-          random() +
-          random() -
-          1.5
-        ) /
-          3 *
-        verticalSpread
-
-      positions[i3 + 2] =
-        Math.sin(angle) *
-        radius
-
-      /* the Milky Way is a barred spiral: the bulge is drawn out into a
-         bar about 3 times longer than it is wide */
-      if (population < 0.16) {
-        const along = positions[i3] * BAR_COS + positions[i3 + 2] * BAR_SIN
-        const across = -positions[i3] * BAR_SIN + positions[i3 + 2] * BAR_COS
-        const a = along * 1.55
-        const b = across * 0.55
-        positions[i3] = a * BAR_COS - b * BAR_SIN
-        positions[i3 + 2] = a * BAR_SIN + b * BAR_COS
-      }
-
-      /* ------------------------------------------------------
-         STELLAR POPULATION COLOUR
-      ------------------------------------------------------ */
-
-      const stellarType =
-        random()
-
-      if (stellarType > 0.92) {
-        color.setRGB(
-          0.55,
-          0.73,
-          1.0,
-          THREE.SRGBColorSpace
-        )
-      } else if (
-        stellarType > 0.78
-      ) {
-        color.setRGB(
-          0.76,
-          0.88,
-          1.0,
-          THREE.SRGBColorSpace
-        )
-      } else if (
-        stellarType > 0.35
-      ) {
-        color.setRGB(
-          1.0,
-          0.94,
-          0.80,
-          THREE.SRGBColorSpace
-        )
-      } else if (
-        stellarType > 0.12
-      ) {
-        color.setRGB(
-          1.0,
-          0.72,
-          0.48,
-          THREE.SRGBColorSpace
-        )
+      if (population < 0.08) {
+        // the bulge: small and round, old stars
+        const r = Math.pow(random(), 1.8) * 4.2
+        const a = random() * Math.PI * 2
+        x = Math.cos(a) * r
+        z = Math.sin(a) * r
+        y = bell() * 1.6
+        mix = POPULATIONS.old
+      } else if (population < 0.17) {
+        // the bar: about 16,000 ly each way, a third as wide; old stars
+        const along = (random() < 0.5 ? -1 : 1) * Math.pow(random(), 1.25) * BAR_HALF
+        const across = bell() * 2.4
+        x = along * BAR_COS - across * BAR_SIN
+        z = along * BAR_SIN + across * BAR_COS
+        y = bell() * 0.9
+        mix = POPULATIONS.old
+      } else if (population < 0.78) {
+        // the arms: most stars on the two major arms
+        const r = BAR_HALF * 0.85 + Math.pow(random(), 0.78) * (GALAXY_RADIUS - BAR_HALF * 0.85)
+        const arm = random() < 0.62 ? (random() < 0.5 ? 0 : 2) : random() < 0.5 ? 1 : 3
+        const a = getArmAngle(r, arm) + (random() - 0.5) * (0.16 + r * 0.024) + (random() - 0.5) * 0.16
+        const rr = r + (random() - 0.5) * 0.18
+        x = Math.cos(a) * rr
+        z = Math.sin(a) * rr
+        y = bell() * (0.32 + r * 0.018)
+        mix = POPULATIONS.young
+      } else if (population < 0.81) {
+        // the Orion Spur
+        const { radius, angle } = getSpurPoint((random() - 0.5) * 0.7)
+        const a = angle + (random() - 0.5) * 0.05
+        const rr = radius + (random() - 0.5) * 0.7
+        x = Math.cos(a) * rr
+        z = Math.sin(a) * rr
+        y = bell() * 0.5
+        mix = POPULATIONS.young
+      } else if (population < 0.96) {
+        // the disc between the arms
+        const r = 6 + Math.pow(random(), 0.55) * 17
+        const a = random() * Math.PI * 2
+        x = Math.cos(a) * r
+        z = Math.sin(a) * r
+        y = bell() * (0.42 + r * 0.015)
       } else {
-        color.setRGB(
-          1.0,
-          0.48,
-          0.32,
-          THREE.SRGBColorSpace
-        )
+        // the halo: old stars in a flattened sphere
+        const r = 6 + Math.pow(random(), 1.5) * 26
+        const theta = random() * Math.PI * 2
+        const phi = Math.acos(2 * random() - 1)
+        x = r * Math.sin(phi) * Math.cos(theta)
+        y = r * Math.cos(phi) * 0.6
+        z = r * Math.sin(phi) * Math.sin(theta)
+        mix = POPULATIONS.old
       }
 
-      const luminosity =
-        0.45 +
-        Math.pow(
-          random(),
-          2.5
-        ) *
-          0.75
+      positions[i3] = x
+      positions[i3 + 1] = y
+      positions[i3 + 2] = z
 
-      colors[i3] =
-        color.r *
-        luminosity
-
-      colors[i3 + 1] =
-        color.g *
-        luminosity
-
-      colors[i3 + 2] =
-        color.b *
-        luminosity
+      const [r, g, b] = starColour(random(), mix)
+      color.setRGB(r, g, b, THREE.SRGBColorSpace)
+      const luminosity = 0.45 + Math.pow(random(), 2.5) * 0.75
+      colors[i3] = color.r * luminosity
+      colors[i3 + 1] = color.g * luminosity
+      colors[i3 + 2] = color.b * luminosity
     }
 
-    geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(
-        positions,
-        3
-      )
-    )
-
-    geometry.setAttribute(
-      'color',
-      new THREE.BufferAttribute(
-        colors,
-        3
-      )
-    )
-
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     return geometry
   }, [])
 
@@ -662,18 +439,15 @@ export default function Galaxy({
       const i3 = i * 3
 
       const radius =
-        3 +
+        BAR_HALF * 0.9 +
         Math.pow(
           random(),
           0.78
         ) *
-          (GALAXY_RADIUS - 3)
+          (GALAXY_RADIUS - BAR_HALF * 0.9)
 
-      const arm =
-        Math.floor(
-          random() *
-            ARM_COUNT
-        )
+      // most dust on the major arms, along their inner edge
+      const arm = random() < 0.6 ? (random() < 0.5 ? 0 : 2) : random() < 0.5 ? 1 : 3
 
       const spiral =
         getArmAngle(
@@ -685,8 +459,10 @@ export default function Galaxy({
         (random() - 0.5) *
         (0.08 + radius * 0.015)
 
+      // (the inner edge: at a given radius, a little further round)
       const angle =
         spiral +
+        0.09 +
         turbulence
 
       positions[i3] =
@@ -873,7 +649,6 @@ export default function Galaxy({
         uniforms: {
           uStrength: { value: 0.14 },
           uRadius: { value: GALAXY_RADIUS },
-          uTwist: { value: 3.2 },
         },
         transparent: true,
         depthWrite: false,

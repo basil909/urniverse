@@ -583,6 +583,18 @@ const AIR: Record<string, Air> = {
   },
 }
 
+/* The giants are squashed by their own spin: wider at the equator than
+   from pole to pole (NASA fact sheets: 1 - polar / equatorial radius).
+   Saturn's 10% is plain in any photograph. The rocky planets' few tenths
+   of a percent would not show. The body and its air are both drawn
+   flattened along the spin axis. */
+const FLATTENING: Record<string, number> = {
+  Jupiter: 0.06487,
+  Saturn: 0.09796,
+  Uranus: 0.02293,
+  Neptune: 0.01708,
+}
+
 /* how finely the air is marched, by quality (0 light .. 2 full) */
 const AIR_VIEW_STEPS = [8, 12, 16]
 const AIR_LIGHT_STEPS = [3, 4, 6]
@@ -594,6 +606,9 @@ uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform f
 uniform vec3 uRayleigh; uniform vec3 uMie; uniform vec3 uMieExt; uniform vec3 uMieG;
 uniform float uHR; uniform float uHM; uniform float uSun; uniform float uExaggerate;
 uniform int uViewSteps; uniform int uLightSteps;
+/* world to the planet's round frame, in planet radii: a flattened giant
+   is a sphere there (for a round planet it only turns, and scales) */
+uniform mat3 uToRound;
 varying vec3 vNormal; varying vec3 vWorldPosition;
 varying vec3 vCenter; varying float vRadius;
 
@@ -612,8 +627,8 @@ vec3 miePhase(float mu, vec3 g) {
 
 void main() {
   sceneOcclusion();
-  vec3 o = (cameraPosition - vCenter) / vRadius;
-  vec3 d = normalize(vWorldPosition - cameraPosition);
+  vec3 o = uToRound * (cameraPosition - vCenter);
+  vec3 d = normalize(uToRound * (vWorldPosition - cameraPosition));
   float camR = length(o);
   // each pixel once: the near side of the shell from outside, the far side from within
   if (camR < uShell ? gl_FrontFacing : !gl_FrontFacing) discard;
@@ -635,7 +650,7 @@ void main() {
   if (tg.x > 0.0) t1 = min(t1, tg.x);
   if (t1 <= t0) discard;
 
-  vec3 sunDir = normalize(uSunPosition - vCenter);
+  vec3 sunDir = normalize(uToRound * (uSunPosition - vCenter));
   float seg = (t1 - t0) / float(uViewSteps);
   float depthR = 0.0;
   float depthM = 0.0;
@@ -1040,7 +1055,8 @@ void main() {
   vUv = uv;
   vScale = length(modelMatrix[0].xyz);
   vViewPos = (modelViewMatrix * vec4(position, 1.0)).xyz;
-  vNormal = normalize(mat3(modelMatrix) * normal);
+  /* (the inverse transpose: right for a flattened giant too) */
+  vNormal = normalize(transpose(inverse(mat3(modelMatrix))) * normal);
   vLocalPosition = position;
   /* map directions on the sphere: east = increasing u, north = increasing v */
   vec3 lp = normalize(position);
@@ -2118,6 +2134,10 @@ uniform vec3 uColor;
 uniform vec2 uSun;
 uniform float uStrength;
 uniform float uTime;
+/* a flattened planet's outline: an ellipse, its short axis along the
+   pole as seen (uPole), that axis uPolar of the radius */
+uniform vec2 uPole;
+uniform float uPolar;
 varying vec2 vUv;
 float rimHash(float n) { return fract(sin(n) * 43758.5453); }
 float rimNoise(float x) {
@@ -2127,7 +2147,9 @@ float rimNoise(float x) {
 void main() {
   vec2 c = (vUv * 2.0 - 1.0) * ${(RIM_RAYS_SIZE / 2).toFixed(1)};
   float r = length(c);
-  float above = r - 1.0;
+  /* height above the outline, measured as if it were round */
+  float along = dot(c, uPole);
+  float above = length(vec2(c.x - along * uPole.x, c.y - along * uPole.y) + uPole * along / uPolar) - 1.0;
   if (above < 0.0) discard;
   vec2 radial = c / r;
   float a = atan(c.y, c.x);
@@ -2150,6 +2172,7 @@ const _rimSun = new THREE.Vector3()
 const _rimCenter = new THREE.Vector3()
 const _rimRight = new THREE.Vector3()
 const _rimUp = new THREE.Vector3()
+const _rimPole = new THREE.Vector3()
 
 function RimRays({
   index,
@@ -2162,6 +2185,7 @@ function RimRays({
 }) {
   const mesh = useRef<THREE.Mesh>(null)
   const camera = useThree((state) => state.camera)
+  const poleQuaternion = useMemo(() => getPlanetPoleQuaternion(index), [index])
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -2170,6 +2194,8 @@ function RimRays({
           uSun: { value: new THREE.Vector2(1, 0) },
           uStrength: { value: 0 },
           uTime: { value: 0 },
+          uPole: { value: new THREE.Vector2(0, 1) },
+          uPolar: { value: 1 },
         },
         vertexShader: RIM_VERTEX,
         fragmentShader: RIM_FRAGMENT,
@@ -2202,6 +2228,21 @@ function RimRays({
     material.uniforms.uSun.value
       .set(_rimSun.dot(_rimRight), _rimSun.dot(_rimUp))
       .normalize()
+    // the flattened outline as seen from here: the pole's direction on
+    // screen, and how short it looks (full flattening seen side-on, none
+    // looking down the pole)
+    const flattening = FLATTENING[PLANETS[index].name] ?? 0
+    if (flattening > 0) {
+      _rimPole.set(0, 1, 0).applyQuaternion(poleQuaternion)
+      const px = _rimPole.dot(_rimRight)
+      const py = _rimPole.dot(_rimUp)
+      const side = Math.hypot(px, py)
+      if (side > 1e-4) material.uniforms.uPole.value.set(px / side, py / side)
+      // (side = cos of the pole's tilt towards the camera)
+      material.uniforms.uPolar.value = Math.sqrt(side * side * (1 - flattening) ** 2 + (1 - side * side))
+    } else {
+      material.uniforms.uPolar.value = 1
+    }
   })
 
   return (
@@ -2363,6 +2404,7 @@ function Planet({
       uGroundSky: { value: 0 },
       ...(AIR[planet.name]
         ? {
+            uToRound: { value: new THREE.Matrix3() },
             uRayleigh: { value: new THREE.Vector3(...AIR[planet.name].rayleigh) },
             uMie: { value: new THREE.Vector3(...AIR[planet.name].mie) },
             uMieExt: { value: new THREE.Vector3(...AIR[planet.name].mieExt) },
@@ -2783,7 +2825,7 @@ function Planet({
 
       <group ref={orbit}>
         <group quaternion={poleQuaternion}>
-          <mesh ref={body} scale={visualRadius}>
+          <mesh ref={body} scale={[visualRadius, visualRadius * (1 - (FLATTENING[planet.name] ?? 0)), visualRadius]}>
             {HOTSPOTS[index] && (
               <Hotspots
                 index={index}
@@ -2844,9 +2886,21 @@ function Planet({
               ref={(mesh) => {
                 atmosphereMesh.current = mesh
                 // the marched air: drawn at half resolution
-                if (AIR[planet.name]) lowRes(mesh)
+                if (AIR[planet.name] && mesh) {
+                  lowRes(mesh)
+                  mesh.onBeforeRender = () => {
+                    const toRound = (mesh.material as THREE.ShaderMaterial).uniforms.uToRound?.value as THREE.Matrix3 | undefined
+                    if (!toRound) return
+                    // world to the shell's own frame (shell radius 1), then to planet radii
+                    toRound.setFromMatrix4(mesh.matrixWorld).invert().multiplyScalar(ATMOSPHERE_SHELL[planet.name] ?? 1.055)
+                  }
+                }
               }}
-              scale={visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055)}
+              scale={[
+                visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055),
+                visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055) * (1 - (FLATTENING[planet.name] ?? 0)),
+                visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055),
+              ]}
             >
               <sphereGeometry args={[1, 64, 64]} />
               {AIR[planet.name] ? (
