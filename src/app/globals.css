@@ -1454,10 +1454,41 @@ html.is-spinning * {
   gap: 8px;
 }
 .flight-near {
-  font: 500 11px / 1 var(--sans);
+  display: flex;
+  align-items: baseline;
+  gap: 0.9em;
+  max-width: calc(100vw - 2 * var(--pad));
+  white-space: nowrap;
+  overflow: hidden;
+  font: 400 12px / 1.2 var(--sans);
+  color: var(--text-2);
+}
+/* what is happening: small, spaced capitals */
+.flight-phase {
+  font-size: 10.5px;
+  font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-2);
+}
+/* the figures: steady digits that do not jiggle as they change */
+.flight-figure {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text-1);
+}
+/* the key that changes it: faint, and gone after a few seconds */
+.flight-key {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  transition: opacity 1.2s;
+}
+.flight-key.is-faded { opacity: 0; }
+@media (max-width: 640px) {
+  .flight-near { flex-wrap: wrap; justify-content: center; row-gap: 4px; white-space: normal; }
+  .flight-key { display: none; }
 }
 .flight-speed {
   width: 120px;
@@ -1581,14 +1612,40 @@ html.is-spinning * {
   position: absolute;
   right: var(--pad);
   bottom: 12px;
-  margin: 0;
-  max-width: 46ch;
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
   font: 400 9px / 1.4 var(--sans);
   letter-spacing: 0.02em;
   color: var(--text-3);
-  opacity: 0.7;
+  pointer-events: auto;
 }
+.flight-credit-toggle {
+  border: 0;
+  padding: 2px 0;
+  background: none;
+  font: inherit;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  opacity: 0.7;
+  cursor: pointer;
+}
+.flight-credit-toggle:hover { opacity: 1; }
+/* the full credit: above the word, while fresh, hovered or tapped open */
+.flight-credit-text {
+  margin: 0;
+  max-width: 46ch;
+  text-align: right;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.6s, transform 0.6s;
+  pointer-events: none;
+}
+.flight-credit.is-open .flight-credit-text,
+.flight-credit:hover .flight-credit-text,
+.flight-credit:focus-within .flight-credit-text { opacity: 0.8; transform: none; }
 /* named features on the ground */
 .flight-features { position: absolute; inset: 0; pointer-events: none; }
 .flight-feature {
@@ -1735,6 +1792,27 @@ html.is-photo .flight-land { opacity: 0; pointer-events: none; }
   height: 76px;
   border-radius: 50%;
   touch-action: none;
+}
+.flight-touch-land {
+  position: absolute;
+  right: var(--pad);
+  bottom: 118px;
+  padding: 0.5rem 1rem;
+  pointer-events: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: rgba(6, 8, 14, 0.45);
+  backdrop-filter: blur(6px);
+  color: var(--text-1);
+  font: 500 12px / 1 var(--sans);
+  letter-spacing: 0.06em;
+}
+/* phones: the buttons row fills the width, so Thrust sits above it */
+@media (max-width: 640px) {
+  .flight-touch-land { bottom: 172px; }
+}
+@media (max-width: 640px) {
+  .flight-thrust { bottom: 84px; }
 }
 /* the "Go to" list: every world, grouped by kind */
 /* Exit, Go to, Controls: one row, bottom left */

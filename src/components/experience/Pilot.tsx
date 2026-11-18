@@ -686,6 +686,9 @@ const _bodyPosDummy = new THREE.Vector3()
 const _bodyScaleDummy = new THREE.Vector3()
 const _markerDir = new THREE.Vector3()
 const _occluder = new THREE.Vector3()
+const _focusAt = new THREE.Vector3()
+/* spacecraft that keep by a world: the Space Station and Hubble (Earth), Perseverance (Mars) */
+const CRAFT_WORLD: Record<number, number> = { 20: 2, 21: 2, 25: 3 }
 const _camForward = new THREE.Vector3()
 
 const BODY_NAMES = Array.from({ length: BODY_COUNT + 1 }, (_, i) => getBodyName(i - 1))
@@ -1495,7 +1498,14 @@ export default function Pilot() {
     pilot.nearestRadiusKm = nearestRadius * KM_PER_UNIT
     // near a world (a planet, an asteroid, the Moon or a large moon): it
     // is the focus, and far things step back
-    pilot.focus = nearestIndex >= 0 && nearestIndex < 20 && clearance < nearestRadius * 20
+    // (a spacecraft by a world, the Space Station, Hubble, Perseverance:
+    // the focus is its world)
+    const craftWorld = CRAFT_WORLD[nearestIndex]
+    if (craftWorld !== undefined) {
+      getBodyPosition(craftWorld, simClock.jd, _focusAt)
+      const worldRadius = getBodyRadius(craftWorld)
+      pilot.focus = jet.position.distanceTo(_focusAt) - worldRadius < worldRadius * 20
+    } else pilot.focus = nearestIndex >= 0 && nearestIndex < 20 && clearance < nearestRadius * 20
     pilot.clearance = clearance
     // altitude in km, at the planets' scale (the Sun is not drawn to it)
     pilot.altitudeKm = nearestIndex >= 0 ? clearance * KM_PER_UNIT : -1

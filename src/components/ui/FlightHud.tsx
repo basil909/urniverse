@@ -8,6 +8,12 @@ import { earthToday } from '../experience/earthToday'
 
 /* the first flight's guide: three steps, shown once (remembered) */
 const GUIDE_KEY = 'urniverse-flight-guide'
+/* (on a touch screen, in its own words) */
+const GUIDE_TOUCH = [
+  'Drag to steer · hold Thrust to fly',
+  'Tap a world’s marker to warp there',
+  'Near a solid world, tap Land: the ship lands itself',
+]
 const GUIDE = [
   'Move the mouse to steer · hold W (or click) to fly',
   'Press 3, or click a world’s marker, to warp there',
@@ -298,6 +304,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [goTo, setGoTo] = useState(false)
   const [controls, setControls] = useState(false)
   const [cloudsDate, setCloudsDate] = useState('')
+  // the readout's key hint: shown when it changes, faded after a while
+  const [keyShown, setKeyShown] = useState(true)
+  const lastKey = useRef('')
+  // the sources: pinned open by a tap, or fresh (just appeared)
+  const [creditPinned, setCreditPinned] = useState(false)
+  const [creditFresh, setCreditFresh] = useState(false)
+  const lastCredit = useRef('')
   const [missionClock, setMissionClock] = useState(0)
   const goToOpen = useRef(false)
   const controlsOpen = useRef(false)
@@ -459,7 +472,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       // keep clear of the readout below and the toolbar above
       const insetX = 46
       const insetTop = 64
-      const insetBottom = 104
+      // (on narrower screens the readout sits higher: the arrows keep above it)
+      const insetBottom = width < 1100 ? 150 : 104
       const placed: { x: number; y: number; km: number; label: HTMLElement; quiet: boolean }[] = []
       // close to a world, the rest of the sky goes quiet: worlds beyond its
       // own neighbourhood (its moons, its craft) keep their mark, and their
@@ -719,6 +733,72 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     }
   }, [onLand])
 
+  // the readout: what is happening, the figures (steady, tabular), and the
+  // key that changes it (shown a few seconds, then faded)
+  const tPlus = `T+ ${Math.floor(missionClock / 60)}:${String(Math.floor(missionClock % 60)).padStart(2, '0')}`
+  const readout: { phase: string; figures: string[]; key: string } = warping
+    ? { phase: warpLine(warping), figures: [formatSpeed(kms)], key: 'S to stop' }
+    : nearest === 'the Sun' && hullK > 600
+      ? { phase: 'The Sun', figures: [`hull ${Math.round(hullK - 273).toLocaleString('en-GB')} °C`], key: hullK > 1500 ? 'the heat holds you back' : '' }
+      : orbiting
+        ? { phase: `Orbiting ${nearest}`, figures: [formatSpeed(kms), `round every ${formatPeriod(orbitMinutes)}`], key: '' }
+        : immersion > 0
+          ? {
+              phase: `Inside ${nearest}’s clouds`,
+              figures: [`${pressure < 10 ? pressure.toFixed(1) : Math.round(pressure)} bar`],
+              key: immersion > 0.9 ? 'the pressure turns you back' : '',
+            }
+          : landState === 'launching'
+            ? { phase: 'Launch', figures: [tPlus, formatAltitude(altitude), formatSpeed(kms)], key: '' }
+            : landState === 'returning'
+              ? { phase: 'Re-entry', figures: [`${Math.round(missionClock).toLocaleString('en-GB')} km to Kennedy`, formatAltitude(altitude), formatSpeed(kms)], key: '' }
+              : landState === 'descending'
+                ? { phase: `Coming down to ${nearest}`, figures: [formatAltitude(altitude), formatSpeed(kms)], key: 'W aborts' }
+                : landState === 'landing'
+                  ? altitude < 0.06
+                    ? { phase: 'Flare', figures: [groundSpeed(kms)], key: '' }
+                    : { phase: 'Final approach', figures: [formatAltitude(altitude), formatSpeed(kms)], key: 'W goes round' }
+                  : landState === 'rolling'
+                    ? { phase: 'Touchdown', figures: [groundSpeed(kms)], key: 'W takes off again' }
+                    : landState === 'lifting'
+                      ? altitude < 0.015
+                        ? { phase: 'Takeoff roll', figures: [groundSpeed(kms)], key: '' }
+                        : { phase: 'Climbing out', figures: [formatAltitude(altitude), groundSpeed(kms)], key: '' }
+                      : landState === 'landed'
+                        ? { phase: `Landed on ${nearest}`, figures: [site], key: 'hold W to take off' }
+                        : {
+                            phase: altitude >= 0 ? capital(nearest) : nearest ? `Near ${nearest}` : '',
+                            figures: [altitude >= 0 ? formatAltitude(altitude) : '', formatSpeed(kms)],
+                            key: canLand ? 'L to land' : '',
+                          }
+  readout.figures = readout.figures.filter(Boolean)
+  // (by Earth: Earth itself, or the craft that keep by it)
+  const byEarth = nearest === 'Earth' || nearest === 'Space Station' || nearest === 'Hubble'
+  const credit =
+    byEarth && altitude >= 300 && altitude < 60000 && cloudsDate
+      ? `Clouds and snow: NASA GIBS, VIIRS and MODIS of ${cloudsDate} (UTC)`
+      : nearest === 'Earth' && altitude >= 0 && altitude < 300
+        ? `Imagery: Sentinel-2 cloudless 2016 by EOX (s2maps.eu), contains modified Copernicus Sentinel data · Elevation: Terrain Tiles, AWS Open Data${cloudsDate ? ` · Clouds and snow: NASA GIBS, ${cloudsDate}` : ''}`
+        : ''
+  const creditOpen = creditPinned || creditFresh
+  // a new key hint shows for a few seconds, then fades back
+  useEffect(() => {
+    if (readout.key === lastKey.current) return
+    lastKey.current = readout.key
+    setKeyShown(true)
+    const timer = window.setTimeout(() => setKeyShown(false), 6000)
+    return () => window.clearTimeout(timer)
+  }, [readout.key])
+  // a new source shows in full for a few seconds
+  useEffect(() => {
+    if (credit === lastCredit.current) return
+    lastCredit.current = credit
+    if (!credit) return
+    setCreditFresh(true)
+    const timer = window.setTimeout(() => setCreditFresh(false), 6000)
+    return () => window.clearTimeout(timer)
+  }, [credit])
+
   return (
     <div className={`flight-hud ${landState === 'landed' ? 'is-landed' : ''} ${photo ? 'is-photo' : ''}`}>
       {toast && <p className="flight-toast">{toast}</p>}
@@ -728,7 +808,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       {guideStep >= 0 && (
         <div className="flight-guide-card" role="status">
           <span className="flight-guide-step">{guideStep + 1} / 3</span>
-          <span>{GUIDE[guideStep]}</span>
+          <span>{(touch ? GUIDE_TOUCH : GUIDE)[guideStep]}</span>
           <button
             type="button"
             onClick={() => {
@@ -787,42 +867,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
 
       <div className="flight-readout" aria-live="polite">
         <span className="flight-near">
-          {warping
-            ? [warpLine(warping), formatSpeed(kms), 'S to stop'].filter(Boolean).join(' · ')
-            : nearest === 'the Sun' && hullK > 600
-              ? `The Sun · hull ${Math.round(hullK - 273).toLocaleString('en-GB')} °C${hullK > 1500 ? ' · the heat holds you back' : ''}`
-            : orbiting
-              ? `Orbiting ${nearest} · ${formatSpeed(kms)} · once round every ${formatPeriod(orbitMinutes)}`
-            : immersion > 0
-              ? `Inside ${nearest}’s clouds · ${pressure < 10 ? pressure.toFixed(1) : Math.round(pressure)} bar${immersion > 0.9 ? ' · the pressure turns you back' : ''}`
-            : landState === 'launching'
-              ? [
-                  `Launch · T+ ${Math.floor(missionClock / 60)}:${String(Math.floor(missionClock % 60)).padStart(2, '0')}`,
-                  formatAltitude(altitude),
-                  formatSpeed(kms),
-                ].filter(Boolean).join(' · ')
-            : landState === 'returning'
-              ? [`Re-entry · ${Math.round(missionClock).toLocaleString('en-GB')} km to Kennedy`, formatAltitude(altitude), formatSpeed(kms)]
-                  .filter(Boolean)
-                  .join(' · ')
-            : landState === 'descending'
-              ? [`Coming down to ${nearest}`, formatAltitude(altitude), formatSpeed(kms), 'W aborts'].filter(Boolean).join(' · ')
-            : landState === 'landing'
-              ? altitude < 0.06
-                ? ['Flare', groundSpeed(kms)].filter(Boolean).join(' · ')
-                : [`Final approach`, formatAltitude(altitude), formatSpeed(kms), 'W goes round'].filter(Boolean).join(' · ')
-            : landState === 'rolling'
-              ? ['Touchdown · rolling out', groundSpeed(kms), 'W takes off again'].filter(Boolean).join(' · ')
-            : landState === 'lifting'
-              ? altitude < 0.015
-                ? ['Takeoff roll', groundSpeed(kms)].filter(Boolean).join(' · ')
-                : ['Climbing out', formatAltitude(altitude), groundSpeed(kms)].filter(Boolean).join(' · ')
-            : landState === 'landed'
-              ? `Landed on ${nearest} · ${site} · hold W to take off`
-                : [altitude >= 0 ? `${capital(nearest)} · ${formatAltitude(altitude)}` : `Near ${nearest}`, formatSpeed(kms)]
-                .concat(canLand ? ['L to land'] : [])
-                .filter(Boolean)
-                .join(' · ')}
+          {readout.phase && <span className="flight-phase">{readout.phase}</span>}
+          {readout.figures.map((figure) => (
+            <span key={figure} className="flight-figure">
+              {figure}
+            </span>
+          ))}
+          {readout.key && <span className={`flight-key ${keyShown ? '' : 'is-faded'}`}>{readout.key}</span>}
         </span>
         {timeScale !== 0 && <span className="flight-time">{timeLabel(timeScale)}</span>}
         <span className="flight-speed" aria-hidden="true">
@@ -830,19 +881,15 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         </span>
       </div>
 
-      {/* the clouds and snow are yesterday's real ones: say so, near Earth */}
-      {nearest === 'Earth' && altitude >= 300 && altitude < 60000 && cloudsDate && (
-        <p className="flight-credit">
-          Clouds and snow: NASA GIBS, VIIRS and MODIS of {cloudsDate} (UTC)
-        </p>
-      )}
-      {/* credit for the streamed ground data, shown while it is on screen */}
-      {nearest === 'Earth' && altitude >= 0 && altitude < 300 && (
-        <p className="flight-credit">
-          Imagery: Sentinel-2 cloudless 2016 by EOX (s2maps.eu), contains modified Copernicus Sentinel data ·
-          Elevation: Terrain Tiles, AWS Open Data
-          {cloudsDate && ` · Clouds and snow: NASA GIBS, ${cloudsDate}`}
-        </p>
+      {/* where the data on screen comes from: a quiet "Sources", in full for
+          a few seconds when it first appears, and on hover or tap */}
+      {credit && (
+        <div className={`flight-credit ${creditOpen ? 'is-open' : ''}`}>
+          <p className="flight-credit-text">{credit}</p>
+          <button type="button" className="flight-credit-toggle" onClick={() => setCreditPinned((pinned) => !pinned)}>
+            Sources
+          </button>
+        </div>
       )}
 
       <p className={`flight-hint ${hint ? '' : 'is-hidden'}`}>
@@ -861,6 +908,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           onPointerLeave={() => (pilot.touchThrust = false)}
         >
           Thrust
+        </button>
+      )}
+      {/* touch: landing, when a world is near enough (L on a keyboard) */}
+      {touch && canLand && (
+        <button type="button" className="flight-touch-land" onClick={() => (pilot.landRequest = true)}>
+          Land
         </button>
       )}
 
