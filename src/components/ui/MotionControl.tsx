@@ -65,7 +65,7 @@ export default function MotionControl() {
         className="tool-button"
         aria-pressed={real}
         aria-label={real ? 'Real motion on: turn off' : 'Real motion: run everything on one true clock'}
-        title="Real motion: orbits, Earth's day and night, the Moon's phases and the moons on one true clock"
+        data-tip={real ? 'Real motion: on' : 'Real motion'}
         onClick={toggle}
       >
         <Icon name="clock" />

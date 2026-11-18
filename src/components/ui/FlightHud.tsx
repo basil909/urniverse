@@ -304,6 +304,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [hullK, setHullK] = useState(0)
   const [goTo, setGoTo] = useState(false)
   const [controls, setControls] = useState(false)
+  // the Go to search: what is typed, and which match Enter takes
+  const [query, setQuery] = useState('')
+  const [pick, setPick] = useState(0)
   const [cloudsDate, setCloudsDate] = useState('')
   // the readout's key hint: shown when it changes, faded after a while
   const [keyShown, setKeyShown] = useState(true)
@@ -315,6 +318,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [missionClock, setMissionClock] = useState(0)
   const goToOpen = useRef(false)
   const controlsOpen = useRef(false)
+  useEffect(() => {
+    if (!goTo) {
+      setQuery('')
+      setPick(0)
+    }
+  }, [goTo])
   useEffect(() => {
     goToOpen.current = goTo
     controlsOpen.current = controls
@@ -414,7 +423,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setGuideStep((step) => {
         if (step < 0) return step
         if (step === 0 && pilot.kms > 0.5 && (Math.abs(pilot.steer.x) > 0.15 || Math.abs(pilot.steer.y) > 0.15)) return 1
-        if (step === 1 && pilot.warping) return 2
+        // (warping straight away skips the steering step)
+        if (step <= 1 && pilot.warping) return 2
         if (step === 2 && pilot.landState === 'landed') {
           try {
             localStorage.setItem(GUIDE_KEY, 'done')
@@ -561,6 +571,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
 
     const key = (event: KeyboardEvent) => event.key.toLowerCase()
     const onKeyDown = (event: KeyboardEvent) => {
+      // typing in the Go to search: letters are letters, not controls
+      if ((event.target as HTMLElement | null)?.tagName === 'INPUT' && event.key !== 'Escape') return
       if (event.key === 'Escape') {
         if (goToOpen.current) setGoTo(false)
         else if (controlsOpen.current) setControls(false)
@@ -773,6 +785,15 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
                             key: canLand ? 'L to land' : '',
                           }
   readout.figures = readout.figures.filter(Boolean)
+  const needle = query.trim().toLowerCase()
+  const matches = needle
+    ? WORLDS.filter(
+        (world) =>
+          world.name.toLowerCase().includes(needle) ||
+          world.what.toLowerCase().includes(needle) ||
+          (world.parent !== undefined && PARENT_NAMES[world.parent].toLowerCase().includes(needle)),
+      ).slice(0, 10)
+    : []
   // (by Earth: Earth itself, or the craft that keep by it)
   const byEarth = nearest === 'Earth' || nearest === 'Space Station' || nearest === 'Hubble'
   const credit =
@@ -866,20 +887,42 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         ))}
       </div>
 
+      {/* the instruments: what is happening, its figures, the speed
+          (the bar: how hard the engines are pushing), the key to act */}
       <div className="flight-readout" aria-live="polite">
-        <span className="flight-near">
-          {readout.phase && <span className="flight-phase">{readout.phase}</span>}
-          {readout.figures.map((figure) => (
-            <span key={figure} className="flight-figure">
-              {figure}
-            </span>
-          ))}
-          {readout.key && <span className={`flight-key ${keyShown ? '' : 'is-faded'}`}>{readout.key}</span>}
-        </span>
-        {timeScale !== 0 && <span className="flight-time">{timeLabel(timeScale)}</span>}
+        <div className="fr-top">
+          {readout.phase && <span className="fr-phase">{readout.phase}</span>}
+          {timeScale !== 0 && <span className="fr-time">{timeLabel(timeScale)}</span>}
+        </div>
+        {readout.figures.length > 0 && (
+          <div className="fr-figures">
+            {readout.figures.map((figure) => (
+              <span key={figure} className="fr-figure">
+                {figure}
+              </span>
+            ))}
+          </div>
+        )}
         <span className="flight-speed" aria-hidden="true">
           <span style={{ transform: `scaleX(${Math.max(0.02, speed)})` }} />
         </span>
+        {readout.key && (
+          <span className={`fr-key ${keyShown ? '' : 'is-faded'}`}>
+            {(() => {
+              // "L to land" -> a key-cap, then the words
+              const match = readout.key.match(/^([A-Z]|hold [A-Z]|S|W|L)\b(.*)$/)
+              if (!match) return readout.key
+              const cap = match[1].replace(/^hold /, '')
+              return (
+                <>
+                  {match[1].startsWith('hold') ? 'hold ' : ''}
+                  <kbd>{cap}</kbd>
+                  {match[2]}
+                </>
+              )
+            })()}
+          </span>
+        )}
       </div>
 
       {/* where the data on screen comes from: a quiet "Sources", in full for
@@ -938,6 +981,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           <Icon name="compass" />
           Go to <kbd>G</kbd>
         </button>
+        {/* (the keys: not for a touch screen) */}
+        {!touch && (
         <button
           type="button"
           className={`flight-goto-button ${controls ? 'is-open' : ''}`}
@@ -950,6 +995,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           <Icon name="keys" />
           Controls <kbd>H</kbd>
         </button>
+        )}
       </div>
       {controls && (
         <div className="flight-controls" role="dialog" aria-label="Controls">
@@ -974,6 +1020,62 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       )}
       {goTo && (
         <nav className="flight-goto" aria-label="Go to">
+          <div className="flight-search">
+            <Icon name="compass" />
+            <input
+              type="search"
+              autoFocus
+              placeholder="Search planets, moons, craft, stars…"
+              aria-label="Search places to warp to"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setPick(0)
+              }}
+              onKeyDown={(event) => {
+                if (!matches.length) return
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setPick((at) => (at + (event.key === 'ArrowDown' ? 1 : -1) + matches.length) % matches.length)
+                } else if (event.key === 'Enter') {
+                  event.preventDefault()
+                  pilot.warpRequest = matches[Math.min(pick, matches.length - 1)].index
+                  setGoTo(false)
+                }
+              }}
+            />
+            <kbd>Esc</kbd>
+          </div>
+          {query.trim() ? (
+            <ul className="flight-results" role="listbox" aria-label="Matches">
+              {matches.length === 0 && <li className="flight-results-none">Nothing by that name</li>}
+              {matches.map((world, i) => (
+                <li key={world.name}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={i === pick}
+                    className={i === pick ? 'is-picked' : ''}
+                    data-kind={world.kind}
+                    onMouseEnter={() => setPick(i)}
+                    onClick={() => {
+                      pilot.warpRequest = world.index
+                      setGoTo(false)
+                    }}
+                  >
+                    <Glyph kind={world.kind} />
+                    <span className="flight-results-name">
+                      {world.name}
+                      {world.parent !== undefined && <small>{PARENT_NAMES[world.parent]}</small>}
+                    </span>
+                    <span className="flight-results-what">{world.what}</span>
+                    {i === pick && <kbd>↵</kbd>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+          <>
           <section className="flight-goto-missions">
             <h3>Shuttle missions</h3>
             <div>
@@ -1028,6 +1130,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
               ))}
             </div>
           ))}
+          </>
+          )}
         </nav>
       )}
     </div>

@@ -1243,8 +1243,8 @@ export default function Journey() {
             type="button"
             className="tool-button"
             aria-pressed={flying}
-            aria-label={flying ? 'Land the jet' : 'Fly through space in a small jet'}
-            title={flying ? 'Land' : 'Fly'}
+            aria-label={flying ? 'Leave flight' : 'Fly the Shuttle anywhere'}
+            data-tip={flying ? 'Leave flight' : 'Fly the Shuttle'}
             onClick={() => (flying ? land() : takeOff())}
           >
             <Icon name="shuttle" />
