@@ -264,10 +264,19 @@ export class GroundModel {
   readonly roughRadii: number
   readonly detailFreq: number
 
+  private loading = false
+
   constructor(readonly config: GroundConfig) {
     this.reliefRadii = config.reliefKm / config.radiusKm
     this.roughRadii = config.roughKm / config.radiusKm
     this.detailFreq = config.radiusKm / DETAIL_KM
+  }
+
+  /** fetch the maps (once): only when a ship heads for this world */
+  load() {
+    if (this.loading) return
+    this.loading = true
+    const config = this.config
     Promise.all([
       config.heightMap ? loadSampler(config.heightMap) : Promise.resolve(null),
       config.seaMap ? loadSampler(config.seaMap) : Promise.resolve(null),

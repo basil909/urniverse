@@ -87,13 +87,22 @@ const SHIP_M = 37.24
    tube, Webb's 21 m sunshield, Voyager, Perseverance. Hidden when the
    world below stands between them and the camera.
 ============================================================ */
+/* the models' loader: one Draco decoder (its workers and WebAssembly made
+   once, not per model), and a loading manager of its own, so models
+   fetched in flight never hold up the loading screen */
+const modelManager = new THREE.LoadingManager()
+let sharedDraco: DRACOLoader | null = null
+function modelLoader() {
+  sharedDraco ??= new DRACOLoader(modelManager).setDecoderPath('/draco/')
+  return new GLTFLoader(modelManager).setDRACOLoader(sharedDraco)
+}
+
 const craftModels = new Map<string, Promise<THREE.Object3D>>()
 function loadModel(url: string) {
   let pending = craftModels.get(url)
   if (!pending) {
     pending = new Promise((resolve, reject) => {
-      const draco = new DRACOLoader().setDecoderPath('/draco/')
-      new GLTFLoader().setDRACOLoader(draco).load(
+      modelLoader().load(
         url,
         (gltf) => {
           // centred, one unit across at its widest
@@ -979,15 +988,41 @@ type ShuttleModel = {
   boosters: { mesh: THREE.Mesh; nozzle: THREE.Vector3; radius: number }[]
 }
 
+/* the Shuttle is fetched only once it may be wanted: the moment you fly,
+   or once the page has settled and the browser is idle (most visits
+   never fly, and the loading screen should not wait on 1 MB of model) */
+const SHUTTLE_IDLE_AFTER_MS = 5000
+function whenShuttleWanted(start: () => void) {
+  let started = false
+  let idle = false
+  const begin = () => {
+    if (started) return
+    started = true
+    window.clearInterval(watch)
+    window.clearTimeout(settle)
+    start()
+  }
+  const watch = window.setInterval(() => {
+    if (pilot.active || idle) begin()
+  }, 200)
+  const settle = window.setTimeout(() => {
+    if ('requestIdleCallback' in window) window.requestIdleCallback(() => (idle = true), { timeout: 4000 })
+    else idle = true
+  }, SHUTTLE_IDLE_AFTER_MS)
+  return () => {
+    started = true
+    window.clearInterval(watch)
+    window.clearTimeout(settle)
+  }
+}
+
 function useShuttle() {
   const [model, setModel] = useState<ShuttleModel | null>(null)
   useEffect(() => {
     let cancelled = false
     let built: ShuttleModel | null = null
     // NASA's file is Draco-compressed: three.js's own decoder, served from /draco/
-    const draco = new DRACOLoader().setDecoderPath('/draco/')
-    const loader = new GLTFLoader().setDRACOLoader(draco)
-    loader.load(
+    const stopWaiting = whenShuttleWanted(() => modelLoader().load(
       SHUTTLE_URL,
       (gltf) => {
         if (cancelled) return
@@ -1161,10 +1196,10 @@ function useShuttle() {
         // keep the built-in jet
         console.warn('Shuttle model could not be loaded:', error)
       },
-    )
+    ))
     return () => {
       cancelled = true
-      draco.dispose()
+      stopWaiting()
       built?.body.geometry.dispose()
       ;(built?.body.material as THREE.Material | undefined)?.dispose()
     }

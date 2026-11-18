@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "urniverse", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 }
+    { "name": "urniverse", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3000 },
+    { "name": "urniverse-prod", "runtimeExecutable": "npx", "runtimeArgs": ["next", "start", "-p", "3100"], "port": 3100 }
   ]
 }

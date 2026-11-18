@@ -65,6 +65,7 @@ import Belts from './Belts'
 import Comet from './Comet'
 import Cutaway from './Cutaway'
 import { cutaway } from './cutawayState'
+import { BitmapTextureLoader } from './textures'
 import {
   SHARP_EARTH_MAPS,
   SHARP_PLANET_MAPS,
@@ -2329,7 +2330,7 @@ function Planet({
       }
     }
 
-    const loader = new THREE.TextureLoader()
+    const loader = new BitmapTextureLoader()
     loader.setCrossOrigin('anonymous')
 
     loader.load(
@@ -2387,7 +2388,7 @@ function Planet({
     if (!relief) return
     let disposed = false
     let owned: THREE.Texture | null = null
-    new THREE.TextureLoader().load(relief.url, (texture) => {
+    new BitmapTextureLoader().load(relief.url, (texture) => {
       if (disposed) {
         texture.dispose()
         return
@@ -2440,7 +2441,7 @@ function Planet({
     }
 
     let cancelled = false
-    const loader = new THREE.TextureLoader()
+    const loader = new BitmapTextureLoader()
     loader.setCrossOrigin('anonymous')
     const owned: THREE.Texture[] = []
 
@@ -3115,7 +3116,7 @@ function Moon({ sharp }: { sharp: boolean }) {
 
   useEffect(() => {
     let cancelled = false
-    const loader = new THREE.TextureLoader()
+    const loader = new BitmapTextureLoader()
     loader.setCrossOrigin('anonymous')
     const owned: THREE.Texture[] = []
 
@@ -3306,7 +3307,7 @@ function MoonSystem({
   // loading screen's progress mid-render)
   const [moonMaps, setMoonMaps] = useState<(THREE.Texture | null)[]>([])
   useEffect(() => {
-    const loader = new THREE.TextureLoader()
+    const loader = new BitmapTextureLoader()
     const maps = system.moons.map((moon) => {
       if (!moon.map) return null
       const texture = loader.load(moon.map)
@@ -3672,7 +3673,7 @@ function SaturnRing({
     let disposed = false
     let loadedTexture: THREE.Texture | null = null
 
-    new THREE.TextureLoader().load(SATURN_RING_TEXTURE, (texture) => {
+    new BitmapTextureLoader().load(SATURN_RING_TEXTURE, (texture) => {
       if (disposed) {
         texture.dispose()
         return

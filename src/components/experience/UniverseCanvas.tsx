@@ -11,7 +11,7 @@ import {
 } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { PerformanceMonitor, useProgress } from '@react-three/drei'
-import { memo, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from 'react'
+import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from 'react'
 import * as THREE from 'three'
 
 import SolarSystem from './SolarSystem'
@@ -28,6 +28,7 @@ import { lens } from './lens'
 import Pilot, { GroundCarry } from './Pilot'
 import NearStars, { skyHandOver } from './NearStars'
 import FocusCull from './FocusCull'
+import { drainTextures, textureLoader } from './textures'
 import { getShipPass } from './shipLayer'
 import { LowResLayer, PerfMeter } from './PerfMeter'
 import { pilot } from './pilotState'
@@ -967,12 +968,23 @@ function WarmUp() {
   const camera = useThree((state) => state.camera)
   const { active, loaded, total } = useProgress()
   const warmedAt = useRef(-1)
+  // textures still to send up: a few a frame (about one 2K map's worth),
+  // never the lot in one frame
+  const warmQueue = useMemo<THREE.Texture[]>(() => [], [])
+  // warm-ups still waiting on their shaders (the scene is held back)
+  const holds = useRef(0)
+  useFrame(() => {
+    drainTextures()
+    let pixels = 0
+    while (warmQueue.length && pixels < 2048 * 2048) {
+      const texture = warmQueue.shift()!
+      const image = texture.image as { width?: number; height?: number } | null
+      pixels += Math.max(1, (image?.width ?? 1) * (image?.height ?? 1))
+      gl.initTexture(texture)
+    }
+  })
 
-  useEffect(() => {
-    if (active || total === 0 || warmedAt.current === loaded) return
-    warmedAt.current = loaded
-
-    const warm = () => {
+  const warm = useCallback(() => {
       const hidden: THREE.Object3D[] = []
       scene.traverse((object) => {
         if (!object.visible) {
@@ -981,13 +993,30 @@ function WarmUp() {
         }
       })
 
-      gl.compile(scene, camera)
+      // compiled side by side in the background (KHR_parallel_shader_compile).
+      // A program is only free if nothing draws with it before it is ready,
+      // so while the loading screen is still up the scene is held back
+      // until they all are (at most a couple of seconds); later warm-ups
+      // just compile ahead
+      const compiling = gl.compileAsync(scene, camera)
+      if (!lens.revealed) {
+        holds.current += 1
+        let released = false
+        const release = () => {
+          if (released) return
+          released = true
+          holds.current -= 1
+          if (holds.current === 0) scene.visible = true
+        }
+        compiling.then(release, release)
+        window.setTimeout(release, 2500)
+      }
 
       const seen = new Set<THREE.Texture>()
       const upload = (value: unknown) => {
         if (value instanceof THREE.Texture && !seen.has(value)) {
           seen.add(value)
-          gl.initTexture(value)
+          warmQueue.push(value)
         }
       }
       scene.traverse((object) => {
@@ -1003,13 +1032,27 @@ function WarmUp() {
       hidden.forEach((object) => {
         object.visible = false
       })
-    }
+      if (holds.current > 0) scene.visible = false
+  }, [gl, scene, camera, warmQueue])
+
+  // the very first frame too: compiled in parallel before anything draws.
+  // And in the built site, no reading back of each shader's compile log on
+  // its first use (some 5 ms a shader, 40-odd shaders): that check is for
+  // finding mistakes while developing
+  useLayoutEffect(() => {
+    if (process.env.NODE_ENV === 'production') gl.debug.checkShaderErrors = false
+    warm()
+  }, [warm, gl])
+
+  useEffect(() => {
+    if (active || total === 0 || warmedAt.current === loaded) return
+    warmedAt.current = loaded
 
     warm()
     // Earth's material rebuilds as its maps arrive: warm again after that
     const again = window.setTimeout(warm, 400)
     return () => window.clearTimeout(again)
-  }, [active, loaded, total, gl, scene, camera])
+  }, [active, loaded, total, warm])
 
   return null
 }
@@ -1198,7 +1241,7 @@ function MilkyWaySky({
   useEffect(() => {
     let disposed = false
     let loaded: THREE.Texture | null = null
-    new THREE.TextureLoader().load(SKY_TEXTURE, (texture) => {
+    textureLoader.load(SKY_TEXTURE, (texture) => {
       if (disposed) {
         texture.dispose()
         return

@@ -13,6 +13,7 @@ import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, shipShadow } from
 import { CLOUD_GLSL, cloudVolume } from './clouds'
 import { earthToday } from './earthToday'
 import { earthEclipse, MOON_SHADOW_GLSL } from './eclipse'
+import { textureLoader } from './textures'
 
 /* The patch of ground under the ship (see groundState.ts). A child of the
    planet's sphere, so it turns with it; its vertices are placed on the
@@ -344,18 +345,27 @@ export default function Terrain({
     texture.wrapS = THREE.RepeatWrapping
     return texture
   }, [config])
+  // the ground's maps are fetched only when a ship heads for this world
+  // (not at the start: most visits never land)
+  const reliefAsked = useRef<THREE.Texture | null>(null)
+  const unmounted = useRef(false)
   useEffect(() => {
-    if (!reliefTexture) return
-    let cancelled = false
-    new THREE.ImageLoader().load(config.heightMap ?? config.seaMap!, (image) => {
-      if (cancelled) return
-      reliefTexture.image = image
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+    }
+  }, [])
+  const fetchGround = () => {
+    model.load()
+    if (!reliefTexture || reliefAsked.current === reliefTexture) return
+    reliefAsked.current = reliefTexture
+    textureLoader.load(config.heightMap ?? config.seaMap!, (loaded) => {
+      if (unmounted.current || reliefAsked.current !== reliefTexture) return
+      reliefTexture.image = loaded.image
+      reliefTexture.flipY = loaded.flipY
       reliefTexture.needsUpdate = true
     })
-    return () => {
-      cancelled = true
-    }
-  }, [reliefTexture, config])
+  }
   const look = LOOK[index]
   const material = useMemo(
     () =>
@@ -425,6 +435,7 @@ export default function Terrain({
     const patch = mesh.current
     const body = patch?.parent
     if (!patch || !body) return
+    if (pilot.active && pilot.nearestIndex === index) fetchGround()
     const near = pilot.active && pilot.nearestIndex === index && model.ready
     if (near) {
       _ship.copy(pilot.shipWorld)
