@@ -8,7 +8,15 @@
 export type WorldDetail = {
   glance: { label: string; value: string }[]
   sections: { heading: string; body: string }[]
+  /* the largest or most remarkable moons */
+  moons?: { name: string; note: string }[]
   missions: { year: string; name: string; note: string }[]
+  /* the timeline's heading (default "Exploration") */
+  missionsHeading?: string
+  /* a live figure: how far it has moved since the page opened, at a mean
+     speed in km/s ({km} is filled in) */
+  travel?: { kmPerSecond: number; sentence: string }
+  source?: string
 }
 
 export const DETAIL_SOURCE =
@@ -16,6 +24,7 @@ export const DETAIL_SOURCE =
 
 export const WORLD_DETAILS: Record<string, WorldDetail> = {
   sun: {
+    travel: { kmPerSecond: 230, sentence: 'The Sun has carried the whole Solar System {km} around the galaxy since you opened this page.' },
     glance: [
       { label: 'Type', value: 'Yellow dwarf star (G2V)' },
       { label: 'Age', value: 'About 4.6 billion years' },
@@ -49,6 +58,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   mercury: {
+    travel: { kmPerSecond: 47.4, sentence: 'Mercury has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '4,879 km (0.38 Earths)' },
       { label: 'Mass', value: '0.055 Earths' },
@@ -58,6 +68,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Temperature', value: '−180 °C to 430 °C' },
       { label: 'Moons', value: 'None' },
       { label: 'Axial tilt', value: '0.03°' },
+      { label: 'Atmosphere', value: 'Almost none: a thin exosphere' },
+      { label: 'From the Sun', value: '46–70 million km' },
     ],
     sections: [
       {
@@ -81,6 +93,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   venus: {
+    travel: { kmPerSecond: 35.0, sentence: 'Venus has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '12,104 km (0.95 Earths)' },
       { label: 'Mass', value: '0.82 Earths' },
@@ -90,6 +103,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Year', value: '225 Earth days' },
       { label: 'Surface', value: '464 °C, 92 times Earth’s pressure' },
       { label: 'Moons', value: 'None' },
+      { label: 'Atmosphere', value: '96.5% carbon dioxide, 3.5% nitrogen' },
+      { label: 'From the Sun', value: '107–109 million km' },
     ],
     sections: [
       {
@@ -115,6 +130,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   earth: {
+    travel: { kmPerSecond: 29.8, sentence: 'Earth has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '12,742 km' },
       { label: 'Mass', value: '5.97 × 10²⁴ kg' },
@@ -124,6 +140,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Average temperature', value: '15 °C' },
       { label: 'Moons', value: '1' },
       { label: 'Axial tilt', value: '23.4°' },
+      { label: 'Atmosphere', value: '78% nitrogen, 21% oxygen' },
+      { label: 'From the Sun', value: '147–152 million km' },
     ],
     sections: [
       {
@@ -148,6 +166,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   mars: {
+    travel: { kmPerSecond: 24.1, sentence: 'Mars has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '6,779 km (0.53 Earths)' },
       { label: 'Mass', value: '0.11 Earths' },
@@ -157,6 +176,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Average temperature', value: 'About −65 °C' },
       { label: 'Moons', value: '2 (Phobos, Deimos)' },
       { label: 'Axial tilt', value: '25.2°' },
+      { label: 'Atmosphere', value: '95% carbon dioxide, a little nitrogen and argon' },
+      { label: 'From the Sun', value: '207–249 million km' },
     ],
     sections: [
       {
@@ -172,6 +193,10 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
         body: 'Its carbon dioxide atmosphere is less than 1% as dense as Earth’s and holds little heat. Dust storms can grow to cover the whole planet for weeks.',
       },
     ],
+    moons: [
+      { name: 'Phobos', note: 'About 22 km across, it circles Mars three times a day and is slowly spiralling inwards: in some 50 million years it will break apart or crash.' },
+      { name: 'Deimos', note: 'About 12 km across and farther out, it takes 30 hours to go round. Both moons may be captured asteroids, or debris from an ancient impact.' },
+    ],
     missions: [
       { year: '1965', name: 'Mariner 4', note: 'First close-up photos of another planet.' },
       { year: '1976', name: 'Viking 1 & 2', note: 'First successful landers; searched for signs of life.' },
@@ -183,6 +208,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   jupiter: {
+    travel: { kmPerSecond: 13.1, sentence: 'Jupiter has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '139,820 km (11 Earths)' },
       { label: 'Mass', value: '318 Earths' },
@@ -192,6 +218,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Cloud tops', value: 'About −110 °C' },
       { label: 'Moons', value: '95+ known' },
       { label: 'Axial tilt', value: '3.1°' },
+      { label: 'Atmosphere', value: 'About 90% hydrogen, 10% helium' },
+      { label: 'From the Sun', value: '741–817 million km' },
     ],
     sections: [
       {
@@ -202,10 +230,12 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
         heading: 'Storms',
         body: 'Its stripes are bands of cloud driven by powerful jet streams. The Great Red Spot is a storm wider than Earth, though it has been shrinking for more than a century.',
       },
-      {
-        heading: 'Moons',
-        body: 'Its four largest moons, discovered by Galileo in 1610, are worlds of their own: volcanic Io; Europa, with an ocean beneath its ice; Ganymede, the largest moon in the Solar System; and heavily cratered Callisto.',
-      },
+    ],
+    moons: [
+      { name: 'Io', note: 'The most volcanically active world known: Jupiter’s tides knead its interior, feeding hundreds of active volcanoes. It is one of the four large moons Galileo found in 1610.' },
+      { name: 'Europa', note: 'An ice shell over a salty ocean holding perhaps twice the water of Earth’s oceans; one of the best places to look for life.' },
+      { name: 'Ganymede', note: 'The largest moon in the Solar System, 5,268 km across: bigger than Mercury, and the only moon with its own magnetic field.' },
+      { name: 'Callisto', note: 'Its ancient surface is the most heavily cratered in the Solar System, almost unchanged for 4 billion years.' },
     ],
     missions: [
       { year: '1973', name: 'Pioneer 10', note: 'First spacecraft to fly past Jupiter.' },
@@ -217,6 +247,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   saturn: {
+    travel: { kmPerSecond: 9.7, sentence: 'Saturn has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '116,460 km (9 Earths)' },
       { label: 'Mass', value: '95 Earths' },
@@ -226,6 +257,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Cloud tops', value: 'About −140 °C' },
       { label: 'Moons', value: '274 known (2025)' },
       { label: 'Axial tilt', value: '26.7°' },
+      { label: 'Atmosphere', value: 'About 96% hydrogen, 3% helium' },
+      { label: 'From the Sun', value: '1.35–1.51 billion km' },
     ],
     sections: [
       {
@@ -236,10 +269,12 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
         heading: 'Light and fast',
         body: 'Saturn is the least dense planet, less dense than water. Its fast spin flattens it: it is about 10% wider at the equator than from pole to pole.',
       },
-      {
-        heading: 'Moons',
-        body: 'Titan, larger than Mercury, has a thick nitrogen atmosphere and lakes of liquid methane. Enceladus sprays jets of water into space from an ocean under its icy crust.',
-      },
+    ],
+    moons: [
+      { name: 'Titan', note: '5,150 km across, with a thick nitrogen atmosphere, methane rain and lakes of liquid methane and ethane. Huygens landed there in 2005.' },
+      { name: 'Enceladus', note: 'Only about 500 km across, it sprays jets of water from an ocean beneath its ice; the spray feeds Saturn’s E ring.' },
+      { name: 'Mimas', note: 'A giant crater, Herschel, a third of its width across, makes it look like the Death Star.' },
+      { name: 'Iapetus', note: 'Two-toned: one side as dark as coal, the other bright as snow.' },
     ],
     missions: [
       { year: '1979', name: 'Pioneer 11', note: 'First flyby of Saturn.' },
@@ -250,6 +285,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   uranus: {
+    travel: { kmPerSecond: 6.8, sentence: 'Uranus has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '50,724 km (4 Earths)' },
       { label: 'Mass', value: '14.5 Earths' },
@@ -259,6 +295,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Cloud tops', value: 'About −195 °C' },
       { label: 'Moons', value: '29 known (2025)' },
       { label: 'Axial tilt', value: '97.8°' },
+      { label: 'Atmosphere', value: '83% hydrogen, 15% helium, 2% methane' },
+      { label: 'From the Sun', value: '2.74–3.00 billion km' },
     ],
     sections: [
       {
@@ -274,6 +312,12 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
         body: 'It has 13 known faint, dark rings. Its moons are named after characters from Shakespeare and Alexander Pope, such as Miranda, Ariel and Titania.',
       },
     ],
+    moons: [
+      { name: 'Miranda', note: 'A patchwork of grooves and ridges, with cliffs some 20 km tall: perhaps the steepest in the Solar System.' },
+      { name: 'Ariel', note: 'The brightest of Uranus’s large moons, with a young surface cut by valleys.' },
+      { name: 'Titania', note: 'The largest moon of Uranus, 1,578 km across, scarred by huge canyons.' },
+      { name: 'Oberon', note: 'The outermost of the large moons: old, dark and heavily cratered.' },
+    ],
     missions: [
       { year: '1781', name: 'William Herschel', note: 'Discovered Uranus: the first planet found with a telescope.' },
       { year: '1986', name: 'Voyager 2', note: 'The only spacecraft to visit; found 10 new moons and 2 new rings.' },
@@ -281,6 +325,7 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
   },
 
   neptune: {
+    travel: { kmPerSecond: 5.4, sentence: 'Neptune has moved {km} along its orbit since you opened this page.' },
     glance: [
       { label: 'Diameter', value: '49,244 km (3.9 Earths)' },
       { label: 'Mass', value: '17.1 Earths' },
@@ -290,6 +335,8 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
       { label: 'Cloud tops', value: 'About −200 °C' },
       { label: 'Moons', value: '16 known (2024)' },
       { label: 'Axial tilt', value: '28.3°' },
+      { label: 'Atmosphere', value: '80% hydrogen, 19% helium, 1.5% methane' },
+      { label: 'From the Sun', value: '4.44–4.55 billion km' },
     ],
     sections: [
       {
@@ -300,14 +347,95 @@ export const WORLD_DETAILS: Record<string, WorldDetail> = {
         heading: 'Weather',
         body: 'Neptune has the fastest winds in the Solar System, over 2,000 km/h. Voyager 2 saw a Great Dark Spot, a storm about as wide as Earth, which had vanished by the time Hubble looked a few years later.',
       },
-      {
-        heading: 'Triton',
-        body: 'Its largest moon, Triton, orbits backwards, a sign it was captured from the Kuiper Belt. Voyager 2 saw plumes erupting from its frozen nitrogen surface.',
-      },
+    ],
+    moons: [
+      { name: 'Triton', note: '2,707 km across, it orbits backwards, a sign it was captured from the Kuiper Belt. Voyager 2 saw plumes erupting from its frozen nitrogen surface.' },
+      { name: 'Proteus', note: 'About 420 km across and dark as soot, one of the largest bodies in the Solar System that is not round.' },
+      { name: 'Nereid', note: 'On one of the most stretched orbits of any moon, swinging between 1.4 and 9.6 million km from Neptune.' },
     ],
     missions: [
       { year: '1846', name: 'Johann Galle', note: 'Discovered Neptune using Urbain Le Verrier’s prediction.' },
       { year: '1989', name: 'Voyager 2', note: 'The only spacecraft to visit; found 6 new moons and confirmed its rings.' },
     ],
+  },
+
+  beyond: {
+    travel: { kmPerSecond: 17, sentence: 'Voyager 1 has travelled {km} farther from home since you opened this page.' },
+    glance: [
+      { label: 'Taken', value: '14 February 1990' },
+      { label: 'From', value: 'About 6 billion km (40 AU) from the Sun' },
+      { label: 'Earth in the photo', value: '0.12 of a pixel' },
+      { label: 'Camera', value: 'Voyager 1’s narrow-angle camera' },
+      { label: 'Voyager 1 launched', value: '5 September 1977' },
+      { label: 'Speed', value: 'About 17 km/s (61,000 km/h)' },
+      { label: 'Left the heliosphere', value: 'August 2012' },
+      { label: 'Power', value: 'Plutonium, fading about 4 watts a year' },
+    ],
+    sections: [
+      {
+        heading: 'The family portrait',
+        body: 'The Pale Blue Dot is one of 60 frames Voyager 1 took that day to make a portrait of the Solar System, catching six planets. Mercury was lost in the Sun’s glare and Mars was too faint. They were the last pictures it ever took: soon afterwards its cameras were switched off to save power.',
+      },
+      {
+        heading: 'Beyond the planets',
+        body: 'Past Neptune lies the Kuiper Belt, a ring of icy bodies that includes Pluto. Farther out, the solar wind meets the gas between the stars at the heliopause, which Voyager 1 crossed in 2012 and Voyager 2 in 2018. Beyond that, the Oort Cloud of comets may reach a third of the way to the nearest star.',
+      },
+      {
+        heading: 'Voyager today',
+        body: 'Both Voyagers still send data home, though their instruments are being switched off one by one as their power fades. Each carries a Golden Record of sounds and images from Earth, in case anyone ever finds it.',
+      },
+    ],
+    missionsHeading: 'Milestones',
+    missions: [
+      { year: '1977', name: 'Voyager 1 & 2', note: 'Launched sixteen days apart, Voyager 2 first.' },
+      { year: '1990', name: 'The Pale Blue Dot', note: 'Voyager 1’s last pictures: a portrait of the Solar System.' },
+      { year: '2012', name: 'Interstellar space', note: 'Voyager 1 crosses the heliopause, the first spacecraft to do so.' },
+      { year: '2015', name: 'New Horizons', note: 'The first close look at Pluto.' },
+      { year: '2018', name: 'Voyager 2', note: 'Follows Voyager 1 into interstellar space.' },
+      { year: '2019', name: 'Arrokoth', note: 'New Horizons visits the most distant object ever explored up close.' },
+    ],
+    source: 'Figures: NASA Voyager and New Horizons mission pages.',
+  },
+
+  galaxy: {
+    travel: { kmPerSecond: 230, sentence: 'You have moved {km} around the centre of the galaxy since you opened this page.' },
+    glance: [
+      { label: 'Type', value: 'Barred spiral galaxy' },
+      { label: 'Disc', value: 'About 100,000 light-years across' },
+      { label: 'Stars', value: '100 to 400 billion' },
+      { label: 'Age', value: 'About 13.6 billion years' },
+      { label: 'Mass', value: 'About a trillion Suns, mostly dark matter' },
+      { label: 'Sun to centre', value: 'About 26,000 light-years' },
+      { label: 'Sun’s orbit', value: 'About 230 million years, at 230 km/s' },
+      { label: 'At the centre', value: 'Sagittarius A*, a black hole of 4 million Suns' },
+    ],
+    sections: [
+      {
+        heading: 'Its shape',
+        body: 'A bulge of old stars and a bar sit at the centre of a thin, flat disc, where spiral arms of gas and young stars wind outward. Around it all is a faint halo of ancient stars, globular clusters and the dark matter that holds the galaxy together.',
+      },
+      {
+        heading: 'Our place',
+        body: 'The Sun lies in the Orion Spur, a minor arm between two major ones, about halfway from the centre to the edge. We see the disc edge-on from inside it: the band of light across a dark night sky. Dust hides the centre from our eyes, but not from infrared and radio telescopes.',
+      },
+      {
+        heading: 'The centre',
+        body: 'Stars near the centre whip round an unseen mass of about 4 million Suns. Tracking them for decades proved it is a black hole, Sagittarius A*, work that won the 2020 Nobel Prize in Physics. In 2022 the Event Horizon Telescope released the first image of it.',
+      },
+      {
+        heading: 'Neighbours',
+        body: 'The Milky Way belongs to the Local Group of galaxies. The Large and Small Magellanic Clouds orbit it and can be seen from the southern hemisphere. The Andromeda Galaxy, 2.5 million light-years away, is approaching; recent studies give about even odds that the two merge within 10 billion years.',
+      },
+    ],
+    missionsHeading: 'Milestones',
+    missions: [
+      { year: '1610', name: 'Galileo Galilei', note: 'His telescope showed the Milky Way is made of countless faint stars.' },
+      { year: '1785', name: 'William Herschel', note: 'Mapped it by counting stars, and put the Sun near the centre.' },
+      { year: '1918', name: 'Harlow Shapley', note: 'Globular clusters showed the Sun is far from the centre.' },
+      { year: '1925', name: 'Edwin Hubble', note: 'Andromeda is another galaxy: the universe is far larger than ours.' },
+      { year: '2013', name: 'Gaia', note: 'ESA’s survey mapped nearly 2 billion stars in 3D before retiring in 2025.' },
+      { year: '2022', name: 'Event Horizon Telescope', note: 'The first image of the black hole at the centre.' },
+    ],
+    source: 'Figures: NASA, ESA (Gaia) and the Event Horizon Telescope collaboration.',
   },
 }

@@ -481,6 +481,15 @@ function brief(text: string) {
   return out.trim()
 }
 
+/* how the chapters beyond the planets are named in the panel and on its button */
+const PANEL_TITLE: Record<string, string> = {
+  beyond: 'The Pale Blue Dot',
+  galaxy: 'The Milky Way',
+}
+const panelTitle = (chapter: Chapter) => PANEL_TITLE[chapter.id] ?? titleCase(chapter.label)
+const moreAbout = (chapter: Chapter) =>
+  PANEL_TITLE[chapter.id] ? PANEL_TITLE[chapter.id].replace(/^The /, 'the ') : titleCase(chapter.label)
+
 const titleCase = (label: string) =>
   label
     .toLowerCase()
@@ -636,6 +645,11 @@ export default function Journey() {
   const lenisRef = useRef<Lenis | null>(null)
   const snapToRef = useRef<((index: number) => void) | null>(null)
   const progressRef = useRef(0)
+  // a glide past several chapters: their text stays down until it lands
+  const glideTargetRef = useRef<number | null>(null)
+  const updateRef = useRef<(() => void) | null>(null)
+  // stepping chapters from the panel: open it again on arrival
+  const reopenAfter = useRef(false)
 
   const frame = useRef<number | null>(null)
   const lastSection = useRef(0)
@@ -701,6 +715,7 @@ export default function Journey() {
       }
 
       snapping = true
+      glideTargetRef.current = Math.abs(target - lastRest) > 1 ? target : null
       lenis.scrollTo(to * unit(), {
         // the pull-back from the Pale Blue Dot to the galaxy takes its time
         duration:
@@ -713,6 +728,8 @@ export default function Journey() {
         onComplete: () => {
           snapping = false
           lastRest = target
+          glideTargetRef.current = null
+          updateRef.current?.()
           const now = performance.now()
           quietUntil = now + 220
           quietHardLimit = now + 1100
@@ -820,11 +837,14 @@ export default function Journey() {
       const isIntro = sectionIndex === 0
       const isReturn = sectionIndex === TOTAL_SECTIONS - 1
 
-      const nextTextOn = isIntro
-        ? local < 0.85
-        : isReturn
-          ? local >= TEXT_IN
-          : local >= TEXT_IN && local < TEXT_OUT
+      const gliding = glideTargetRef.current !== null && glideTargetRef.current !== sectionIndex
+      const nextTextOn = gliding
+        ? false
+        : isIntro
+          ? local < 0.85
+          : isReturn
+            ? local >= TEXT_IN
+            : local >= TEXT_IN && local < TEXT_OUT
 
       if (nextTextOn !== lastTextOn.current) {
         lastTextOn.current = nextTextOn
@@ -837,6 +857,7 @@ export default function Journey() {
       frame.current = window.requestAnimationFrame(updateScroll)
     }
 
+    updateRef.current = updateScroll
     window.addEventListener('scroll', handleScroll, {
       passive: true,
     })
@@ -920,6 +941,13 @@ export default function Journey() {
   }, [section])
 
   useEffect(() => {
+    // arrived where the panel's Previous / Next was taking us: open it again
+    const chapter = section >= 1 && section <= JOURNEY.length ? JOURNEY[section - 1] : null
+    if (reopenAfter.current && textOn && chapter && WORLD_DETAILS[chapter.id]) {
+      reopenAfter.current = false
+      setDetailOpen(true)
+      return
+    }
     setDetailOpen(false)
   }, [section, textOn])
 
@@ -944,6 +972,16 @@ export default function Journey() {
   // planets only (not the Sun): these can be dragged to spin
   const canSpin = textOn && active >= 1 && active <= 8
   const planetName = activeChapter ? titleCase(activeChapter.label) : ''
+  const stepTo = (chapterIndex: number) => {
+    reopenAfter.current = true
+    goToSection(chapterIndex + 1)
+  }
+  const panelStep = (chapterIndex: number) => {
+    const chapter = JOURNEY[chapterIndex]
+    return chapter && WORLD_DETAILS[chapter.id]
+      ? { name: panelTitle(chapter), go: () => stepTo(chapterIndex) }
+      : undefined
+  }
   // this chapter's world, if it is a planet you can fly to
   const flyTarget = activeChapter ? PLANET_INDEX[activeChapter.id] : undefined
   const scale = activeChapter ? scaleSentence(activeChapter.id, planetName) : null
@@ -971,7 +1009,11 @@ export default function Journey() {
 
       <DetailPanel
         open={detailOpen}
-        name={planetName}
+        name={activeChapter ? panelTitle(activeChapter) : ''}
+        eyebrow={activeChapter ? `${chapterNo(active + 1)} · About` : 'About'}
+        sky={activeChapter?.id === 'galaxy' ? 'galaxy' : activeChapter?.id === 'beyond' ? 'distances' : undefined}
+        previous={active > 0 ? panelStep(active - 1) : undefined}
+        next={active >= 0 ? panelStep(active + 1) : undefined}
         detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
         onClose={() => setDetailOpen(false)}
         description={activeChapter?.description}
@@ -1252,7 +1294,7 @@ export default function Journey() {
                     onClick={() => setDetailOpen(true)}
                     aria-expanded={detailOpen}
                   >
-                    More about {planetName}
+                    More about {moreAbout(activeChapter)}
                     <span aria-hidden="true">+</span>
                   </button>
                 )}

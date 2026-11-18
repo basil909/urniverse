@@ -323,6 +323,21 @@ export function getPlanetEclipticAU(index: number, jd: number): [number, number]
   return eclipticPoint(orbit, E)
 }
 
+/** The planet's heliocentric position in AU (ecliptic x, y, z): for true
+ * distances, such as from Earth today. */
+export function getPlanetHeliocentricAU(index: number, jd: number): [number, number, number] {
+  const orbit = orbitAt(index, jd)
+  if (!orbit) return [0, 0, 0]
+  const E = solveKepler(orbit.meanAnomaly, orbit.e)
+  const xp = orbit.a * (Math.cos(E) - orbit.e)
+  const yp = orbit.a * Math.sqrt(1 - orbit.e * orbit.e) * Math.sin(E)
+  return [
+    orbit.px[0] * xp + orbit.qx[0] * yp,
+    orbit.px[1] * xp + orbit.qx[1] * yp,
+    orbit.px[2] * xp + orbit.qx[2] * yp,
+  ]
+}
+
 export function getPlanetOrbitPathAU(index: number, jd: number, samples = 96): [number, number][] {
   const orbit = orbitAt(index, jd)
   if (!orbit) return []

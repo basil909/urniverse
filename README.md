@@ -18,7 +18,7 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - **Real planet surfaces.** Photographic texture maps for every planet, Saturn's rings with real gaps, Earth with clouds, city lights and its Moon. Each planet has a hand-written shader fallback.
 - **Sharp close-ups.** Once the camera arrives at a planet, 4K maps of it are decoded off the main thread and swapped in, one upload at a time; they are released when you move on, so only one planet's sharp maps are ever in memory. Phones keep the lighter 2K maps.
 - **Drawn to scale.** The panel shows each world beside Earth (Earth beside the Moon) to scale, and the Solar System from above with where it and Earth are today.
-- **Deep dives.** "More about" opens a panel for the Sun and each planet: key figures, what it is made of, what makes it unusual, and a timeline of the missions that explored it.
+- **Deep dives.** "More about" opens a panel for the Sun, each planet, the Pale Blue Dot and the Milky Way: key figures (with each planet's air and its distance from the Sun), what makes it unusual, its best-known moons, and a timeline of the missions or discoveries. "Right now" works out where the world is today (its distance from Earth and from the Sun, and how long its light takes to reach us; for the Pale Blue Dot, Voyager 1's distance and the day-long signal), and counts how far it has moved since you opened the page. The Pale Blue Dot has a ladder of distances out to the nearest star, the Milky Way a sketch of the galaxy from above with the Sun marked. A bar keeps the name and close at hand as you read, and Previous / Next at the foot fly on to the neighbouring chapter and open its panel when you arrive.
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
 - **A Pale Blue Dot finale.** From beyond Neptune the camera looks back through a long lens at Earth, a single speck beside the Sun's glare, as Voyager 1 saw it in 1990. Then a long pull-back: the lens opens, the Solar System collapses to a point, and a "You are here" marker appears on a spiral arm of the Milky Way.
 - **Quiet, editorial interface.** Two typefaces, a slim chapter rail and a hairline progress bar; the planet is always the hero.
@@ -114,7 +114,9 @@ src/
    ├─ Journey.tsx         Chapter content, scroll model, pinned text stage, HUD
    ├─ ui/
    │  ├─ Loader.tsx       Loading screen (tracks three.js texture loading)
-   │  └─ DetailPanel.tsx  The "More about" deep-dive panel
+   │  ├─ DetailPanel.tsx  The "More about" deep-dive panel
+   │  ├─ WorldLive.tsx    Its "Right now" figures, worked out live
+   │  └─ SkyGraphics.tsx  The galaxy sketch and the distance ladder
    └─ experience/
       ├─ UniverseCanvas.tsx  Canvas, camera choreography, post-processing
       ├─ SolarSystem.tsx     Sun, planets, rings, Moon, shaders, drag-to-rotate, markers

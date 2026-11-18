@@ -1,32 +1,43 @@
 'use client'
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { DETAIL_SOURCE, type WorldDetail } from '../../data/worlds'
 import type { Layer } from '../../data/interiors'
 import WorldGraphics from './WorldGraphics'
+import WorldLive from './WorldLive'
+import { DistanceLadder, GalaxyMap } from './SkyGraphics'
 
 /* A quiet, scrollable deep-dive for the current world. It sits over the
    text column, scrolls on its own (data-lenis-prevent keeps the page
-   from gliding while you read), and closes with Esc or the close button. */
+   from gliding while you read), and closes with Esc or the close button,
+   which stays at hand as you scroll. At the foot, the neighbouring
+   chapters: the journey flies on and the panel opens again on arrival. */
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1]
+
+export type PanelStep = { name: string; go: () => void }
 
 export default function DetailPanel({
   open,
   name,
+  eyebrow = 'About',
   detail,
   onClose,
   inside,
   onToggleInside,
   layers,
   worldIndex,
+  sky,
   description,
   scaleNote,
+  previous,
+  next,
 }: {
   open: boolean
   name: string
+  eyebrow?: string
   detail: WorldDetail | null
   onClose: () => void
   /* the planet shown cut open (only planets have this) */
@@ -38,11 +49,17 @@ export default function DetailPanel({
   scaleNote?: string
   /* orbit index for the drawings (-1: the Sun); none for other chapters */
   worldIndex?: number
+  /* the chapters beyond the planets: their own drawing and live figures */
+  sky?: 'distances' | 'galaxy'
+  previous?: PanelStep
+  next?: PanelStep
 }) {
   const closeButton = useRef<HTMLButtonElement>(null)
+  const [scrolled, setScrolled] = useState(false)
 
   useEffect(() => {
     if (!open) return
+    setScrolled(false)
     // after the panel has mounted and started animating in
     const focusTimer = window.setTimeout(
       () => closeButton.current?.focus({ preventScroll: true }),
@@ -56,26 +73,46 @@ export default function DetailPanel({
       window.clearTimeout(focusTimer)
       window.removeEventListener('keydown', onKey)
     }
-  }, [open, onClose])
+  }, [open, onClose, name])
+
+  const live = sky === 'distances' ? 'voyager' : sky === 'galaxy' ? undefined : worldIndex
 
   return (
     <AnimatePresence>
       {open && detail && (
         <motion.aside
           key={name}
-          className="detail-panel"
+          className={`detail-panel ${scrolled ? 'is-scrolled' : ''}`}
           role="dialog"
           aria-modal="false"
           aria-labelledby="detail-title"
           data-lenis-prevent
+          onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 110)}
           initial={{ opacity: 0, x: 40 }}
           animate={{ opacity: 1, x: 0 }}
           exit={{ opacity: 0, x: 30 }}
           transition={{ duration: 0.5, ease: EASE }}
         >
+          {/* a slim bar with the name and close, once the title has
+              scrolled away */}
+          <div className="detail-bar" aria-hidden={!scrolled}>
+            <div className="detail-bar-inner">
+              <span className="detail-bar-name">{name}</span>
+              <button
+                type="button"
+                className="detail-close"
+                onClick={onClose}
+                tabIndex={scrolled ? 0 : -1}
+                aria-label={`Close details about ${name}`}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
           <div className="detail-head">
             <div>
-              <div className="detail-eyebrow">About</div>
+              <div className="detail-eyebrow">{eyebrow}</div>
               <h2 id="detail-title" className="detail-title">
                 {name}
               </h2>
@@ -117,6 +154,10 @@ export default function DetailPanel({
 
           {description && <p className="detail-lede">{description}</p>}
 
+          <WorldLive where={live} name={name} travel={detail.travel} />
+
+          {sky === 'galaxy' && <GalaxyMap />}
+          {sky === 'distances' && <DistanceLadder />}
           {worldIndex !== undefined && <WorldGraphics index={worldIndex} name={name} />}
           {scaleNote && <p className="detail-scale">{scaleNote}</p>}
 
@@ -136,8 +177,22 @@ export default function DetailPanel({
             </section>
           ))}
 
+          {detail.moons && (
+            <section className="detail-section">
+              <h3>{detail.moons.length === 1 ? 'Its moon' : 'Moons to know'}</h3>
+              <ul className="detail-moons">
+                {detail.moons.map((moon) => (
+                  <li key={moon.name}>
+                    <b>{moon.name}</b>
+                    {moon.note}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="detail-section">
-            <h3>Exploration</h3>
+            <h3>{detail.missionsHeading ?? 'Exploration'}</h3>
             <ol className="detail-missions">
               {detail.missions.map((mission) => (
                 <li key={`${mission.year}-${mission.name}`}>
@@ -151,7 +206,32 @@ export default function DetailPanel({
             </ol>
           </section>
 
-          <p className="detail-source">{DETAIL_SOURCE}</p>
+          {(previous || next) && (
+            <nav className="detail-steps" aria-label="Neighbouring chapters">
+              {previous ? (
+                <button type="button" onClick={previous.go}>
+                  <span aria-hidden="true">←</span>
+                  <span>
+                    <small>Previous</small>
+                    {previous.name}
+                  </span>
+                </button>
+              ) : (
+                <span />
+              )}
+              {next && (
+                <button type="button" className="is-next" onClick={next.go}>
+                  <span>
+                    <small>Next</small>
+                    {next.name}
+                  </span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              )}
+            </nav>
+          )}
+
+          <p className="detail-source">{detail.source ?? DETAIL_SOURCE}</p>
         </motion.aside>
       )}
     </AnimatePresence>
