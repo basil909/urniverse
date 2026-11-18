@@ -1055,9 +1055,18 @@ void main() {
 
 
 
+/* One shader source, compiled once per planet: which planet (PLANET) and
+   its kind (PLANET_TYPE) are set as #defines, so each planet's program
+   holds only its own surface. As a single program choosing by uniforms
+   it held all seven, and Chrome and Edge on Windows (whose WebGL runs on
+   Direct3D) took some 21 s to compile it on a first visit, freezing the
+   page if a planet was drawn before it was done. Now the giants' take
+   about 3 s each, compiled side by side. */
 const PLANET_FRAGMENT_SHADER = /* glsl */ `
 
-uniform float uTime; uniform int uType; uniform int uPlanet; uniform vec3 uBaseColor; uniform vec3 uAtmosphereColor; uniform vec3 uSunPosition; uniform sampler2D uMap; uniform float uHasMap;
+#define uPlanet PLANET
+#define uType PLANET_TYPE
+uniform float uTime; uniform vec3 uBaseColor; uniform vec3 uAtmosphereColor; uniform vec3 uSunPosition; uniform sampler2D uMap; uniform float uHasMap;
 
 /* shadows (all in world space) */
 uniform vec3 uMoonPos[4]; uniform float uMoonRadius[4]; uniform int uMoonCount;
@@ -1075,9 +1084,11 @@ float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2
 
 float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += noise(p) * a; p = p * 2.03 + vec3(1.7, 9.2, 3.1); a *= 0.5; } return v; }
 
+#if PLANET == 0 || PLANET == 3
 /* crater-ish field: sharp-rimmed bowls from cellular-like noise */
 float craters(vec3 p) { float n = noise(p); float r = abs(n - 0.5) * 2.0; return smoothstep(0.75, 0.98, 1.0 - r); }
 
+#if PLANET == 0
 /* ---------- MERCURY: grey, heavily cratered regolith ---------- */
 vec3 mercury(vec3 p) {
   float base = fbm(p * 2.4);
@@ -1090,7 +1101,10 @@ vec3 mercury(vec3 p) {
   col += vec3(0.08) * smoothstep(0.82, 0.95, detail);
   return col;
 }
+#endif
 
+#endif
+#if PLANET == 1
 /* ---------- VENUS: thick sulfuric cloud deck, soft swirls ---------- */
 vec3 venus(vec3 p) {
   vec3 q = p * 2.2 + vec3(uTime * 0.012, 0.0, 0.0);
@@ -1104,6 +1118,8 @@ vec3 venus(vec3 p) {
   return mix(deep, cream, smoothstep(0.30, 0.78, t));
 }
 
+#endif
+#if PLANET == 3
 /* ---------- MARS: rust plains, dark basalt, polar caps ---------- */
 vec3 mars(vec3 p) {
   float continents = fbm(p * 1.8);
@@ -1120,6 +1136,8 @@ vec3 mars(vec3 p) {
   return col;
 }
 
+#endif
+#if PLANET >= 4 || PLANET == 2
 /* ---------- shared gas-giant banding with domain warp ---------- */
 float bands(vec3 p, float freq, float warp, float speed) {
   vec3 q = p * 2.6 + vec3(uTime * speed, 0.0, 0.0);
@@ -1131,6 +1149,8 @@ float bands(vec3 p, float freq, float warp, float speed) {
   return b1 * 0.55 + b2 * 0.25 + fine * 0.20;
 }
 
+#endif
+#if PLANET == 4
 /* ---------- JUPITER: cream zones, brown belts, Great Red Spot ---------- */
 vec3 jupiter(vec3 p) {
   float t = bands(p, 21.0, 0.11, 0.010);
@@ -1149,6 +1169,8 @@ vec3 jupiter(vec3 p) {
   return col;
 }
 
+#endif
+#if PLANET == 5
 /* ---------- SATURN: soft butterscotch bands, low contrast ---------- */
 vec3 saturn(vec3 p) {
   float t = bands(p, 28.0, 0.04, 0.008);
@@ -1159,6 +1181,8 @@ vec3 saturn(vec3 p) {
   return col;
 }
 
+#endif
+#if PLANET == 6
 /* ---------- URANUS: nearly featureless cyan haze ---------- */
 vec3 uranus(vec3 p) {
   float t = bands(p, 9.0, 0.05, 0.004);
@@ -1169,6 +1193,8 @@ vec3 uranus(vec3 p) {
   return col;
 }
 
+#endif
+#if PLANET != 0 && PLANET != 1 && PLANET != 3 && PLANET != 4 && PLANET != 5 && PLANET != 6
 /* ---------- NEPTUNE: deep blue, faint bands, dark spot, white streaks ---------- */
 vec3 neptune(vec3 p) {
   float t = bands(p, 13.0, 0.08, 0.014);
@@ -1183,12 +1209,15 @@ vec3 neptune(vec3 p) {
   return col;
 }
 
+#endif
+
 /* ---------- living cloud tops (Jupiter, Saturn) ----------
    The real map, carried along a flow field: alternating east-west jets,
    small eddies so band edges ripple, and on Jupiter the Great Red Spot
    turning anticlockwise. Two samples at staggered phases are cross-faded
    (the flow-map technique), so the clouds move forever without smearing. */
 /* ---------- ice giants: details over the (nearly featureless) maps ---------- */
+#if PLANET == 7
 vec3 neptuneWeather(vec3 base, vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
   /* a Great Dark Spot drifting west, with bright companion clouds */
@@ -1205,7 +1234,9 @@ vec3 neptuneWeather(vec3 base, vec2 uv) {
   float white = max(companion * 0.9, streak * belt * 0.6);
   return mix(base, vec3(0.92, 0.96, 1.0), white);
 }
+#endif
 
+#if PLANET == 3
 /* Mars: a regional dust storm drifting slowly across the surface,
    ochre and soft-edged, veiling the dark markings beneath it */
 vec3 marsDust(vec3 base, vec2 uv, vec3 p) {
@@ -1216,7 +1247,9 @@ vec3 marsDust(vec3 base, vec2 uv, vec3 p) {
   float dust = region * (0.45 + 0.55 * billows);
   return mix(base, vec3(0.86, 0.62, 0.42), dust * 0.7);
 }
+#endif
 
+#if PLANET == 5
 /* Saturn: the hexagon, a six-sided jet stream round the north pole
    (near 78 N), with a darker vortex at the pole itself */
 vec3 saturnPole(vec3 base, vec2 uv) {
@@ -1237,7 +1270,9 @@ vec3 saturnPole(vec3 base, vec2 uv) {
   c = mix(c, c * 0.55, 1.0 - smoothstep(0.0, 0.035, fromPole));
   return c;
 }
+#endif
 
+#if PLANET == 6
 vec3 uranusWeather(vec3 base, vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
   /* faint banding and a bright cap over the sunward (north) pole */
@@ -1254,7 +1289,9 @@ vec3 uranusWeather(vec3 base, vec2 uv) {
   }
   return mix(base, vec3(0.95, 1.0, 1.0), clamp(storms, 0.0, 1.0) * 0.7);
 }
+#endif
 
+#if PLANET == 1 || PLANET == 4 || PLANET == 5
 vec2 cloudFlow(vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
   if (uPlanet == 1) {
@@ -1302,6 +1339,7 @@ vec3 flowingClouds(vec2 uv, vec2 gx, vec2 gy) {
   vec3 b = textureGrad(uMap, uv - v * (t1 - 0.5) * period, gx, gy).rgb;
   return mix(a, b, abs(1.0 - 2.0 * t0));
 }
+#endif
 
 ${CLOSE_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
@@ -1313,15 +1351,10 @@ void main() {
   float streamedCover = 0.0;
 
   if (uHolePlanet == uPlanet && dot(p, uHoleDir) > uHoleCos) discard;
-  if (uPlanet == 0) surface = mercury(p);
-  else if (uPlanet == 1) surface = venus(p);
-  else if (uPlanet == 3) surface = mars(p);
-  else if (uPlanet == 4) surface = jupiter(p);
-  else if (uPlanet == 5) surface = saturn(p);
-  else if (uPlanet == 6) surface = uranus(p);
-  else surface = neptune(p);
 
-  /* real surface map when loaded; procedural surface above is the fallback */
+  /* the real surface map when loaded; a procedural surface (below) until
+     then. Worked out only where there is no map: computed first and then
+     overwritten, as it was, it doubled the program's compile time */
   if (uHasMap > 0.5) {
     /* giants, close up (flying): the bands break into eddies and
        filaments, as in Juno's and Cassini's close views. The map's own
@@ -1329,7 +1362,8 @@ void main() {
        their contrast lifted. Off in every view of the journey itself. */
     vec2 mapUv = vUv;
     float swirl = 0.0;
-    if (uType == 2 || uType == 3) {
+#if PLANET_TYPE == 2 || PLANET_TYPE == 3
+    {
       swirl = 1.0 - smoothstep(0.0008, 0.0025, length(fwidth(p)));
       if (swirl > 0.0) {
         vec3 q = p * vec3(1.0, 3.2, 1.0);
@@ -1350,14 +1384,18 @@ void main() {
         mapUv += (eddy * vec2(0.012, 0.007) * stir + curl * vec2(0.0065, 0.004) * stir + fine * vec2(0.0016, 0.0011)) * swirl;
       }
     }
+#endif
     vec2 gx = dFdx(vUv);
     vec2 gy = dFdy(vUv);
     /* (across the map's seam the coordinates jump: no blur there) */
     gx.x -= floor(gx.x + 0.5);
     gy.x -= floor(gy.x + 0.5);
-    surface = (uPlanet == 4 || uPlanet == 5 || uPlanet == 1)
-      ? flowingClouds(mapUv, gx, gy)
-      : textureGrad(uMap, mapUv, gx, gy).rgb;
+#if PLANET == 1 || PLANET == 4 || PLANET == 5
+    surface = flowingClouds(mapUv, gx, gy);
+#else
+    surface = textureGrad(uMap, mapUv, gx, gy).rgb;
+#endif
+#if PLANET_TYPE == 2 || PLANET_TYPE == 3
     if (swirl > 0.0) {
       vec3 broad = texture2D(uMap, mapUv, 4.0).rgb;
       surface = max(broad + (surface - broad) * (1.0 + 1.3 * swirl), vec3(0.0));
@@ -1375,6 +1413,7 @@ void main() {
          it into a milky haze */
       surface *= 1.0 - 0.18 * swirl;
     }
+#endif
     /* flying low: NASA's imagery of the ground below, streamed in */
     if (uPatchPlanet == uPlanet) {
       vec4 streamed = patched(surface, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, vUv, uPatchGain);
@@ -1382,22 +1421,45 @@ void main() {
       streamedCover = streamed.a;
     }
     /* Venus: the faint dark chevrons seen in ultraviolet, sweeping round */
-    if (uPlanet == 1) {
+#if PLANET == 1
+    {
       float lat = (vUv.y - 0.5) * 3.14159;
       float x = vUv.x * 6.28318 + uTime * 0.025;
       float chevron = sin(x * 2.0 + abs(lat) * 3.5 + fbm(vec3(vUv * vec2(5.0, 9.0), uTime * 0.01)) * 2.5);
       surface *= 1.0 - 0.07 * smoothstep(0.2, 1.0, chevron) * cos(lat);
     }
-    if (uPlanet == 7) {
+#endif
+#if PLANET == 7
+    {
       /* true colour (Irwin et al. 2024): the familiar deep blue came from
          contrast-enhanced Voyager images; the planet is a pale azure */
       float lum = dot(surface, vec3(0.299, 0.587, 0.114));
       surface = mix(surface, vec3(0.62, 0.8, 0.9) * (0.55 + lum * 0.8), 0.7);
       surface = neptuneWeather(surface, vUv);
     }
-    else if (uPlanet == 6) surface = uranusWeather(surface, vUv);
-    else if (uPlanet == 3) surface = marsDust(surface, vUv, p);
-    else if (uPlanet == 5) surface = saturnPole(surface, vUv);
+#elif PLANET == 6
+    surface = uranusWeather(surface, vUv);
+#elif PLANET == 3
+    surface = marsDust(surface, vUv, p);
+#elif PLANET == 5
+    surface = saturnPole(surface, vUv);
+#endif
+  } else {
+#if PLANET == 0
+    surface = mercury(p);
+#elif PLANET == 1
+    surface = venus(p);
+#elif PLANET == 3
+    surface = mars(p);
+#elif PLANET == 4
+    surface = jupiter(p);
+#elif PLANET == 5
+    surface = saturn(p);
+#elif PLANET == 6
+    surface = uranus(p);
+#else
+    surface = neptune(p);
+#endif
   }
 
   vec3 toSun = normalize(uSunPosition - vWorldPosition);
@@ -2274,9 +2336,11 @@ function Planet({
         uniforms,
         vertexShader: PLANET_VERTEX_SHADER,
         fragmentShader: PLANET_FRAGMENT_SHADER,
+        // each planet its own small program (see PLANET_FRAGMENT_SHADER)
+        defines: { PLANET: index, PLANET_TYPE: planetType },
         toneMapped: false,
       }),
-    [uniforms],
+    [uniforms, index, planetType],
   )
   useEffect(() => () => planetMaterial.dispose(), [planetMaterial])
 

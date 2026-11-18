@@ -962,6 +962,67 @@ function mulberry32(seed: number) {
    are currently hidden (like the star streaks).
 ============================================================ */
 
+/* Whether a material's shader has finished compiling (asked without
+   waiting, via KHR_parallel_shader_compile; without it, compiling happens
+   on first use anyway). */
+function programReady(gl: THREE.WebGLRenderer, material: THREE.Material) {
+  if (!gl.extensions.has('KHR_parallel_shader_compile')) return true
+  const program = (gl.properties.get(material) as { currentProgram?: { isReady(): boolean } }).currentProgram
+  return !program || program.isReady()
+}
+
+function whenReady(gl: THREE.WebGLRenderer, materials: Set<THREE.Material>) {
+  const waiting = new Set(materials)
+  return new Promise<void>((resolve) => {
+    const check = () => {
+      waiting.forEach((material) => {
+        if (programReady(gl, material)) waiting.delete(material)
+      })
+      if (waiting.size === 0) resolve()
+      else window.setTimeout(check, 20)
+    }
+    check()
+  })
+}
+
+/* Keeps whatever uses a still-compiling shader out of every view (on no
+   layer at all, which leaves its own visibility alone) and lets each back
+   in as its shader is done. One register for every warm-up, so an object
+   held twice keeps its own layers, not the none it was given. */
+const heldBack = new Map<THREE.Object3D, { mask: number; uses: Set<THREE.Material> }>()
+let heldCheck = 0
+
+function holdBackUntilReady(gl: THREE.WebGLRenderer, scene: THREE.Scene, materials: Set<THREE.Material>) {
+  scene.traverse((object) => {
+    const material = (object as THREE.Mesh).material
+    if (!material) return
+    const uses = (Array.isArray(material) ? material : [material]).filter(
+      (m) => materials.has(m) && !programReady(gl, m),
+    )
+    if (!uses.length) return
+    const held = heldBack.get(object)
+    if (held) uses.forEach((m) => held.uses.add(m))
+    else {
+      heldBack.set(object, { mask: object.layers.mask, uses: new Set(uses) })
+      object.layers.mask = 0
+    }
+  })
+  const check = () => {
+    heldCheck = 0
+    heldBack.forEach(({ mask, uses }, object) => {
+      uses.forEach((m) => {
+        if (programReady(gl, m)) uses.delete(m)
+      })
+      if (uses.size === 0) {
+        object.layers.mask = mask
+        heldBack.delete(object)
+      }
+    })
+    if (heldBack.size) heldCheck = window.setTimeout(check, 50)
+  }
+  if (heldBack.size && !heldCheck) heldCheck = window.setTimeout(check, 50)
+}
+
 function WarmUp() {
   const gl = useThree((state) => state.gl)
   const scene = useThree((state) => state.scene)
@@ -999,8 +1060,9 @@ function WarmUp() {
       // compiled side by side in the background (KHR_parallel_shader_compile).
       // A program is only free if nothing draws with it before it is ready,
       // so while the loading screen is still up the scene is held back
-      // until they all are (at most a couple of seconds); later warm-ups
-      // just compile ahead.
+      // until they all are (at most a couple of seconds, then whatever is
+      // not ready is held back on its own); later warm-ups just compile
+      // ahead.
       // Compiled for an offscreen buffer, as they are drawn: the scene goes
       // into the effects' buffers, never straight to the screen, and a
       // shader made for the screen (its last line turns colour to sRGB) is
@@ -1009,19 +1071,24 @@ function WarmUp() {
       // for 200 ms, the Galaxy the Milky Way for 120 ms.
       const target = gl.getRenderTarget()
       gl.setRenderTarget(warmTarget)
-      const compiling = gl.compileAsync(scene, camera)
+      const materials = gl.compile(scene, camera)
       gl.setRenderTarget(target)
       if (!lens.revealed) {
         holds.current += 1
         let released = false
-        const release = () => {
+        const release = (late: boolean) => {
           if (released) return
           released = true
           holds.current -= 1
+          // shaders still compiling when the wait runs out: what uses them
+          // stays out of the picture until they are done, rather than the
+          // first frame that draws it waiting for the compiler (on Windows,
+          // where WebGL runs on Direct3D, that froze the page for seconds)
+          if (late) holdBackUntilReady(gl, scene, materials)
           if (holds.current === 0) scene.visible = true
         }
-        compiling.then(release, release)
-        window.setTimeout(release, 2500)
+        whenReady(gl, materials).then(() => release(false))
+        window.setTimeout(() => release(true), 2500)
       }
 
       const seen = new Set<THREE.Texture>()
