@@ -161,6 +161,7 @@ const CONTROLS: [string, [string[], string][]][] = [
       [['C', 'Scroll'], 'Pull the camera back'],
       [['P'], 'Hide everything (photo)'],
       [['K'], 'Save a picture'],
+      [['F'], 'Frame meter: speed and load'],
       [['T'], 'Time: held, real, faster'],
       [['Esc'], 'Leave flight'],
     ],

@@ -38,6 +38,8 @@ export function getShipPass() {
   if (!pass) {
     pass = new ShipPass(shipScene, shipCamera)
     pass.clearPass.setClearFlags(false, true, false)
+    // (the scene's depth, for the passes that read it, is the world's, not the ship's)
+    pass.needsDepthBlit = false
     pass.enabled = false
   }
   return pass

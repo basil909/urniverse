@@ -6,6 +6,7 @@ import * as THREE from 'three'
 
 import { pilot } from './pilotState'
 import { CLOUD_GLSL, cloudVolume } from './clouds'
+import { LOW_RES_GLSL, lowRes, lowResUniforms } from './lowRes'
 
 /* The 3D cloud layer (see clouds.ts), drawn on two shells, the top and
    the base of the layer, each a patch of sky round the ship reaching to
@@ -40,6 +41,7 @@ uniform vec3 uCamRel; uniform vec3 uCam; uniform vec3 uSun; uniform float uWhich
 uniform int uSteps; uniform int uLightSteps;
 varying vec3 vRel;
 ${CLOUD_GLSL}
+${LOW_RES_GLSL}
 
 vec2 hitSphere(vec3 o, vec3 d, float r) {
   float b = dot(o, d);
@@ -50,6 +52,7 @@ vec2 hitSphere(vec3 o, vec3 d, float r) {
 }
 
 void main() {
+  sceneOcclusion();
   vec3 o = uCam;
   vec3 d = normalize(vRel - uCamRel);
   float camR = length(o);
@@ -202,6 +205,7 @@ export default function CloudVolume({ sun, light }: { sun: THREE.Vector3; light:
             uniforms: {
               ...shared,
               ...cloudVolume,
+              ...lowResUniforms,
               uR: { value: 1 },
               uCamRel: { value: new THREE.Vector3() },
               uWhich: { value: which },
@@ -277,8 +281,26 @@ export default function CloudVolume({ sun, light }: { sun: THREE.Vector3; light:
 
   return (
     <>
-      <mesh ref={top} geometry={geometry} material={materials[0]} frustumCulled={false} visible={false} />
-      <mesh ref={base} geometry={geometry} material={materials[1]} frustumCulled={false} visible={false} />
+      <mesh
+        ref={(mesh) => {
+          top.current = mesh
+          lowRes(mesh)
+        }}
+        geometry={geometry}
+        material={materials[0]}
+        frustumCulled={false}
+        visible={false}
+      />
+      <mesh
+        ref={(mesh) => {
+          base.current = mesh
+          lowRes(mesh)
+        }}
+        geometry={geometry}
+        material={materials[1]}
+        frustumCulled={false}
+        visible={false}
+      />
     </>
   )
 }

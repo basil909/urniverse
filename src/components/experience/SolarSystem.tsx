@@ -41,6 +41,7 @@ import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
+import { LOW_RES_GLSL, lowRes, lowResUniforms } from './lowRes'
 import { aimCloudPatch, CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
 import {
   cloudEclipse,
@@ -587,6 +588,7 @@ const AIR_LIGHT_STEPS = [3, 4, 6]
 
 const PHYSICAL_AIR_FRAGMENT_SHADER = /* glsl */ `
 #define PI 3.14159265
+${LOW_RES_GLSL}
 uniform vec3 uSunPosition; uniform float uLight; uniform float uShell; uniform float uAirglow;
 uniform vec3 uRayleigh; uniform vec3 uMie; uniform vec3 uMieExt; uniform vec3 uMieG;
 uniform float uHR; uniform float uHM; uniform float uSun; uniform float uExaggerate;
@@ -608,6 +610,7 @@ vec3 miePhase(float mu, vec3 g) {
 }
 
 void main() {
+  sceneOcclusion();
   vec3 o = (cameraPosition - vCenter) / vRadius;
   vec3 d = normalize(vWorldPosition - cameraPosition);
   float camR = length(o);
@@ -2304,6 +2307,8 @@ function Planet({
             uExaggerate: { value: 1 },
             uViewSteps: { value: AIR_VIEW_STEPS[2] },
             uLightSteps: { value: AIR_LIGHT_STEPS[2] },
+            // drawn at half resolution (lowRes.ts)
+            ...lowResUniforms,
           }
         : {}),
     }
@@ -2763,7 +2768,11 @@ function Planet({
 
           {planet.atmosphereColor && (
             <mesh
-              ref={atmosphereMesh}
+              ref={(mesh) => {
+                atmosphereMesh.current = mesh
+                // the marched air: drawn at half resolution
+                if (AIR[planet.name]) lowRes(mesh)
+              }}
               scale={visualRadius * (ATMOSPHERE_SHELL[planet.name] ?? 1.055)}
             >
               <sphereGeometry args={[1, 64, 64]} />

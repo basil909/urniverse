@@ -29,6 +29,7 @@ import Pilot, { GroundCarry } from './Pilot'
 import NearStars, { skyHandOver } from './NearStars'
 import FocusCull from './FocusCull'
 import { getShipPass } from './shipLayer'
+import { LowResLayer, PerfMeter } from './PerfMeter'
 import { pilot } from './pilotState'
 import {
   SYSTEM_OFFSET,
@@ -1400,11 +1401,17 @@ function Scene({
       {/* last: the far, tiny things drawn lightly (flight) */}
       <FocusCull />
 
+      {/* F: the frame meter */}
+      <PerfMeter />
+
 
 
       {/* no MSAA (costly with these buffers): SMAA below smooths planet
           and ring edges for a fraction of the price */}
       <EffectComposer multisampling={0}>
+
+        {/* the air, the 3D clouds and the auroras, at half resolution */}
+        <LowResLayer />
 
         {/* the Shuttle, at its true size, in a layer of its own (flight only) */}
         <primitive object={getShipPass()} />

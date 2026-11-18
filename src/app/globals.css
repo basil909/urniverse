@@ -1905,3 +1905,19 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   .flight-hint { white-space: normal; width: 80%; text-align: center; }
 }
 
+
+/* the frame meter (F) */
+.perf-meter {
+  position: fixed;
+  left: 16px;
+  bottom: 132px;
+  z-index: 60;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(8, 10, 14, 0.6);
+  color: rgba(235, 240, 248, 0.78);
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  pointer-events: none;
+}
+.perf-meter[hidden] { display: none; }

@@ -5,6 +5,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 import { pilot } from './pilotState'
+import { LOW_RES_GLSL, lowRes, lowResUniforms } from './lowRes'
 
 /* ============================================================
    AURORAS, UP CLOSE
@@ -56,6 +57,7 @@ void main() {
 }`
 
 const FRAGMENT = /* glsl */ `
+${LOW_RES_GLSL}
 uniform vec3 uCam; uniform vec3 uSun; uniform vec3 uAxis;
 uniform float uNight; uniform float uDay; uniform float uWidth;
 uniform float uBase; uniform float uTop; uniform float uShell;
@@ -85,6 +87,7 @@ vec2 hitSphere(vec3 o, vec3 d, float r) {
 
 void main() {
   if (uOn < 0.01) discard;
+  sceneOcclusion();
   vec3 o = uCam;
   vec3 d = normalize(vLocal - uCam);
   float camR = length(o);
@@ -162,7 +165,7 @@ void main() {
   }
   color *= uGlow * uOn;
   if (dot(color, vec3(1.0)) < 0.0005) discard;
-  gl_FragColor = vec4(color, 1.0);
+  gl_FragColor = vec4(color, 0.0);
 }`
 
 /* how many steps along each line of sight, by quality (0 light .. 2 full) */
@@ -196,6 +199,7 @@ export default function Aurora({ look, sun, near }: { look: AuroraLook; sun: THR
         uTime: { value: 0 },
         uOn: { value: 0 },
         uSteps: { value: AURORA_STEPS[2] },
+        ...lowResUniforms,
       },
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -203,7 +207,9 @@ export default function Aurora({ look, sun, near }: { look: AuroraLook; sun: THR
       depthWrite: false,
       depthTest: false,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor,
+      blendDst: THREE.OneFactor,
       toneMapped: false,
     })
   }, [look, shell])
@@ -234,7 +240,16 @@ export default function Aurora({ look, sun, near }: { look: AuroraLook; sun: THR
   })
 
   return (
-    <mesh ref={mesh} scale={shell} material={material} frustumCulled={false} renderOrder={2}>
+    <mesh
+      ref={(m) => {
+        mesh.current = m
+        lowRes(m)
+      }}
+      scale={shell}
+      material={material}
+      frustumCulled={false}
+      renderOrder={2}
+    >
       <sphereGeometry args={[1, 96, 64]} />
     </mesh>
   )
