@@ -6,7 +6,7 @@
    button says otherwise; coloured by the text.
 ============================================================ */
 
-export type IconName = 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check'
+export type IconName = 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus'
 
 const PATHS: Record<IconName, React.ReactNode> = {
   // the orbiter from above, nose up: the fly button
@@ -80,6 +80,25 @@ const PATHS: Record<IconName, React.ReactNode> = {
   check: (
     <>
       <path d="M5.4 12.6l4.2 4.2 9-9.6" />
+    </>
+  ),
+  close: (
+    <>
+      <path d="M6.6 6.6l10.8 10.8" />
+      <path d="M17.4 6.6L6.6 17.4" />
+    </>
+  ),
+  // pointing right; turned in CSS for the other ways
+  arrow: (
+    <>
+      <path d="M4.8 12h14" />
+      <path d="M13.4 6.6l5.4 5.4-5.4 5.4" />
+    </>
+  ),
+  plus: (
+    <>
+      <path d="M12 5.4v13.2" />
+      <path d="M5.4 12h13.2" />
     </>
   ),
 }

@@ -83,7 +83,7 @@ function rowsFor(where: number | 'voyager' | undefined, name: string): Row[] {
     const voyager = voyagerPositionAU(now)
     const fromEarth = distance(voyager, earth) * AU_KM
     return [
-      { label: 'Voyager 1 from the Sun', value: `About ${formatKm(distance(voyager, sun) * AU_KM)}` },
+      { label: 'From the Sun', value: `About ${formatKm(distance(voyager, sun) * AU_KM)}` },
       {
         label: 'A signal from Earth',
         value: `About ${Math.round(fromEarth / LIGHT_KM_S / 3600)} hours`,
@@ -94,7 +94,7 @@ function rowsFor(where: number | 'voyager' | undefined, name: string): Row[] {
   if (where === -1) {
     const km = distance(earth, sun) * AU_KM
     return [
-      { label: 'From Earth today', value: formatKm(km) },
+      { label: 'From Earth', value: formatKm(km) },
       { label: 'Its light takes', value: formatLight(km), note: 'to reach Earth' },
     ]
   }
@@ -102,14 +102,14 @@ function rowsFor(where: number | 'voyager' | undefined, name: string): Row[] {
   const fromSun = distance(here, sun) * AU_KM
   if (where === EARTH) {
     return [
-      { label: 'From the Sun today', value: formatKm(fromSun) },
+      { label: 'From the Sun', value: formatKm(fromSun) },
       { label: 'Sunlight takes', value: formatLight(fromSun), note: 'to reach Earth' },
     ]
   }
   const fromEarth = distance(here, earth) * AU_KM
   return [
-    { label: 'From Earth today', value: formatKm(fromEarth) },
-    { label: 'From the Sun today', value: formatKm(fromSun) },
+    { label: 'From Earth', value: formatKm(fromEarth) },
+    { label: 'From the Sun', value: formatKm(fromSun) },
     { label: 'Its light takes', value: formatLight(fromEarth), note: `from ${name} to Earth` },
   ]
 }
@@ -139,10 +139,10 @@ export default function WorldLive({
   const km = Math.round((travel?.kmPerSecond ?? 0) * seconds).toLocaleString('en-US')
 
   return (
-    <section className="detail-live" aria-label="Right now">
+    <section className="detail-live" aria-label="Where it is today">
       <h3 className="detail-live-heading">
         <span className="detail-live-dot" aria-hidden="true" />
-        Right now
+        {where === 'voyager' ? 'Voyager 1 today' : rows.length ? 'Where it is today' : 'On the move'}
       </h3>
       {rows.length > 0 && (
         <dl className="detail-live-grid">

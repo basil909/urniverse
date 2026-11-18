@@ -1472,19 +1472,19 @@ export default function Journey() {
                 {WORLD_DETAILS[activeChapter.id] && (
                   <button
                     type="button"
-                    className="detail-open"
+                    className="btn btn--primary"
                     onClick={() => setDetailOpen(true)}
                     aria-expanded={detailOpen}
                   >
                     More about {moreAbout(activeChapter)}
-                    <span aria-hidden="true">+</span>
+                    <Icon name="plus" />
                   </button>
                 )}
 
                 {flyTarget !== undefined && (
                   <button
                     type="button"
-                    className="detail-open fly-there"
+                    className="btn btn--ghost"
                     onClick={() => {
                       // take the ship and warp straight there
                       pilot.warpRequest = flyTarget
@@ -1492,18 +1492,19 @@ export default function Journey() {
                     }}
                   >
                     Fly there
-                    <span aria-hidden="true">↗</span>
+                    <Icon name="arrow" className="is-up" />
                   </button>
                 )}
 
                 <button
-                  className="journey-hint"
+                  type="button"
+                  className="btn btn--text"
                   onClick={() => goToSection(section + 1)}
                 >
                   {active < JOURNEY.length - 1
                     ? `Next: ${titleCase(JOURNEY[active + 1].label)}`
                     : 'Continue'}
-                  <span>→</span>
+                  <Icon name="arrow" />
                 </button>
                 </div>
               </div>

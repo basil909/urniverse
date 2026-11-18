@@ -3644,6 +3644,10 @@ function MoonSystem({
           const apart = _tagToMoon.normalize().angleTo(_tagToPlanet.normalize())
           const planetAngle = Math.asin(Math.min(1, (planetRadius * _satScale.x * 1.04) / camera.position.distanceTo(_tagPlanet)))
           if (behind && apart < planetAngle) shown = false
+          // nor under the chapter rail (left) or the text (right, on a
+          // wide screen)
+          const ndc = _tagMoon.project(camera)
+          if (ndc.x < -0.8 || (camera instanceof THREE.PerspectiveCamera && camera.aspect > 1 && ndc.x > 0.2)) shown = false
         }
         const opacity = shown ? '1' : '0'
         if (tag.style.opacity !== opacity) tag.style.opacity = opacity
