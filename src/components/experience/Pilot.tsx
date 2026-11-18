@@ -108,6 +108,16 @@ const MERGE_FROM = 64
 const MERGE_SLICE_MS = 6
 const MERGE_BATCH_VERTICES = 16384
 const yieldToFrame = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+/* for a long job done a few milliseconds at a time: await the returned
+   function often, and it gives the page a turn once a slice is used up */
+function timeSlicer(sliceMs = MERGE_SLICE_MS) {
+  let sliceStart = performance.now()
+  return async () => {
+    if (performance.now() - sliceStart < sliceMs) return
+    await yieldToFrame()
+    sliceStart = performance.now()
+  }
+}
 async function mergeByMaterial(root: THREE.Object3D) {
   const meshes: THREE.Mesh[] = []
   root.updateMatrixWorld(true)
@@ -140,12 +150,7 @@ async function mergeByMaterial(root: THREE.Object3D) {
     group.meshes.push(mesh)
   })
   const _local = new THREE.Matrix4()
-  let sliceStart = performance.now()
-  const breathe = async () => {
-    if (performance.now() - sliceStart < MERGE_SLICE_MS) return
-    await yieldToFrame()
-    sliceStart = performance.now()
-  }
+  const breathe = timeSlicer()
   // parts merged a batch at a time (up to ~16k vertices a mesh), each
   // part moved into place in its own step, so no single step is long
   const mergeBatch = async (material: THREE.Material, batch: THREE.Mesh[]) => {
@@ -1115,8 +1120,11 @@ function useShuttle() {
     // NASA's file is Draco-compressed: three.js's own decoder, served from /draco/
     const stopWaiting = whenShuttleWanted(() => modelLoader().load(
       SHUTTLE_URL,
-      (gltf) => {
+      async (gltf) => {
         if (cancelled) return
+        // built a few milliseconds at a time: in one go it held whatever
+        // the journey was showing for a quarter of a second
+        const breathe = timeSlicer()
         gltf.scene.updateMatrixWorld(true)
         const white = new THREE.Color('#e9ecef')
         const tile = new THREE.Color('#1d1f24')
@@ -1161,34 +1169,32 @@ function useShuttle() {
           }
           return ''
         }
+        // the orbiter's extent, gathered as its parts are moved into place
+        const bodyBounds = new THREE.Box3()
+        const meshes: THREE.Mesh[] = []
         gltf.scene.traverse((object) => {
-          const mesh = object as THREE.Mesh
-          if (!mesh.isMesh) return
+          if ((object as THREE.Mesh).isMesh) meshes.push(object as THREE.Mesh)
+        })
+        for (const mesh of meshes) {
+          await breathe()
+          if (cancelled) return
           const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
           // the external tank and solid rocket boosters: kept apart (they
           // fly only on the launch, and fall away)
           if (inLaunchStack(mesh) || materials.some((m) => m.name.startsWith('shuttlesrbsande'))) {
-            let piece = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld)
-            if (piece.index) piece = piece.toNonIndexed()
-            if (!piece.getAttribute('normal')) piece.computeVertexNormals()
-            for (const name of Object.keys(piece.attributes)) {
-              if (!['position', 'normal'].includes(name)) piece.deleteAttribute(name)
-            }
-            stackParts.push(piece)
-            return
+            stackParts.push(await bakePart(mesh.geometry, mesh.matrixWorld, breathe))
+            if (cancelled) return
+            continue
           }
           const isWindow = materials.some((m) => WINDOW_MATERIALS.has(m.name))
-          let geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld)
-          if (geometry.index) geometry = geometry.toNonIndexed()
-          if (!geometry.getAttribute('normal')) geometry.computeVertexNormals()
-          // keep only what every part shares, so they merge into one
-          for (const name of Object.keys(geometry.attributes)) {
-            if (!['position', 'normal'].includes(name)) geometry.deleteAttribute(name)
-          }
+          // only what every part shares (position, normal), so they merge into one
+          const geometry = await bakePart(mesh.geometry, mesh.matrixWorld, breathe, bodyBounds)
+          if (cancelled) return
           const engine = engineGroup(mesh)
           const normal = geometry.getAttribute('normal')
           const colors = new Float32Array(normal.count * 3)
           for (let i = 0; i < normal.count; i += 1) {
+            if ((i & 16383) === 16383) await breathe()
             const c = isWindow ? glass : engine ? metal : normal.getY(i) < -0.3 ? tile : white
             colors[i * 3] = c.r
             colors[i * 3 + 1] = c.g
@@ -1202,15 +1208,16 @@ function useShuttle() {
             box.union(geometry.boundingBox!)
             engineBoxes.set(engine, box)
           }
-        })
+        }
+        if (cancelled) return
         // one body, centred and scaled to unit length along z
         const merged = mergeGeometries(parts)
-        merged.computeBoundingBox()
-        const bounds = merged.boundingBox!
-        const center = bounds.getCenter(new THREE.Vector3())
-        const length = bounds.max.z - bounds.min.z
-        merged.translate(-center.x, -center.y, -center.z)
-        merged.scale(1 / length, 1 / length, 1 / length)
+        await breathe()
+        if (cancelled) return
+        const center = bodyBounds.getCenter(new THREE.Vector3())
+        const length = bodyBounds.max.z - bodyBounds.min.z
+        await centreAndScale(merged, center, 1 / length, breathe, bodyBounds)
+        if (cancelled) return
         const body = new THREE.Mesh(
           merged,
           new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide }),
@@ -1236,12 +1243,16 @@ function useShuttle() {
         // (the file mixes them in its pieces): the tank (8.4 m across, on
         // the middle line), or a booster (centred some 6.5 m to either side)
         const buckets = [0, 1, 2].map(() => ({ position: [] as number[], normal: [] as number[] }))
-        stackParts.forEach((piece) => {
-          piece.translate(-center.x, -center.y, -center.z)
-          piece.scale(1 / length, 1 / length, 1 / length)
+        for (const piece of stackParts) {
+          await centreAndScale(piece, center, 1 / length, breathe)
+          if (cancelled) return
           const position = piece.getAttribute('position')
           const normal = piece.getAttribute('normal')
           for (let t = 0; t + 2 < position.count; t += 3) {
+            if (t % 12288 === 0) {
+              await breathe()
+              if (cancelled) return
+            }
             const x = (position.getX(t) + position.getX(t + 1) + position.getX(t + 2)) / 3
             const which = x < -0.12 ? 1 : x > 0.12 ? 2 : 0
             for (let k = 0; k < 3; k += 1) {
@@ -1249,7 +1260,9 @@ function useShuttle() {
               buckets[which].normal.push(normal.getX(t + k), normal.getY(t + k), normal.getZ(t + k))
             }
           }
-        })
+        }
+        await breathe()
+        if (cancelled) return
         const build = (bucket: { position: number[]; normal: number[] }, tone: THREE.Color) => {
           if (!bucket.position.length) return null
           const geometry = new THREE.BufferGeometry()
@@ -1296,6 +1309,87 @@ function useShuttle() {
     }
   }, [])
   return model
+}
+
+/* A part's positions and normals, moved into place (as applyMatrix4 would),
+   without an index (as toNonIndexed would), and nothing else: one pass, a
+   slice at a time (the orbiter's largest part has hundreds of thousands of
+   corners). Widens `bounds` by the moved positions when given. */
+async function bakePart(
+  source: THREE.BufferGeometry,
+  matrix: THREE.Matrix4,
+  breathe: () => Promise<void>,
+  bounds?: THREE.Box3,
+) {
+  const position = source.getAttribute('position')
+  const normal = source.getAttribute('normal') as THREE.BufferAttribute | undefined
+  const index = source.index
+  const count = index ? index.count : position.count
+  const positions = new Float32Array(count * 3)
+  const normals = normal ? new Float32Array(count * 3) : null
+  const m = matrix.elements
+  const n = new THREE.Matrix3().getNormalMatrix(matrix).elements
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  for (let i = 0; i < count; i += 1) {
+    if ((i & 16383) === 16383) await breathe()
+    const v = index ? index.getX(i) : i
+    const x = position.getX(v), y = position.getY(v), z = position.getZ(v)
+    const px = m[0] * x + m[4] * y + m[8] * z + m[12]
+    const py = m[1] * x + m[5] * y + m[9] * z + m[13]
+    const pz = m[2] * x + m[6] * y + m[10] * z + m[14]
+    positions[i * 3] = px
+    positions[i * 3 + 1] = py
+    positions[i * 3 + 2] = pz
+    if (px < minX) minX = px
+    if (py < minY) minY = py
+    if (pz < minZ) minZ = pz
+    if (px > maxX) maxX = px
+    if (py > maxY) maxY = py
+    if (pz > maxZ) maxZ = pz
+    if (normal && normals) {
+      const a = normal.getX(v), b = normal.getY(v), c = normal.getZ(v)
+      const nx = n[0] * a + n[3] * b + n[6] * c
+      const ny = n[1] * a + n[4] * b + n[7] * c
+      const nz = n[2] * a + n[5] * b + n[8] * c
+      const scale = 1 / (Math.hypot(nx, ny, nz) || 1)
+      normals[i * 3] = nx * scale
+      normals[i * 3 + 1] = ny * scale
+      normals[i * 3 + 2] = nz * scale
+    }
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  if (normals) geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+  else geometry.computeVertexNormals()
+  if (bounds && count > 0) {
+    bounds.expandByPoint(new THREE.Vector3(minX, minY, minZ))
+    bounds.expandByPoint(new THREE.Vector3(maxX, maxY, maxZ))
+  }
+  return geometry
+}
+
+/* moved so `center` is at the origin, then scaled by `scale` (normals keep
+   their direction under a uniform scale), a slice at a time. Given the
+   box it had, its new box and sphere follow, so drawing it for the first
+   time does not mean measuring it. */
+async function centreAndScale(
+  geometry: THREE.BufferGeometry,
+  center: THREE.Vector3,
+  scale: number,
+  breathe: () => Promise<void>,
+  box?: THREE.Box3,
+) {
+  const array = geometry.getAttribute('position').array as Float32Array
+  for (let i = 0; i < array.length; i += 3) {
+    if (i % 49152 === 0) await breathe()
+    array[i] = (array[i] - center.x) * scale
+    array[i + 1] = (array[i + 1] - center.y) * scale
+    array[i + 2] = (array[i + 2] - center.z) * scale
+  }
+  geometry.getAttribute('position').needsUpdate = true
+  geometry.boundingBox = box ? box.clone().translate(center.clone().negate()).applyMatrix4(new THREE.Matrix4().makeScale(scale, scale, scale)) : null
+  geometry.boundingSphere = geometry.boundingBox ? geometry.boundingBox.getBoundingSphere(new THREE.Sphere()) : null
 }
 
 /* merge position/normal/color geometries into one (all non-indexed) */

@@ -971,6 +971,9 @@ function WarmUp() {
   // textures still to send up: a few a frame (about one 2K map's worth),
   // never the lot in one frame
   const warmQueue = useMemo<THREE.Texture[]>(() => [], [])
+  // stands in for the effects' buffers while compiling (never drawn into)
+  const warmTarget = useMemo(() => new THREE.WebGLRenderTarget(1, 1), [])
+  useEffect(() => () => warmTarget.dispose(), [warmTarget])
   // warm-ups still waiting on their shaders (the scene is held back)
   const holds = useRef(0)
   useFrame(() => {
@@ -997,8 +1000,17 @@ function WarmUp() {
       // A program is only free if nothing draws with it before it is ready,
       // so while the loading screen is still up the scene is held back
       // until they all are (at most a couple of seconds); later warm-ups
-      // just compile ahead
+      // just compile ahead.
+      // Compiled for an offscreen buffer, as they are drawn: the scene goes
+      // into the effects' buffers, never straight to the screen, and a
+      // shader made for the screen (its last line turns colour to sRGB) is
+      // a different program. Compiled for the screen, every one was built
+      // again on first use: the auroras and clouds held arriving at Earth
+      // for 200 ms, the Galaxy the Milky Way for 120 ms.
+      const target = gl.getRenderTarget()
+      gl.setRenderTarget(warmTarget)
       const compiling = gl.compileAsync(scene, camera)
+      gl.setRenderTarget(target)
       if (!lens.revealed) {
         holds.current += 1
         let released = false
@@ -1033,7 +1045,7 @@ function WarmUp() {
         object.visible = false
       })
       if (holds.current > 0) scene.visible = false
-  }, [gl, scene, camera, warmQueue])
+  }, [gl, scene, camera, warmQueue, warmTarget])
 
   // the very first frame too: compiled in parallel before anything draws.
   // And in the built site, no reading back of each shader's compile log on

@@ -51,14 +51,102 @@ function sharpMapsAllowed(gl: THREE.WebGLRenderer) {
 /* A 4K map sent to the graphics card in one go costs a frame 30–80 ms (a
    visible jolt just as the camera settles on a planet). So it goes up in
    tiles instead: the texture's memory is reserved empty, the decoded map
-   is cut into 1024 x 512 tiles off the main thread, one tile is copied in
-   per frame (a few ms), and the smaller mip levels are made once, with the
-   last tile. The same pixels, spread over some 16 frames. Maps go one at a
-   time, so Earth's four never share a frame. The planet keeps its 2K map
-   until the last tile is in. */
+   arrives cut into 1024 x 512 tiles, one tile is copied in per frame (a
+   few ms), and the smaller mip levels are made once, with the last tile.
+   The same pixels, spread over some 16 frames. Maps go one at a time, so
+   Earth's four never share a frame. The planet keeps its 2K map until the
+   last tile is in. */
 const TILE_W = 1024
 const TILE_H = 512
 let uploadQueue: Promise<void> = Promise.resolve()
+
+type Tiles = { width: number; height: number; tiles: { bitmap: ImageBitmap; x: number; y: number }[] }
+
+/* Fetches, decodes (flipped for WebGL's UV origin, rows bottom up) and cuts
+   a map into tiles. Self-contained, because its source text is what the
+   decoding worker runs. */
+async function decodeTiles(url: string, tileW: number, tileH: number): Promise<Tiles> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`${response.status}`)
+  const whole = await createImageBitmap(await response.blob(), {
+    imageOrientation: 'flipY',
+    premultiplyAlpha: 'none',
+    colorSpaceConversion: 'none',
+  })
+  const { width, height } = whole
+  const tiles: Tiles['tiles'] = []
+  for (let y = 0; y < height; y += tileH) {
+    for (let x = 0; x < width; x += tileW) {
+      const w = Math.min(tileW, width - x)
+      const h = Math.min(tileH, height - y)
+      tiles.push({ bitmap: await createImageBitmap(whole, x, y, w, h, { premultiplyAlpha: 'none' }), x, y })
+    }
+  }
+  whole.close()
+  return { width, height, tiles }
+}
+
+/* Done on the main thread, the decode and the cutting held the frame the
+   map arrived in for 40–90 ms (the decoded map is handed over, then cut
+   up). In a worker they cost the page nothing: the finished tiles are
+   handed over without a copy. The worker is made from decodeTiles' own
+   source, as the bundler would copy a worker file as it is (TypeScript),
+   which no browser runs. Where workers cannot decode, the main thread
+   does it as before. */
+let decoder: Worker | null | undefined
+let nextJob = 1
+const decoding = new Map<number, { resolve: (tiles: Tiles) => void; reject: (error: Error) => void }>()
+
+function decodeWorker() {
+  if (decoder !== undefined) return decoder
+  decoder = null
+  if (typeof Worker === 'undefined') return decoder
+  try {
+    const code = `const decodeTiles = ${decodeTiles.toString()}
+onmessage = (event) => {
+  const { id, url, tileW, tileH } = event.data
+  decodeTiles(url, tileW, tileH).then(
+    (result) => postMessage({ id, result }, result.tiles.map((tile) => tile.bitmap)),
+    (error) => postMessage({ id, error: String(error) }),
+  )
+}`
+    const worker = new Worker(URL.createObjectURL(new Blob([code], { type: 'text/javascript' })))
+    worker.onmessage = (event: MessageEvent<{ id: number; result?: Tiles; error?: string }>) => {
+      const job = decoding.get(event.data.id)
+      if (!job) return
+      decoding.delete(event.data.id)
+      if (event.data.result) job.resolve(event.data.result)
+      else job.reject(new Error(event.data.error))
+    }
+    worker.onerror = () => {
+      // the worker cannot run here: what it had in hand goes to the main thread
+      decoder = null
+      worker.terminate()
+      decoding.forEach((job) => job.reject(new Error('worker')))
+      decoding.clear()
+    }
+    decoder = worker
+  } catch {
+    decoder = null
+  }
+  return decoder
+}
+
+function decodeOffThread(url: string): Promise<Tiles> {
+  const absolute = new URL(url, window.location.href).href
+  const worker = decodeWorker()
+  if (!worker) return decodeTiles(absolute, TILE_W, TILE_H)
+  const id = nextJob++
+  return new Promise<Tiles>((resolve, reject) => {
+    decoding.set(id, { resolve, reject })
+    worker.postMessage({ id, url: absolute, tileW: TILE_W, tileH: TILE_H })
+  }).catch((error: Error) => {
+    if (error.message === 'worker') return decodeTiles(absolute, TILE_W, TILE_H)
+    throw error
+  })
+}
+
+const closeTiles = ({ tiles }: Tiles) => tiles.forEach(({ bitmap }) => bitmap.close())
 
 /* Freeing a 4K map is felt too: Earth's four freed in one moment stalled
    a frame for 50 ms. So they are let go one at a time, a little apart,
@@ -73,28 +161,9 @@ function releaseLater(map: THREE.Texture) {
 }
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 
-function uploadInTiles(
-  gl: THREE.WebGLRenderer,
-  bitmap: ImageBitmap,
-  map: THREE.DataTexture,
-  stillWanted: () => boolean,
-) {
+function uploadInTiles(gl: THREE.WebGLRenderer, { tiles }: Tiles, map: THREE.DataTexture, stillWanted: () => boolean) {
   const job = uploadQueue.then(async () => {
     if (!stillWanted()) return false
-    const width = bitmap.width
-    const height = bitmap.height
-    const tileW = Math.min(TILE_W, width)
-    const tileH = Math.min(TILE_H, height)
-    // cut into tiles (off the main thread); rows already run bottom up
-    const cuts: Promise<{ tile: ImageBitmap; x: number; y: number }>[] = []
-    for (let y = 0; y < height; y += tileH) {
-      for (let x = 0; x < width; x += tileW) {
-        const w = Math.min(tileW, width - x)
-        const h = Math.min(tileH, height - y)
-        cuts.push(createImageBitmap(bitmap, x, y, w, h, { premultiplyAlpha: 'none' }).then((tile) => ({ tile, x, y })))
-      }
-    }
-    const tiles = await Promise.all(cuts)
     // the memory, with room for every mip level (reserved, nothing sent)
     map.generateMipmaps = true
     gl.initTexture(map)
@@ -108,13 +177,12 @@ function uploadInTiles(
         complete = false
         break
       }
-      const { tile, x, y } = tiles[i]
-      source.image = tile
+      const { bitmap, x, y } = tiles[i]
+      source.image = bitmap
       // the mip levels are made once, with the last tile
       map.generateMipmaps = i === tiles.length - 1
       gl.copyTextureToTexture(source, map, null, place.set(x, y))
     }
-    tiles.forEach(({ tile }) => tile.close())
     map.generateMipmaps = true
     return complete
   })
@@ -179,19 +247,15 @@ export function useSharpTexture(
 
     let cancelled = false
     let owned: THREE.Texture | null = null
-    const loader = new THREE.ImageBitmapLoader()
-    // decoded off the main thread, already flipped for WebGL's UV origin
-    loader.setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none' })
 
-    loader.load(
-      url,
-      (bitmap) => {
+    decodeOffThread(url).then(
+      (decoded) => {
         if (cancelled) {
-          bitmap.close()
+          closeTiles(decoded)
           return
         }
         // an empty texture of the map's size, filled tile by tile
-        const map = new THREE.DataTexture(null, bitmap.width, bitmap.height, format, THREE.UnsignedByteType)
+        const map = new THREE.DataTexture(null, decoded.width, decoded.height, format, THREE.UnsignedByteType)
         map.source.dataReady = false
         map.flipY = false
         map.colorSpace = colorSpace
@@ -202,16 +266,13 @@ export function useSharpTexture(
         map.anisotropy = Math.min(anisotropy, gl.capabilities.getMaxAnisotropy())
         map.needsUpdate = true
         owned = map
-        uploadInTiles(gl, bitmap, map, () => !cancelled)
+        uploadInTiles(gl, decoded, map, () => !cancelled)
           .then((complete) => {
-            bitmap.close()
             if (complete && !cancelled) setTexture(map)
           })
-          .catch(() => {
-            bitmap.close() // keep the 2K map
-          })
+          .catch(() => {}) // keep the 2K map
+          .finally(() => closeTiles(decoded))
       },
-      undefined,
       () => {
         /* keep the 2K map */
       },
