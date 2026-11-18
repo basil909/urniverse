@@ -1061,7 +1061,7 @@ void main() {
    it held all seven, and Chrome and Edge on Windows (whose WebGL runs on
    Direct3D) took some 21 s to compile it on a first visit, freezing the
    page if a planet was drawn before it was done. Now the giants' take
-   about 3 s each, compiled side by side. */
+   about 5 s each, compiled side by side. */
 const PLANET_FRAGMENT_SHADER = /* glsl */ `
 
 #define uPlanet PLANET
