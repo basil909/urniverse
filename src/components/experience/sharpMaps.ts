@@ -99,14 +99,14 @@ export function useSharpFocus(
   return sharp
 }
 
-type Setup = { colorSpace: THREE.ColorSpace; anisotropy?: number }
+type Setup = { colorSpace: THREE.ColorSpace; anisotropy?: number; format?: THREE.PixelFormat }
 
 /* Loads `url` while `active`; returns the texture once it is decoded and
    uploaded, and null otherwise. */
 export function useSharpTexture(
   url: string | undefined,
   active: boolean,
-  { colorSpace, anisotropy = 8 }: Setup,
+  { colorSpace, anisotropy = 8, format = THREE.RGBAFormat }: Setup,
 ) {
   const gl = useThree((state) => state.gl)
   const [texture, setTexture] = useState<THREE.Texture | null>(null)
@@ -129,6 +129,7 @@ export function useSharpTexture(
         }
         const map = new THREE.Texture(bitmap)
         map.flipY = false
+        map.format = format
         map.colorSpace = colorSpace
         map.wrapS = THREE.RepeatWrapping
         map.wrapT = THREE.ClampToEdgeWrapping

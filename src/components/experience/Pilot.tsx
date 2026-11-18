@@ -5,6 +5,7 @@ import { createPortal, useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js'
+import { mergeGeometries as mergeBuffers } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
 import {
   AU_UNITS,
@@ -97,6 +98,94 @@ function modelLoader() {
   return new GLTFLoader(modelManager).setDRACOLoader(sharedDraco)
 }
 
+/* A model made of many small meshes (Webb: 1,600) costs a draw call each.
+   The parts that share a material are baked into one mesh in place (the
+   same triangles, where they were): Webb draws in about 50 calls. Parts
+   that are mirrored, skinned, morphed or use several materials are left
+   as they are. Done a few milliseconds at a time, so it never stalls a
+   frame (Webb takes about half a second in all). */
+const MERGE_FROM = 64
+const MERGE_SLICE_MS = 6
+const MERGE_BATCH_VERTICES = 16384
+const yieldToFrame = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+async function mergeByMaterial(root: THREE.Object3D) {
+  const meshes: THREE.Mesh[] = []
+  root.updateMatrixWorld(true)
+  root.traverse((object) => {
+    const mesh = object as THREE.Mesh
+    if (
+      mesh.isMesh &&
+      !(mesh as THREE.SkinnedMesh).isSkinnedMesh &&
+      !(mesh as THREE.InstancedMesh).isInstancedMesh &&
+      !Array.isArray(mesh.material) &&
+      !mesh.morphTargetInfluences &&
+      mesh.matrixWorld.determinant() > 0
+    ) {
+      meshes.push(mesh)
+    }
+  })
+  if (meshes.length < MERGE_FROM) return
+  const toRoot = new THREE.Matrix4().copy(root.matrixWorld).invert()
+  const groups = new Map<string, { material: THREE.Material; meshes: THREE.Mesh[] }>()
+  meshes.forEach((mesh) => {
+    const geometry = mesh.geometry
+    const key = [
+      (mesh.material as THREE.Material).uuid,
+      Object.keys(geometry.attributes).sort().join(','),
+      geometry.index ? 'indexed' : 'plain',
+      Object.keys(geometry.morphAttributes).length,
+    ].join('|')
+    let group = groups.get(key)
+    if (!group) groups.set(key, (group = { material: mesh.material as THREE.Material, meshes: [] }))
+    group.meshes.push(mesh)
+  })
+  const _local = new THREE.Matrix4()
+  let sliceStart = performance.now()
+  const breathe = async () => {
+    if (performance.now() - sliceStart < MERGE_SLICE_MS) return
+    await yieldToFrame()
+    sliceStart = performance.now()
+  }
+  // parts merged a batch at a time (up to ~16k vertices a mesh), each
+  // part moved into place in its own step, so no single step is long
+  const mergeBatch = async (material: THREE.Material, batch: THREE.Mesh[]) => {
+    if (batch.length < 2) return
+    const baked: THREE.BufferGeometry[] = []
+    for (const mesh of batch) {
+      baked.push(mesh.geometry.clone().applyMatrix4(_local.multiplyMatrices(toRoot, mesh.matrixWorld)))
+      await breathe()
+    }
+    const merged = mergeBuffers(baked, false)
+    baked.forEach((geometry) => geometry.dispose())
+    if (!merged) return // attributes that do not line up: leave the parts
+    const one = new THREE.Mesh(merged, material)
+    one.name = `${material.name || 'part'} (merged)`
+    root.add(one)
+    batch.forEach((mesh) => {
+      // anything hung under this part stays where it is
+      ;[...mesh.children].forEach((child) => mesh.parent?.attach(child))
+      mesh.removeFromParent()
+      mesh.geometry.dispose()
+    })
+  }
+  for (const { material, meshes: parts } of groups.values()) {
+    let batch: THREE.Mesh[] = []
+    let vertices = 0
+    for (const mesh of parts) {
+      batch.push(mesh)
+      vertices += mesh.geometry.getAttribute('position').count
+      if (vertices >= MERGE_BATCH_VERTICES) {
+        await mergeBatch(material, batch)
+        batch = []
+        vertices = 0
+        await breathe()
+      }
+    }
+    await mergeBatch(material, batch)
+    await breathe()
+  }
+}
+
 const craftModels = new Map<string, Promise<THREE.Object3D>>()
 function loadModel(url: string) {
   let pending = craftModels.get(url)
@@ -104,7 +193,9 @@ function loadModel(url: string) {
     pending = new Promise((resolve, reject) => {
       modelLoader().load(
         url,
-        (gltf) => {
+        async (gltf) => {
+          // (a merge that fails leaves the parts as they were)
+          await mergeByMaterial(gltf.scene).catch(() => {})
           // centred, one unit across at its widest
           const box = new THREE.Box3().setFromObject(gltf.scene)
           const size = box.getSize(new THREE.Vector3())

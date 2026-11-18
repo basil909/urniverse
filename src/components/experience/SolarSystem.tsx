@@ -2195,7 +2195,8 @@ function Planet({
   const sharpClouds = useSharpTexture(
     index === 2 ? SHARP_EARTH_MAPS.clouds : undefined,
     sharp,
-    { colorSpace: THREE.NoColorSpace },
+    // two channels, not four: clouds are read as .g (21 MB, not 43)
+    { colorSpace: THREE.NoColorSpace, format: THREE.RGFormat },
   )
   const sharpNight = useSharpTexture(
     index === 2 ? SHARP_EARTH_MAPS.night : undefined,
@@ -2393,6 +2394,7 @@ function Planet({
         texture.dispose()
         return
       }
+      texture.format = THREE.RedFormat // one channel: read as .r
       texture.colorSpace = THREE.NoColorSpace
       texture.wrapS = THREE.RepeatWrapping
       texture.wrapT = THREE.ClampToEdgeWrapping
@@ -2449,6 +2451,7 @@ function Planet({
       url: string,
       colorTexture: boolean,
       onLoaded: (value: THREE.Texture) => void,
+      format: THREE.PixelFormat = THREE.RGBAFormat,
     ) => {
       loader.load(url, (loaded) => {
         if (cancelled) {
@@ -2456,6 +2459,7 @@ function Planet({
           return
         }
 
+        loaded.format = format
         loaded.colorSpace = colorTexture
           ? THREE.SRGBColorSpace
           : THREE.NoColorSpace
@@ -2472,12 +2476,16 @@ function Planet({
     }
 
     loadLocal(EARTH_LOCAL_TEXTURES.color, true, setEarthMap)
-    loadLocal(EARTH_LOCAL_TEXTURES.clouds, false, setEarthClouds)
+    // grey maps kept in the channels their shaders read, not four: the
+    // same pixels in a half (clouds, read as .g) or a quarter (the sea
+    // mask, read as .r) of the graphics memory
+    loadLocal(EARTH_LOCAL_TEXTURES.clouds, false, setEarthClouds, THREE.RGFormat)
     loadLocal(EARTH_LOCAL_TEXTURES.normal, false, setEarthNormal)
     loadLocal(
       EARTH_LOCAL_TEXTURES.specular,
       false,
       setEarthSpecular,
+      THREE.RedFormat,
     )
     loadLocal(EARTH_LOCAL_TEXTURES.night, true, setEarthLights)
 
@@ -3124,6 +3132,7 @@ function Moon({ sharp }: { sharp: boolean }) {
       url: string,
       colorTexture: boolean,
       setter: (value: THREE.Texture) => void,
+      format: THREE.PixelFormat = THREE.RGBAFormat,
     ) => {
       loader.load(url, (loaded) => {
         if (cancelled) {
@@ -3131,6 +3140,7 @@ function Moon({ sharp }: { sharp: boolean }) {
           return
         }
 
+        loaded.format = format
         loaded.colorSpace = colorTexture
           ? THREE.SRGBColorSpace
           : THREE.NoColorSpace
@@ -3147,7 +3157,7 @@ function Moon({ sharp }: { sharp: boolean }) {
     }
 
     load(MOON_LOCAL_TEXTURES.color, true, setMap)
-    load(MOON_LOCAL_TEXTURES.height, false, setHeight)
+    load(MOON_LOCAL_TEXTURES.height, false, setHeight, THREE.RedFormat) // a bump map: read as .x
 
     return () => {
       cancelled = true

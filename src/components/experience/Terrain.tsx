@@ -341,6 +341,7 @@ export default function Terrain({
     if (!config.heightMap && !config.seaMap) return null
     // filled in by an effect below (loading while rendering upsets React)
     const texture = new THREE.Texture()
+    texture.format = THREE.RedFormat // relief or sea mask: read as .r
     texture.colorSpace = THREE.NoColorSpace
     texture.wrapS = THREE.RepeatWrapping
     return texture
