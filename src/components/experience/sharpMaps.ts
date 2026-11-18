@@ -48,19 +48,82 @@ function sharpMapsAllowed(gl: THREE.WebGLRenderer) {
   return sharpAllowed
 }
 
-/* Each 4K upload costs the main thread ~20–40 ms. Uploads go one at a
-   time, a few frames apart, so Earth's four maps never land in one frame. */
+/* A 4K map sent to the graphics card in one go costs a frame 30–80 ms (a
+   visible jolt just as the camera settles on a planet). So it goes up in
+   tiles instead: the texture's memory is reserved empty, the decoded map
+   is cut into 1024 x 512 tiles off the main thread, one tile is copied in
+   per frame (a few ms), and the smaller mip levels are made once, with the
+   last tile. The same pixels, spread over some 16 frames. Maps go one at a
+   time, so Earth's four never share a frame. The planet keeps its 2K map
+   until the last tile is in. */
+const TILE_W = 1024
+const TILE_H = 512
 let uploadQueue: Promise<void> = Promise.resolve()
-function queueUpload(upload: () => void) {
-  uploadQueue = uploadQueue.then(
-    () =>
-      new Promise<void>((done) => {
-        requestAnimationFrame(() => {
-          upload()
-          requestAnimationFrame(() => requestAnimationFrame(() => done()))
-        })
-      }),
+
+/* Freeing a 4K map is felt too: Earth's four freed in one moment stalled
+   a frame for 50 ms. So they are let go one at a time, a little apart,
+   starting once the material is back on its 2K map. */
+const RELEASE_AFTER_MS = 1000
+const RELEASE_GAP_MS = 350
+let releaseAt = 0
+function releaseLater(map: THREE.Texture) {
+  const now = performance.now()
+  releaseAt = Math.max(now + RELEASE_AFTER_MS, releaseAt + RELEASE_GAP_MS)
+  window.setTimeout(() => map.dispose(), releaseAt - now)
+}
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+
+function uploadInTiles(
+  gl: THREE.WebGLRenderer,
+  bitmap: ImageBitmap,
+  map: THREE.DataTexture,
+  stillWanted: () => boolean,
+) {
+  const job = uploadQueue.then(async () => {
+    if (!stillWanted()) return false
+    const width = bitmap.width
+    const height = bitmap.height
+    const tileW = Math.min(TILE_W, width)
+    const tileH = Math.min(TILE_H, height)
+    // cut into tiles (off the main thread); rows already run bottom up
+    const cuts: Promise<{ tile: ImageBitmap; x: number; y: number }>[] = []
+    for (let y = 0; y < height; y += tileH) {
+      for (let x = 0; x < width; x += tileW) {
+        const w = Math.min(tileW, width - x)
+        const h = Math.min(tileH, height - y)
+        cuts.push(createImageBitmap(bitmap, x, y, w, h, { premultiplyAlpha: 'none' }).then((tile) => ({ tile, x, y })))
+      }
+    }
+    const tiles = await Promise.all(cuts)
+    // the memory, with room for every mip level (reserved, nothing sent)
+    map.generateMipmaps = true
+    gl.initTexture(map)
+    const source = new THREE.Texture()
+    source.flipY = false
+    const place = new THREE.Vector2()
+    let complete = true
+    for (let i = 0; i < tiles.length; i += 1) {
+      await nextFrame()
+      if (!stillWanted()) {
+        complete = false
+        break
+      }
+      const { tile, x, y } = tiles[i]
+      source.image = tile
+      // the mip levels are made once, with the last tile
+      map.generateMipmaps = i === tiles.length - 1
+      gl.copyTextureToTexture(source, map, null, place.set(x, y))
+    }
+    tiles.forEach(({ tile }) => tile.close())
+    map.generateMipmaps = true
+    return complete
+  })
+  // the queue moves on whatever happens to this map
+  uploadQueue = job.then(
+    () => nextFrame(),
+    () => nextFrame(),
   )
+  return job
 }
 
 /* wait this long after arriving, so the text fades in undisturbed */
@@ -127,21 +190,26 @@ export function useSharpTexture(
           bitmap.close()
           return
         }
-        const map = new THREE.Texture(bitmap)
+        // an empty texture of the map's size, filled tile by tile
+        const map = new THREE.DataTexture(null, bitmap.width, bitmap.height, format, THREE.UnsignedByteType)
+        map.source.dataReady = false
         map.flipY = false
-        map.format = format
         map.colorSpace = colorSpace
         map.wrapS = THREE.RepeatWrapping
         map.wrapT = THREE.ClampToEdgeWrapping
+        map.magFilter = THREE.LinearFilter
+        map.minFilter = THREE.LinearMipmapLinearFilter
         map.anisotropy = Math.min(anisotropy, gl.capabilities.getMaxAnisotropy())
         map.needsUpdate = true
         owned = map
-        // upload now (camera is at rest), not on the first frame it is drawn
-        queueUpload(() => {
-          if (cancelled) return
-          gl.initTexture(map)
-          setTexture(map)
-        })
+        uploadInTiles(gl, bitmap, map, () => !cancelled)
+          .then((complete) => {
+            bitmap.close()
+            if (complete && !cancelled) setTexture(map)
+          })
+          .catch(() => {
+            bitmap.close() // keep the 2K map
+          })
       },
       undefined,
       () => {
@@ -155,10 +223,7 @@ export function useSharpTexture(
       if (owned) {
         const map = owned
         // let the material switch back to the 2K map before freeing this one
-        window.setTimeout(() => {
-          map.dispose()
-          ;(map.image as ImageBitmap | undefined)?.close?.()
-        }, 1000)
+        releaseLater(map)
       }
     }
   }, [url, active, colorSpace, anisotropy, gl])
