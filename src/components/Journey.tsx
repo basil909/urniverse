@@ -17,6 +17,7 @@ import CountUp from './ui/CountUp'
 import MotionControl from './ui/MotionControl'
 import SoundToggle from './ui/SoundToggle'
 import FlightHud from './ui/FlightHud'
+import ChapterMenu from './ui/ChapterMenu'
 import Icon from './ui/Icon'
 import { pilot } from './experience/pilotState'
 import { WORLD_DETAILS } from '../data/worlds'
@@ -1227,6 +1228,15 @@ export default function Journey() {
           <span className="brand-name">You Are Here</span>
         </button>
 
+        {/* every chapter, one tap away (the rail is hidden on a phone) */}
+        {!flying && (
+          <ChapterMenu
+            chapters={JOURNEY.map((chapter) => ({ id: chapter.id, name: titleCase(chapter.label), accent: chapter.accent }))}
+            section={section}
+            onGo={(index) => goToSection(index)}
+          />
+        )}
+
         {/* three small tools: fly, real motion, sound */}
         <div className="hud-tools">
           <button
@@ -1382,12 +1392,16 @@ export default function Journey() {
                 One star. Eight planets. Scroll to travel from the Sun to
                 the edge of home, and see where you really are.
               </p>
-              <button className="begin-button" onClick={scrollToStart}>
-                <span className="begin-ring">
-                  <span className="begin-arrow">↓</span>
-                </span>
-                <span className="begin-text">Begin the journey</span>
-              </button>
+              <div className="hero-actions">
+                <button type="button" className="btn btn--primary btn--lg" onClick={scrollToStart}>
+                  Begin the journey
+                  <Icon name="arrow" className="is-down" />
+                </button>
+                <button type="button" className="btn btn--ghost btn--lg" onClick={takeOff}>
+                  <Icon name="shuttle" />
+                  Fly the Shuttle
+                </button>
+              </div>
               {today && (
                 <p className="hero-note">
                   Planets start where they are today, {today}
@@ -1528,16 +1542,19 @@ export default function Journey() {
                 Now look <em>back.</em>
               </div>
               <p className="return-text" aria-hidden="true">
-                Eight worlds. One tiny corner of a much larger universe.
-                <br />
-                <strong>And this is only the beginning.</strong>
+                Eight worlds, one star, one galaxy among many: a tiny corner of
+                a much larger universe. <strong>And this is only the beginning.</strong>
               </p>
-              <button className="begin-button" onClick={() => goToSection(0)}>
-                <span className="begin-ring">
-                  <span className="begin-arrow">↑</span>
-                </span>
-                <span className="begin-text">Start again</span>
-              </button>
+              <div className="hero-actions return-actions">
+                <button type="button" className="btn btn--primary btn--lg" onClick={() => goToSection(0)}>
+                  <Icon name="arrow" className="is-up-straight" />
+                  Start again
+                </button>
+                <button type="button" className="btn btn--ghost btn--lg" onClick={takeOff}>
+                  <Icon name="shuttle" />
+                  Fly the Shuttle
+                </button>
+              </div>
               <p className="credits">
                 Planet textures:{' '}
                 <a

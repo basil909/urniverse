@@ -83,6 +83,17 @@ export default function Loader() {
         </svg>
         <div className="loader-percent">{done ? 100 : percent}%</div>
         <div className="loader-label">Charting the Solar System</div>
+        <ul className="loader-tips" aria-label="How to get about">
+          <li>
+            <kbd>Scroll</kbd> or the arrow keys to travel
+          </li>
+          <li>
+            <kbd>Drag</kbd> a planet to turn it
+          </li>
+          <li>
+            <kbd>Fly</kbd> the Shuttle anywhere
+          </li>
+        </ul>
       </div>
     </div>
   )

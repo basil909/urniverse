@@ -296,6 +296,8 @@ void main() {
   gl_FragColor = vec4(vec3(0.62, 0.72, 0.95) * uOpacity, 1.0);
 }`
 
+const _nameAt = new THREE.Vector3()
+
 export default function NightSky({ progressRef }: { progressRef: MutableRefObject<number> }) {
   const group = useRef<THREE.Group>(null)
   const camera = useThree((state) => state.camera)
@@ -461,10 +463,11 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     group.current.position.copy(camera.position)
     starMaterial.uniforms.uPixelRatio.value = gl.getPixelRatio()
 
-    // constellations only in the opening, wide view (and the return)
+    // constellations only in the opening, wide view (at the end they ran
+    // through the closing words)
     const progress = progressRef.current ?? 0
     const chapter = Math.floor(progress)
-    const wide = (chapter === 0 || chapter === 13) && !pilot.active
+    const wide = chapter === 0 && !pilot.active
     linesOn.current += ((wide ? 1 : 0) - linesOn.current) * (1 - Math.exp(-delta * 1.5))
     lineMaterial.uniforms.uOpacity.value = linesOn.current * 0.09
     // the nebulae glow fully in the wide views, softer behind close-ups,
@@ -475,8 +478,19 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     const names = linesOn.current > 0.05
     if (names !== showNames) setShowNames(names)
     const opacity = (linesOn.current * 0.38).toFixed(3)
-    labels.current.forEach((label) => {
-      if (label) label.style.opacity = opacity
+    const portrait = camera instanceof THREE.PerspectiveCamera && camera.aspect < 1
+    NAMED.forEach((name, i) => {
+      const label = labels.current[i]
+      if (!label) return
+      // never over the opening words: the left of a wide screen, the
+      // lower half of a tall one
+      const p = positions.get(name)
+      let hidden = false
+      if (p) {
+        _nameAt.copy(p).add(group.current!.position).project(camera)
+        hidden = portrait ? _nameAt.y < 0.05 : _nameAt.x < -0.05 && _nameAt.y > -0.8 && _nameAt.y < 0.75
+      }
+      label.style.opacity = hidden ? '0' : opacity
     })
   })
 
