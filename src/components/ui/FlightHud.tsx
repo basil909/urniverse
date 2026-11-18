@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import { pilot, resetPilotInput, setView, TIME_STEPS, VIEW_STEPS } from '../experience/pilotState'
 import { FlightAudio, SOUND_EVENT, soundSwitch } from './flightAudio'
 import { earthToday } from '../experience/earthToday'
+import Icon from './Icon'
 
 /* the first flight's guide: three steps, shown once (remembered) */
 const GUIDE_KEY = 'urniverse-flight-guide'
@@ -907,12 +908,14 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           onPointerCancel={() => (pilot.touchThrust = false)}
           onPointerLeave={() => (pilot.touchThrust = false)}
         >
+          <Icon name="thrust" />
           Thrust
         </button>
       )}
       {/* touch: landing, when a world is near enough (L on a keyboard) */}
       {touch && canLand && (
         <button type="button" className="flight-touch-land" onClick={() => (pilot.landRequest = true)}>
+          <Icon name="land" />
           Land
         </button>
       )}
@@ -920,6 +923,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <div className="flight-actions">
         {/* leaves flight, back to where you were (landing on a world is L) */}
         <button type="button" className="flight-land" onClick={onLand}>
+          <Icon name="exit" />
           Exit <kbd>Esc</kbd>
         </button>
         <button
@@ -931,6 +935,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
             setControls(false)
           }}
         >
+          <Icon name="compass" />
           Go to <kbd>G</kbd>
         </button>
         <button
@@ -942,6 +947,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
             setGoTo(false)
           }}
         >
+          <Icon name="keys" />
           Controls <kbd>H</kbd>
         </button>
       </div>

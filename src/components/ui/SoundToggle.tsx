@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import Icon from './Icon'
 import { Soundscape } from './soundscape'
 import { SOUND_EVENT, soundSwitch } from './flightAudio'
 
@@ -49,11 +50,7 @@ export default function SoundToggle({ section }: { section: number }) {
       onClick={toggle}
     >
       {/* three bars: still when off, gently moving when on */}
-      <span className="sound-bars" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
+      <Icon name={on ? 'sound' : 'muted'} />
     </button>
   )
 }

@@ -17,6 +17,7 @@ import CountUp from './ui/CountUp'
 import MotionControl from './ui/MotionControl'
 import SoundToggle from './ui/SoundToggle'
 import FlightHud from './ui/FlightHud'
+import Icon from './ui/Icon'
 import { pilot } from './experience/pilotState'
 import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
@@ -1035,9 +1036,7 @@ export default function Journey() {
             title={flying ? 'Land' : 'Fly'}
             onClick={() => (flying ? land() : takeOff())}
           >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 1.5l1.4 4.3 5.1 2.6-5.1 1.2L8 14.5l-1.4-4.9-5.1-1.2 5.1-2.6z" />
-            </svg>
+            <Icon name="shuttle" />
           </button>
           <MotionControl />
           <SoundToggle section={section} />

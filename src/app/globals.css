@@ -29,7 +29,33 @@
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --pad: clamp(20px, 3vw, 44px);
+
+  /* the glass every control and card is made of: dark, a little see-through,
+     blurred behind, a hairline edge with a faint light along its top */
+  --surface: rgba(11, 14, 22, 0.5);
+  --surface-hover: rgba(24, 29, 40, 0.62);
+  --surface-strong: rgba(11, 14, 22, 0.82);
+  --surface-edge: rgba(255, 255, 255, 0.11);
+  --surface-edge-hover: rgba(255, 255, 255, 0.26);
+  --surface-blur: blur(14px) saturate(150%);
+  --surface-light: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --surface-shadow: 0 10px 32px rgba(0, 0, 0, 0.38);
+  --control-height: 36px;
 }
+
+/* the icons (ui/Icon.tsx): one line weight at any size */
+.icon {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+}
+.icon * { vector-effect: non-scaling-stroke; }
 
 /* ============================================================
    RESET & BASE
@@ -1320,46 +1346,57 @@ html.is-spinning * {
 .tool-button {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: var(--control-height);
+  height: var(--control-height);
   padding: 0;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--surface-edge);
   border-radius: 50%;
-  background: rgba(6, 8, 14, 0.35);
-  backdrop-filter: blur(6px);
+  background: var(--surface);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light);
   color: var(--text-2);
+  font-size: 18px;
   cursor: pointer;
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
+  transition: color 0.2s, border-color 0.2s, background 0.2s, transform 0.2s var(--ease);
 }
-.tool-button:hover { color: var(--text-1); border-color: rgba(255, 255, 255, 0.28); }
+.tool-button:hover { color: var(--text-1); border-color: var(--surface-edge-hover); background: var(--surface-hover); }
+.tool-button:active { transform: scale(0.94); }
 .tool-button[aria-pressed='true'] {
-  color: var(--text-1);
-  border-color: color-mix(in srgb, var(--planet-accent) 60%, transparent);
-  background: color-mix(in srgb, var(--planet-accent) 14%, rgba(6, 8, 14, 0.35));
+  color: color-mix(in srgb, var(--planet-accent) 55%, white);
+  border-color: color-mix(in srgb, var(--planet-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--planet-accent) 16%, var(--surface));
+  box-shadow: var(--surface-light), 0 0 18px color-mix(in srgb, var(--planet-accent) 22%, transparent);
 }
 .tool-button svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  /* (sized by the button's font) */
+  display: block;
 }
-.tool-button:focus-visible { outline: 1px solid var(--planet-accent); outline-offset: 2px; }
+.tool-button:focus-visible { outline: 1.5px solid var(--planet-accent); outline-offset: 2px; }
 
 /* real motion: speeds and the live clock, beneath the clock button */
 .motion-control { position: relative; }
 .motion-panel {
   position: absolute;
-  top: 38px;
+  top: calc(var(--control-height) + 8px);
   right: 0;
   display: grid;
   justify-items: end;
-  gap: 6px;
+  gap: 7px;
   white-space: nowrap;
+  animation: goto-in 0.25s var(--ease) both;
 }
-.motion-speeds { display: flex; gap: 0.2rem; }
+.motion-speeds {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--surface-edge);
+  border-radius: 999px;
+  background: var(--surface);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light);
+}
 .motion-speeds button {
   padding: 0.3rem 0.55rem;
   border: 1px solid transparent;
@@ -1371,33 +1408,29 @@ html.is-spinning * {
   cursor: pointer;
 }
 .motion-speeds button:hover { color: var(--text-1); }
-.motion-speeds button[aria-pressed='true'] { color: var(--text-1); border-color: var(--hairline); }
-.motion-speeds .motion-now { margin-left: 0.3rem; }
+.motion-speeds button[aria-pressed='true'] { color: var(--text-1); background: rgba(255, 255, 255, 0.09); }
+.motion-speeds .motion-now { margin-left: 2px; color: var(--text-2); }
 .sim-date {
+  padding-right: 10px;
   font: 400 11px / 1 var(--sans);
   letter-spacing: 0.04em;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 
-/* sound: three small bars */
-.sound-bars { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
-.sound-bars span { width: 2px; height: 3px; border-radius: 1px; background: currentColor; }
-.sound-toggle[aria-pressed='true'] .sound-bars span {
-  background: var(--planet-accent);
-  animation: sound-bar 1.6s ease-in-out infinite;
-}
-.sound-toggle[aria-pressed='true'] .sound-bars span:nth-child(2) { animation-delay: -0.5s; }
-.sound-toggle[aria-pressed='true'] .sound-bars span:nth-child(3) { animation-delay: -1s; }
-@keyframes sound-bar {
-  0%, 100% { height: 3px; }
-  50% { height: 10px; }
+/* sound: the speaker's waves breathe while it plays */
+.sound-toggle[aria-pressed='true'] .icon-wave { animation: sound-wave 2.4s ease-in-out infinite; }
+.sound-toggle[aria-pressed='true'] .icon-wave-far { animation-delay: -1.2s; }
+@keyframes sound-wave {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sound-toggle[aria-pressed='true'] .sound-bars span { animation: none; height: 7px; }
+  .sound-toggle[aria-pressed='true'] .icon-wave { animation: none; }
 }
 @media (max-width: 640px) {
   .hud-tools { top: 14px; gap: 6px; }
+  :root { --control-height: 34px; }
 }
 
 /* decluttered chapter text: the two actions share a line */
@@ -1706,11 +1739,13 @@ html.is-spinning * {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 0.6rem 0.9rem 0.6rem 1rem;
-  border: 1px solid var(--hairline);
+  padding: 0.65rem 1rem 0.65rem 1.1rem;
+  border: 1px solid var(--surface-edge);
   border-radius: 999px;
-  background: rgba(6, 8, 14, 0.5);
-  backdrop-filter: blur(6px);
+  background: var(--surface);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light), var(--surface-shadow);
   color: var(--text-1);
   font: 400 12px / 1.2 var(--sans);
   letter-spacing: 0.02em;
@@ -1768,44 +1803,64 @@ html.is-photo .flight-land { opacity: 0; pointer-events: none; }
 }
 .flight-guide line { stroke: rgba(255, 255, 255, 0.12); stroke-dasharray: 2 5; }
 .flight-land,
-.flight-thrust {
+.flight-thrust,
+.flight-touch-land,
+.flight-goto-button {
   position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   pointer-events: auto;
-  border: 1px solid var(--hairline);
+  border: 1px solid var(--surface-edge);
   border-radius: 999px;
-  background: rgba(6, 8, 14, 0.45);
-  backdrop-filter: blur(6px);
+  background: var(--surface);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light);
   color: var(--text-1);
   font: 500 12px / 1 var(--sans);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s var(--ease);
 }
+.flight-land,
+.flight-touch-land,
+.flight-goto-button {
+  height: var(--control-height);
+  padding: 0 13px 0 11px;
+}
+.flight-land .icon,
+.flight-touch-land .icon,
+.flight-goto-button .icon { font-size: 16px; color: var(--text-2); }
+.flight-land:hover,
+.flight-goto-button:hover { border-color: var(--surface-edge-hover); background: var(--surface-hover); }
+.flight-land:active,
+.flight-touch-land:active,
+.flight-goto-button:active { transform: scale(0.97); }
+.flight-land:focus-visible,
+.flight-thrust:focus-visible,
+.flight-touch-land:focus-visible,
+.flight-goto-button:focus-visible { outline: 1.5px solid var(--planet-accent); outline-offset: 2px; }
 .flight-land {
   left: var(--pad);
   bottom: 30px;
-  padding: 0.55rem 1.1rem;
 }
+.flight-thrust .icon { font-size: 20px; }
 .flight-thrust {
   right: var(--pad);
   bottom: 30px;
+  flex-direction: column;
+  gap: 4px;
   width: 76px;
   height: 76px;
   border-radius: 50%;
+  font-size: 11px;
   touch-action: none;
 }
 .flight-touch-land {
-  position: absolute;
   right: var(--pad);
   bottom: 118px;
-  padding: 0.5rem 1rem;
-  pointer-events: auto;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  background: rgba(6, 8, 14, 0.45);
-  backdrop-filter: blur(6px);
-  color: var(--text-1);
-  font: 500 12px / 1 var(--sans);
-  letter-spacing: 0.06em;
 }
 /* phones: the buttons row fills the width, so Thrust sits above it */
 @media (max-width: 640px) {
@@ -1827,31 +1882,37 @@ html.is-photo .flight-land { opacity: 0; pointer-events: none; }
 /* narrow screens: the readout moves up, clear of the buttons */
 @media (max-width: 1100px) {
   .flight-readout { bottom: 84px; }
-}
-.flight-land kbd {
-  margin-left: 6px;
-  font: 500 9.5px / 1 var(--sans);
-  color: var(--text-3);
+  .flight-hint { bottom: 124px; }
 }
 .flight-goto-button {
   position: relative;
-  padding: 0.55rem 1rem;
-  pointer-events: auto;
-  border: 1px solid var(--hairline);
-  border-radius: 999px;
-  background: rgba(6, 8, 14, 0.45);
-  backdrop-filter: blur(6px);
-  color: var(--text-1);
-  font: 500 12px / 1 var(--sans);
-  letter-spacing: 0.06em;
-  cursor: pointer;
 }
-.flight-goto-button.is-open { border-color: rgba(255, 255, 255, 0.3); }
+.flight-goto-button.is-open { border-color: var(--surface-edge-hover); background: var(--surface-hover); }
+.flight-goto-button.is-open .icon { color: var(--text-1); }
 .flight-goto-button kbd,
+.flight-land kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 1px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  font: 500 9.5px / 1 var(--sans);
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
 .flight-goto kbd {
   margin-left: 6px;
   font: 500 9.5px / 1 var(--sans);
   color: var(--text-3);
+}
+/* no keyboard: no keys on the buttons */
+@media (hover: none) {
+  .flight-actions kbd { display: none !important; }
 }
 html.is-photo .flight-goto-button,
 html.is-photo .flight-goto,
@@ -1860,7 +1921,7 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
 .flight-controls {
   position: absolute;
   left: var(--pad);
-  bottom: 78px;
+  bottom: calc(30px + var(--control-height) + 10px);
   width: min(620px, calc(100vw - 2 * var(--pad)));
   max-height: min(66vh, 560px);
   overflow-y: auto;
@@ -1869,10 +1930,12 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   column-gap: 28px;
   pointer-events: auto;
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
-  background: rgba(6, 8, 14, 0.76);
-  backdrop-filter: blur(10px);
+  border: 1px solid var(--surface-edge);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light), var(--surface-shadow);
   animation: goto-in 0.25s var(--ease) both;
 }
 .flight-controls section { margin-bottom: 14px; }
@@ -1903,7 +1966,7 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
 .flight-goto {
   position: absolute;
   left: var(--pad);
-  bottom: 78px;
+  bottom: calc(30px + var(--control-height) + 10px);
   width: min(560px, calc(100vw - 2 * var(--pad)));
   max-height: min(62vh, 520px);
   overflow-y: auto;
@@ -1912,10 +1975,12 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   column-gap: 24px;
   pointer-events: auto;
-  border: 1px solid var(--hairline);
-  border-radius: 14px;
-  background: rgba(6, 8, 14, 0.72);
-  backdrop-filter: blur(10px);
+  border: 1px solid var(--surface-edge);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light), var(--surface-shadow);
   animation: goto-in 0.25s var(--ease) both;
 }
 @keyframes goto-in {
@@ -1978,9 +2043,13 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
 .flight-goto li button.is-here { color: var(--kind); }
 .flight-goto li button span { font-size: 11px; color: var(--text-3); }
 .flight-goto li button kbd { margin-left: auto; }
-.flight-thrust:active { background: color-mix(in srgb, var(--planet-accent) 30%, rgba(6, 8, 14, 0.45)); }
+.flight-thrust:active {
+  transform: scale(0.96);
+  border-color: color-mix(in srgb, var(--planet-accent) 60%, transparent);
+  background: color-mix(in srgb, var(--planet-accent) 26%, var(--surface));
+}
 @media (max-width: 640px) {
-  .flight-hint { white-space: normal; width: 80%; text-align: center; }
+  .flight-hint { white-space: normal; width: 80%; text-align: center; bottom: 216px; }
 }
 
 
