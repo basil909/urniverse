@@ -6,9 +6,16 @@
    button says otherwise; coloured by the text.
 ============================================================ */
 
-export type IconName = 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
+export type IconName = 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
 
 const PATHS: Record<IconName, React.ReactNode> = {
+  // a small world beside a great one: true size
+  scale: (
+    <>
+      <circle cx="14.2" cy="11.4" r="7" />
+      <circle cx="5.2" cy="17.2" r="2" />
+    </>
+  ),
   // the orbiter from above, nose up: the fly button
   shuttle: (
     <>

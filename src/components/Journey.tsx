@@ -31,7 +31,8 @@ import { WORLD_DETAILS } from '../data/worlds'
 import { INTERIORS, PLANET_INDEX } from '../data/interiors'
 import { cutaway } from './experience/cutawayState'
 import { lens } from './experience/lens'
-import { getPlanetHeliocentricAU, julianDate } from './experience/orbit'
+import { PLANETS, getPlanetHeliocentricAU, julianDate } from './experience/orbit'
+import { REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal, revealFigures } from './experience/scaleReveal'
 import { formatKm } from './ui/WorldLive'
 
 
@@ -1210,6 +1211,59 @@ export default function Journey() {
   // planets only (not the Sun): these can be dragged to spin
   const canSpin = textOn && active >= 1 && active <= 8
   const planetName = activeChapter ? titleCase(activeChapter.label) : ''
+
+  /* True size (scaleReveal.ts): the reveal at the Sun or a planet other
+     than Earth. 0 off; 1 running, nothing said yet; 2 "This is Earth.";
+     3 "And this is ..."; 4 the figures */
+  const sizeIndex = activeChapter ? PLANET_INDEX[activeChapter.id] : undefined
+  const sizeKm =
+    activeChapter?.id === 'sun' ? 695700 : sizeIndex !== undefined && activeChapter?.id !== 'earth' ? PLANETS[sizeIndex]?.radiusKm : undefined
+  const sizeName = activeChapter?.id === 'sun' ? 'the Sun' : planetName
+  const [revealStep, setRevealStep] = useState(0)
+  const endReveal = useCallback(() => {
+    reveal.active = false
+    setRevealStep(0)
+    lenisRef.current?.start()
+  }, [])
+  const startReveal = () => {
+    reveal.active = true
+    reveal.chapter = section
+    reveal.clock = 0
+    lenisRef.current?.stop()
+    setRevealStep(1)
+  }
+  // the captions follow the camera's clock
+  useEffect(() => {
+    if (revealStep === 0) return
+    let frame = 0
+    const tick = () => {
+      const t = reveal.clock
+      const step = t >= REVEAL_END - 0.4 ? 4 : t >= REVEAL_HOLD + REVEAL_PULL * 0.42 ? 3 : t >= 0.9 ? 2 : 1
+      setRevealStep((current) => (current === 0 ? 0 : step))
+      frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frame)
+  }, [revealStep === 0]) // eslint-disable-line react-hooks/exhaustive-deps
+  // out of it: Esc, a scroll, or leaving the chapter
+  useEffect(() => {
+    if (revealStep === 0) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') endReveal()
+    }
+    const onWheel = () => {
+      if (reveal.clock > 1.2) endReveal()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('wheel', onWheel, { passive: true })
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('wheel', onWheel)
+    }
+  }, [revealStep === 0, endReveal]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (reveal.active && reveal.chapter !== section) endReveal()
+  }, [section, endReveal])
   const stepTo = (chapterIndex: number) => {
     reopenAfter.current = true
     goToSection(chapterIndex + 1)
@@ -1341,7 +1395,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textOn && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
+      className={`universe-page ${revealStep > 0 ? 'is-revealing' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textOn && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -1359,6 +1413,44 @@ export default function Journey() {
       <Loader />
 
       {flying && <FlightHud onLand={land} />}
+
+      {/* true size: words over the reveal, like a documentary's */}
+      {revealStep > 0 && sizeKm !== undefined && (
+        <div className="reveal" role="status" aria-live="polite">
+          <AnimatePresence mode="wait">
+            {revealStep === 2 && (
+              <motion.div key="earth" className="reveal-card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 1.1, ease: EASE_OUT_EXPO }}>
+                <p className="reveal-line">This is Earth.</p>
+                <p className="reveal-sub">12,742 km across. Everyone who has ever lived, lived here.</p>
+              </motion.div>
+            )}
+            {revealStep === 3 && (
+              <motion.div key="it" className="reveal-card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 1.2, ease: EASE_OUT_EXPO }}>
+                <p className="reveal-line">And this is {sizeName}.</p>
+              </motion.div>
+            )}
+            {revealStep === 4 && (
+              <motion.div key="figures" className="reveal-card" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 1.2, ease: EASE_OUT_EXPO }}>
+                <p className="reveal-line">{revealFigures(sizeKm, activeChapter?.id === 'sun').line}</p>
+                <p className="reveal-sub">{revealFigures(sizeKm, activeChapter?.id === 'sun').sub}</p>
+                <div className="reveal-actions">
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => (reveal.clock = 0)}>
+                    Watch again
+                  </button>
+                  <button type="button" className="btn btn--primary btn--sm" onClick={endReveal}>
+                    Back to the story
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {revealStep < 4 && (
+            <button type="button" className="reveal-skip" onClick={endReveal}>
+              Skip <kbd>Esc</kbd>
+            </button>
+          )}
+        </div>
+      )}
 
       {!flying && <PickLayer />}
 
@@ -1712,6 +1804,21 @@ export default function Journey() {
                     </motion.div>
                   ))}
                 </div>
+
+                {sizeKm !== undefined && (
+                  <motion.button
+                    type="button"
+                    className="true-size"
+                    onClick={startReveal}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.62, ease: EASE_OUT_EXPO }}
+                  >
+                    <Icon name="scale" />
+                    See its true size
+                    <span className="true-size-hint">beside Earth</span>
+                  </motion.button>
+                )}
 
                 <motion.div
                   className="story-actions"

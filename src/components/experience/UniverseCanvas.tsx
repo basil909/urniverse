@@ -11,7 +11,7 @@ import {
   Vignette,
 } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
-import { PerformanceMonitor, useProgress } from '@react-three/drei'
+import { Html, PerformanceMonitor, useProgress } from '@react-three/drei'
 import { Component, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
 
@@ -39,10 +39,12 @@ import { getShipPass } from './shipLayer'
 import { LowResLayer, PerfMeter } from './PerfMeter'
 import { pilot } from './pilotState'
 import {
+  PLANETS,
   SYSTEM_OFFSET,
   getPlanetPosition,
   getPlanetVisualRadius,
 } from './orbit'
+import { EARTH_KM, REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal } from './scaleReveal'
 
 /* ============================================================
    CINEMATIC SOLAR SYSTEM JOURNEY
@@ -365,6 +367,94 @@ function getRestPose(
 }
 
 /* ============================================================
+   TRUE SIZE (see scaleReveal.ts): where the Earth goes, and the camera's
+   path from close on it back to the whole world
+============================================================ */
+
+const _rC = new THREE.Vector3()
+const _rV = new THREE.Vector3()
+const _rRight = new THREE.Vector3()
+const _rUp = new THREE.Vector3()
+const _rP0 = new THREE.Vector3()
+const _rP1 = new THREE.Vector3()
+const _rT1 = new THREE.Vector3()
+const _rHero = new THREE.Vector3()
+const _rArrival = new THREE.Vector3()
+const _rTarget = new THREE.Vector3()
+
+const _revealPos = new THREE.Vector3()
+const _revealTarget = new THREE.Vector3()
+
+const smoother = (x: number) => {
+  const t = THREE.MathUtils.clamp(x, 0, 1)
+  return t * t * t * (t * (t * 6 - 15) + 10)
+}
+
+/** the reveal's pose at a time; writes where the Earth is into `reveal` */
+function revealPose(
+  chapter: number,
+  progress: number,
+  camera: THREE.PerspectiveCamera,
+  time: number,
+  fromPos: THREE.Vector3,
+  fromTarget: THREE.Vector3,
+  outPos: THREE.Vector3,
+  outTarget: THREE.Vector3,
+) {
+  const isSun = chapter === 1
+  const index = chapter - 2
+  let radius: number
+  let realKm: number
+  if (isSun) {
+    _rC.copy(SYSTEM_OFFSET)
+    radius = 1
+    realKm = 695700
+    _rV.copy(SUN.position).sub(_rC).normalize()
+  } else {
+    calculatePlanetPose(index, progress, _rHero, _rArrival, _rTarget)
+    getPlanetPosition(index, simClock.jd, _rC)
+    radius = getPlanetVisualRadius(index)
+    realKm = PLANETS[index].radiusKm
+    _rV.copy(_rHero).sub(_rC).normalize()
+  }
+  const earth = (radius * EARTH_KM) / realKm
+  // the view's own right and up
+  _rRight.copy(_rV).negate().cross(_worldUp).normalize()
+  _rUp.copy(_rRight).cross(_rV).negate().normalize()
+
+  // the Earth: beside the world's sunlit edge, at the same depth as its
+  // centre (in front of it, it would look larger than it is); Saturn's
+  // beyond the rings, the Sun's clear of its glow
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * Math.min(1, camera.aspect)
+  const small = earth >= radius * 0.5
+  const apart = isSun
+    ? (radius + earth) * 1.3
+    : index === 5
+      ? radius * 2.55 + earth
+      : (radius + earth) * (small ? 1.3 : 1.16)
+  reveal.earth.copy(_rC).addScaledVector(_rRight, -apart)
+  _rT1.copy(_rC).lerp(reveal.earth, small ? 0.5 : isSun ? 0.18 : 0.22)
+  const halfSpan = Math.max(radius + _rT1.distanceTo(_rC), reveal.earth.distanceTo(_rT1) + earth)
+  _rP1.copy(_rT1).addScaledVector(_rV, (halfSpan / tanHalf) * 1.22)
+  reveal.earthRadius = earth
+  // close on the Earth: it fills most of the frame
+  _rP0.copy(reveal.earth).addScaledVector(_rV, earth * 4.4)
+
+  if (time < REVEAL_HOLD) {
+    // in from where the camera was, and hold
+    const k = smoother(time / 1.8)
+    outPos.lerpVectors(fromPos, _rP0, k)
+    outTarget.lerpVectors(fromTarget, reveal.earth, smoother(time / 1.2))
+    return
+  }
+  // the pull back: slow at first, gathering pace as the size dawns
+  const pull = smoother((time - REVEAL_HOLD) / REVEAL_PULL)
+  const grow = (Math.exp(4 * pull) - 1) / (Math.exp(4) - 1)
+  outPos.lerpVectors(_rP0, _rP1, grow)
+  outTarget.lerpVectors(reveal.earth, _rT1, grow)
+}
+
+/* ============================================================
    CAMERA CONTROLLER
 ============================================================ */
 
@@ -410,6 +500,10 @@ function CinematicCamera({
   )
 
   const piloting = useRef(false)
+  // the true-size reveal: how much of it the camera follows (1 in it,
+  // easing to 0 after), and the near plane it needed
+  const revealBlend = useRef(0)
+  const revealFrom = useRef({ pos: new THREE.Vector3(), target: new THREE.Vector3() })
   // the lens shift that sets a planet left of the words (0..1)
   const lensShift = useRef(0)
 
@@ -593,6 +687,47 @@ function CinematicCamera({
       }
     }
 
+    /* the true-size reveal: the camera follows its path while it runs,
+       and eases back to the chapter's own view after */
+    const revealHere = reveal.active && reveal.chapter === chapter && (planet || chapter === 1)
+    if (revealHere && revealBlend.current === 0) {
+      revealFrom.current.pos.copy(camera.position)
+      revealFrom.current.target.copy(_scratchTarget)
+      reveal.clock = 0
+    }
+    if (revealHere) {
+      reveal.clock = reducedMotion ? REVEAL_END : Math.min(reveal.clock + delta, REVEAL_END)
+      revealBlend.current = 1
+    } else if (revealBlend.current > 0) {
+      revealBlend.current = Math.max(0, revealBlend.current - delta / 1.8)
+      if (revealBlend.current === 0 || reveal.chapter !== chapter) revealBlend.current = 0
+    }
+    reveal.show = revealBlend.current
+    if (revealBlend.current > 0) {
+      revealPose(
+        chapter,
+        safeProgress,
+        camera,
+        revealHere ? reveal.clock : REVEAL_END,
+        revealFrom.current.pos,
+        revealFrom.current.target,
+        _revealPos,
+        _revealTarget,
+      )
+      const k = revealHere ? 1 : smoother(revealBlend.current)
+      _scratchPos.lerp(_revealPos, k)
+      _scratchTarget.lerp(_revealTarget, k)
+      // close on a small Earth (beside the Sun, a hundredth of its size)
+      const near = Math.min(0.08, reveal.earthRadius * 0.8)
+      if (Math.abs(camera.near - near) > 1e-6) {
+        camera.near = near
+        camera.updateProjectionMatrix()
+      }
+    } else if (camera.near !== 0.08) {
+      camera.near = 0.08
+      camera.updateProjectionMatrix()
+    }
+
     if (!initialized.current) {
       smoothPosition.current.copy(_scratchPos)
       camera.position.copy(smoothPosition.current)
@@ -646,7 +781,7 @@ function CinematicCamera({
     // planet sits left of the words (as a film frames a subject off-centre)
     const wide = camera.aspect > 1.2
     heroFrame.closer = wide ? 0.8 : 1
-    const shiftTarget = planet && wide ? 1 : 0
+    const shiftTarget = planet && wide && revealBlend.current === 0 ? 1 : 0
     const shiftBefore = lensShift.current
     lensShift.current += (shiftTarget - lensShift.current) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
     if (Math.abs(lensShift.current - shiftBefore) > 1e-5 || (shiftTarget === 0 && camera.filmOffset !== 0 && lensShift.current < 1e-4)) {
@@ -1472,6 +1607,105 @@ function Lens({
   return null
 }
 
+/* The Earth of the true-size reveal: the day map, lit by the Sun, under a
+   thin blue rim of air; drawn only while the reveal shows */
+const REVEAL_AIR_VERTEX = /* glsl */ `
+varying vec3 vNormalW;
+varying vec3 vView;
+varying vec3 vWorld;
+void main() {
+  vec4 world = modelMatrix * vec4(position, 1.0);
+  vWorld = world.xyz;
+  vNormalW = normalize(mat3(modelMatrix) * normal);
+  vView = normalize(cameraPosition - world.xyz);
+  gl_Position = projectionMatrix * viewMatrix * world;
+}`
+const REVEAL_AIR_FRAGMENT = /* glsl */ `
+uniform vec3 uSun;
+varying vec3 vNormalW;
+varying vec3 vView;
+varying vec3 vWorld;
+void main() {
+  float rim = pow(1.0 - max(dot(vNormalW, vView), 0.0), 3.0);
+  float day = smoothstep(-0.25, 0.4, dot(vNormalW, normalize(uSun - vWorld)));
+  gl_FragColor = vec4(vec3(0.36, 0.6, 1.0) * rim * day * day * 0.5, 1.0);
+}`
+
+function RevealEarth() {
+  const group = useRef<THREE.Group>(null)
+  const [map, setMap] = useState<THREE.Texture | null>(null)
+  const air = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { uSun: { value: SYSTEM_OFFSET } },
+        vertexShader: REVEAL_AIR_VERTEX,
+        fragmentShader: REVEAL_AIR_FRAGMENT,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.BackSide,
+      }),
+    [],
+  )
+  const loading = useRef(false)
+  const tag = useRef<HTMLDivElement>(null)
+  const ring = useRef<HTMLDivElement>(null)
+  const label = useRef<HTMLSpanElement>(null)
+  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
+  const size = useThree((state) => state.size)
+  useEffect(() => () => air.dispose(), [air])
+  useEffect(() => () => map?.dispose(), [map])
+
+  useFrame((_, delta) => {
+    const g = group.current
+    if (!g) return
+    const on = reveal.show > 0
+    g.visible = on
+    if (!on) return
+    if (!map && !loading.current) {
+      loading.current = true
+      textureLoader.load('/textures/earth-day.webp', (texture) => {
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.anisotropy = 8
+        setMap(texture)
+      })
+    }
+    g.position.copy(reveal.earth)
+    g.scale.setScalar(Math.max(reveal.earthRadius, 1e-6))
+    g.rotation.y += delta * 0.05
+    // its name, once it is small among the moons
+    if (tag.current && ring.current) {
+      const shown = reveal.active && reveal.clock > REVEAL_HOLD + REVEAL_PULL * 0.62
+      tag.current.style.opacity = shown ? '1' : '0'
+      // a ring just outside the Earth as drawn (a speck beside the Sun)
+      const distance = Math.max(camera.position.distanceTo(reveal.earth), 1e-6)
+      const px = (reveal.earthRadius / distance) / Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * (size.height / 2)
+      const across = Math.max(16, px * 2 + 14)
+      ring.current.style.width = `${across}px`
+      ring.current.style.height = `${across}px`
+      if (label.current) label.current.style.top = `${across / 2 + 8}px`
+    }
+  })
+
+  return (
+    <group ref={group} visible={false}>
+      <mesh>
+        <sphereGeometry args={[1, 96, 64]} />
+        <meshStandardMaterial key={map ? 'mapped' : 'plain'} map={map ?? undefined} color={map ? '#ffffff' : '#3b6fb6'} roughness={0.85} metalness={0} />
+      </mesh>
+      <mesh material={air} scale={1.035}>
+        <sphereGeometry args={[1, 64, 32]} />
+      </mesh>
+      <Html center zIndexRange={[40, 0]} style={{ pointerEvents: 'none' }}>
+        <div ref={tag} className="reveal-tag" style={{ opacity: 0 }}>
+          <div ref={ring} className="reveal-ring" />
+          <span ref={label} className="reveal-name">Earth</span>
+        </div>
+      </Html>
+    </group>
+  )
+}
+
 /* How far into a backlit hero shot we are (0..1): the planet's rim rays
    read it (see RimRays in SolarSystem) */
 function BacklitDriver({ progressRef }: { progressRef: MutableRefObject<number> }) {
@@ -1504,6 +1738,7 @@ function Scene({
       <Clock progressRef={progressRef} />
 
       <Lens progressRef={progressRef} glare={glare} />
+      <RevealEarth />
       <TextShield />
 
       <Pilot />

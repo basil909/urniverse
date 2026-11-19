@@ -61,6 +61,7 @@ import Aurora, { AURORA } from './Aurora'
 import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens, whenOpened } from './lens'
+import { reveal } from './scaleReveal'
 import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import Belts from './Belts'
 import Comet from './Comet'
@@ -2867,9 +2868,12 @@ function Planet({
       chapter >= 2 && chapter <= 9 ? chapter - 2 : chapter === 10 ? 2 : -1
     // In the Sun chapter the Sun is the subject: giants step back too
     const sunFocus = chapter === 1 && index >= 4
-    // flying, every planet is its true size
+    // flying, every planet is its true size; in the Sun's true-size
+    // reveal the planets (drawn far larger than the Sun's scale) step out
     const targetScale = pilot.active
       ? 1
+      : reveal.show > 0 && reveal.chapter === 1
+      ? 0.0001
       : sunFocus
       ? 0.35
       : subject < 0 || subject === index

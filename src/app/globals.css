@@ -4211,3 +4211,119 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .return-title {
   text-shadow: 0 2px 30px rgba(0, 0, 0, 0.55);
 }
+
+/* ============================================================
+   TRUE SIZE: the way in, and the words over the reveal
+   ============================================================ */
+
+.true-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 2px 0 18px;
+  padding: 0;
+  font: 500 13.5px / 1 var(--sans);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.true-size .icon {
+  font-size: 19px;
+  color: var(--planet-accent);
+  transition: transform 0.5s var(--ease);
+}
+.true-size-hint { color: var(--text-3); font-weight: 400; }
+.true-size:hover .icon { transform: scale(1.18); }
+.true-size:hover { color: #fff; }
+
+/* in the reveal: only the scene and its words */
+.is-revealing .stage,
+.is-revealing .rail,
+.is-revealing .time-bar,
+.is-revealing .hud-bottom,
+.is-revealing .hotspot,
+.is-revealing .moon-tag,
+.is-revealing .planet-pick {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.6s;
+}
+.is-revealing .letterbox { transform: none; }
+.is-revealing .hud-top { opacity: 0.25; }
+
+.reveal {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(9vh + 34px);
+  z-index: 70;
+  display: grid;
+  justify-items: center;
+  padding: 0 var(--pad);
+  pointer-events: none;
+  text-align: center;
+}
+.reveal-card { display: grid; justify-items: center; gap: 10px; }
+.reveal-line {
+  font-family: var(--serif);
+  font-size: clamp(30px, 3.4vw, 50px);
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  color: var(--text-1);
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.7);
+}
+.reveal-sub {
+  max-width: 34em;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text-2);
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.8);
+}
+.reveal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  pointer-events: auto;
+}
+.reveal-skip {
+  position: fixed;
+  right: var(--pad);
+  bottom: calc(9vh + 30px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  pointer-events: auto;
+}
+.reveal-skip:hover { color: var(--text-1); }
+.reveal-skip kbd {
+  padding: 2px 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  font: 500 10.5px / 1 var(--sans);
+}
+@media (max-width: 760px) {
+  .reveal { bottom: calc(7vh + 24px); }
+  .reveal-skip { bottom: auto; top: calc(7vh + 14px); }
+}
+
+.reveal-tag {
+  font: 600 10.5px / 1 var(--sans);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(190, 215, 255, 0.92);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  transition: opacity 1.2s;
+}
+.reveal-tag { position: relative; width: 0; height: 0; }
+.reveal-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 1px solid rgba(190, 215, 255, 0.7);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 14px rgba(120, 170, 255, 0.25);
+}
+.reveal-name { position: absolute; left: 0; transform: translateX(-50%); }
