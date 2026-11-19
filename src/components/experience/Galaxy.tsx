@@ -4,6 +4,7 @@ import { useMemo, useRef, useEffect, type MutableRefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
+import { shot } from './shots'
 
 /* ============================================================
    PROCEDURAL GALAXY
@@ -774,7 +775,7 @@ export default function Galaxy({
     if (marker.current && progressRef) {
       const progress = progressRef.current ?? 0
       const local = progress - GALAXY_CHAPTER
-      const target = local >= 0.18 && local < 0.93 ? 1 : 0
+      const target = (local >= 0.18 && local < 0.93 ? 1 : 0) * (shot.index >= 2 && shot.index <= 5 ? 0 : 1)
       markerOpacity.current +=
         (target - markerOpacity.current) * (1 - Math.exp(-delta * 4))
       marker.current.style.opacity = markerOpacity.current.toFixed(3)

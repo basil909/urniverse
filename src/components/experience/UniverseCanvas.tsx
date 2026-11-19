@@ -22,9 +22,10 @@ import Galaxy, {
   GALAXY_RADIUS,
   GALAXY_SCALE,
   GALAXY_TILT,
+  SUN_RADIUS as GALAXY_SUN_RADIUS,
 } from './Galaxy'
 import Starfield from './Starfield'
-import LocalGroup, { LOCAL_GROUP_VIEW } from './LocalGroup'
+import LocalGroup, { LOCAL_GROUP_VIEW, NEIGHBOURS } from './LocalGroup'
 import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
 import { lens } from './lens'
@@ -555,6 +556,203 @@ function shotPose(
   return radius
 }
 
+/* The film at the Sun, the Pale Blue Dot, the Milky Way and the Local
+   Group: the same six kinds of shot, each world's own version of them */
+const FILM_CHAPTERS = new Set([1, 10, 11, 12])
+const filmable = (chapter: number) => isPlanetChapter(chapter) || FILM_CHAPTERS.has(chapter)
+
+/** the lens for a shot (null: the chapter's own) */
+function shotFov(chapter: number, which: number) {
+  if (isPlanetChapter(chapter)) return which === 6 ? 64 : null
+  if (chapter === 10) return which === 6 ? PALE_BLUE_DOT_FOV : PLANET_CONFIG[2].fov
+  if (chapter === 1) return which === 6 ? 52 : which === 3 ? 30 : 41
+  return which === 6 ? 56 : 44
+}
+
+const _gN = new THREE.Vector3()
+const _gE1 = new THREE.Vector3()
+const _gE2 = new THREE.Vector3()
+const _gC = new THREE.Vector3()
+const _gA = new THREE.Vector3()
+const _gV = new THREE.Vector3()
+const _gD = new THREE.Vector3()
+const _gEuler = new THREE.Euler()
+const _venus = new THREE.Vector3()
+const _earthAt = new THREE.Vector3()
+
+/** a chapter's shot that is not a planet's own; returns the near plane */
+function chapterShotPose(which: number, chapter: number, time: number, outPos: THREE.Vector3, outTarget: THREE.Vector3) {
+  shotUp.set(0, 1, 0)
+  const turn = time * 0.01
+
+  if (chapter === 1) {
+    const S = SYSTEM_OFFSET
+    _gD.copy(SUN.position).sub(S).normalize().applyAxisAngle(_worldUp, turn)
+    _gE1.crossVectors(_worldUp, _gD).normalize()
+    switch (which) {
+      case 2: {
+        // low over the photosphere, looking along it to the limb
+        outPos.copy(S).addScaledVector(_gD, 1.3)
+        outTarget.copy(S).addScaledVector(_gD.clone().addScaledVector(_gE1, 1.25).normalize(), 1)
+        shotUp.copy(_gD)
+        shot.altitudeKm = 0.3 * 695700
+        return 0.01
+      }
+      case 3: {
+        // Venus in transit: on the line from the Sun out through Venus,
+        // beyond it, so it crosses the Sun's face (its air lit round it)
+        getPlanetPosition(1, simClock.jd, _venus)
+        _gV.copy(_venus).sub(S)
+        const gap = _gV.length()
+        _gV.normalize()
+        _gE2.crossVectors(_worldUp, _gV).normalize()
+        outPos.copy(_venus).addScaledVector(_gV, gap * 2.2).addScaledVector(_gE2, gap * 0.38 + Math.sin(time * 0.12) * gap * 0.02)
+        outTarget.copy(S)
+        return 0.05
+      }
+      case 4: {
+        outPos.copy(S).addScaledVector(_gD, 4.2).addScaledVector(_worldUp, 0.6)
+        outTarget.copy(S)
+        return 0.004
+      }
+      case 5: {
+        // sunrise from orbit: over Earth's night side by the terminator,
+        // the Sun just clearing the curve of the world
+        getPlanetPosition(2, simClock.jd, _earthAt)
+        const rE = getPlanetVisualRadius(2)
+        _gV.copy(S).sub(_earthAt).normalize()
+        _gN.copy(_worldUp).addScaledVector(_gV, -_gV.y).normalize()
+        _gN.multiplyScalar(0.97).addScaledVector(_gV, -0.24).normalize()
+        outPos.copy(_earthAt).addScaledVector(_gN, rE * 1.045)
+        _gE2.copy(_gV).addScaledVector(_gN, -_gV.dot(_gN)).normalize()
+        outTarget.copy(outPos).addScaledVector(_gE2, Math.cos(0.2)).addScaledVector(_gN, -Math.sin(0.2))
+        shotUp.copy(_gN)
+        shot.altitudeKm = 0.045 * 6371
+        return rE * 0.01
+      }
+      case 6: {
+        outPos.copy(S).addScaledVector(_worldUp, 10).addScaledVector(_gD, 9).addScaledVector(_gE1, 4)
+        outTarget.copy(S)
+        return 0.08
+      }
+      default: {
+        // the Sun large, a little off-centre
+        outPos.copy(S).addScaledVector(_gD, 3.1)
+        outTarget.copy(S).addScaledVector(_gE1, -0.55)
+        return 0.08
+      }
+    }
+  }
+
+  // the Milky Way's frame: its centre, pole and two axes in its disc
+  const R = GALAXY_RADIUS * GALAXY_SCALE
+  _gC.set(...GALAXY_POSITION)
+  _gEuler.set(...GALAXY_TILT)
+  _gN.set(0, 1, 0).applyEuler(_gEuler)
+  _gE1.set(1, 0, 0).applyEuler(_gEuler).applyAxisAngle(_gN, turn)
+  _gE2.set(0, 0, 1).applyEuler(_gEuler).applyAxisAngle(_gN, turn)
+
+  if (chapter === 11) {
+    switch (which) {
+      case 2: {
+        // over the arms, looking down across the star clouds and dust
+        outPos.copy(_gC).addScaledVector(_gE1, R * 0.62).addScaledVector(_gN, R * 0.22)
+        outTarget.copy(_gC).addScaledVector(_gE1, R * 0.3).addScaledVector(_gE2, R * 0.18)
+        shotUp.copy(_gN)
+        break
+      }
+      case 3: {
+        // edge-on: the dust lane dark against the glowing bulge
+        outPos.copy(_gC).addScaledVector(_gE2, R * 1.9).addScaledVector(_gN, R * 0.03)
+        outTarget.copy(_gC)
+        shotUp.copy(_gN)
+        break
+      }
+      case 4: {
+        outPos.copy(_gC).addScaledVector(_gN, R * 1.3).addScaledVector(_gE2, R * 1.5)
+        outTarget.copy(_gC)
+        break
+      }
+      case 5: {
+        // from where the Sun is, 26,000 light-years out, in the disc,
+        // looking to the centre: the Milky Way as we see it, a band
+        outPos.copy(_gC).addScaledVector(_gE1, GALAXY_SUN_RADIUS * GALAXY_SCALE).addScaledVector(_gN, R * 0.012)
+        outTarget.copy(_gC)
+        shotUp.copy(_gN)
+        break
+      }
+      case 6: {
+        outPos.copy(_gC).addScaledVector(_gN, R * 3.3).addScaledVector(_gE2, R * 1.6)
+        outTarget.copy(_gC)
+        break
+      }
+      default: {
+        outPos.copy(_gC).addScaledVector(_gN, R * 1.35).addScaledVector(_gE1, R * 0.95)
+        outTarget.copy(_gC)
+      }
+    }
+    return 0.08
+  }
+
+  // the Local Group: Andromeda and the Milky Way
+  const andromeda = NEIGHBOURS[0]
+  _gA.copy(andromeda.at)
+  const RA = andromeda.radius
+  _gEuler.set(...andromeda.tilt)
+  const nA = _gD.set(0, 1, 0).applyEuler(_gEuler)
+  // the way to Andromeda, in the Milky Way's disc
+  _gV.copy(_gA).sub(_gC)
+  _gV.addScaledVector(_gN, -_gV.dot(_gN)).normalize()
+  // a view of Andromeda: mostly face-on, turned a little towards us
+  const toUs = _venus.copy(_gC).sub(_gA).normalize()
+  const view = _earthAt.copy(nA).multiplyScalar(nA.dot(toUs) >= 0 ? 0.8 : -0.8).addScaledVector(toUs, 0.6).normalize()
+  view.applyAxisAngle(nA, turn)
+  switch (which) {
+    case 2:
+      // close on the core, a little off it (its bright heart below the frame's middle)
+      outPos.copy(_gA).addScaledVector(view, RA * 1.15)
+      outTarget.copy(_gA).addScaledVector(nA, RA * 0.12)
+      break
+    case 3:
+      // the Milky Way edge-on, its dust against its core, Andromeda beyond
+      outPos.copy(_gC).addScaledVector(_gV, -R * 2.1).addScaledVector(_gN, R * 0.03)
+      outTarget.copy(_gC)
+      shotUp.copy(_gN)
+      break
+    case 4:
+      outPos.copy(_gA).addScaledVector(view, RA * 3.4)
+      outTarget.copy(_gA)
+      break
+    case 5: {
+      // from above the Milky Way's far side, its disc across the lower
+      // frame, Andromeda beyond it
+      // (on the line from Andromeda through the Milky Way, beyond it and
+      // raised: Andromeda well out of the disc's plane stays in frame)
+      const line = _gC.clone().sub(_gA).normalize()
+      const lift = _gN.clone().addScaledVector(line, -_gN.dot(line)).normalize()
+      // (the side that keeps the Solar System's model, drawn near the
+      // origin, out of the frame)
+      const toOrigin = _gC.clone().addScaledVector(line, R * 1.7).negate().normalize()
+      if (toOrigin.dot(lift) < 0) lift.negate()
+      outPos.copy(_gC).addScaledVector(line, R * 1.7).addScaledVector(lift, -R * 0.55)
+      lift.negate()
+      const toCore = _gC.clone().sub(outPos).normalize()
+      const toAndromeda = _gA.clone().sub(outPos).normalize()
+      outTarget.copy(outPos).add(toCore.multiplyScalar(0.45).add(toAndromeda.multiplyScalar(0.55)).normalize())
+      shotUp.copy(lift)
+      break
+    }
+    case 6:
+      outPos.copy(LOCAL_GROUP_VIEW.position)
+      outTarget.copy(_gC).lerp(_gA, 0.5)
+      break
+    default:
+      outPos.copy(_gA).addScaledVector(view, RA * 2.3)
+      outTarget.copy(_gA)
+  }
+  return 0.08
+}
+
 /* ============================================================
    CAMERA CONTROLLER
 ============================================================ */
@@ -665,9 +863,10 @@ function CinematicCamera({
 
     // lens changes travel with the flight (e.g. the long lens on Earth
     // opening up to the wide galaxy view during the pull-back)
-    // the establishing shot: a wide lens
-    const baseFov = shot.index === 6 && shot.chapter === chapter && planet
-      ? 64
+    // a shot's own lens
+    const filmFov = shot.index > 0 && shot.chapter === chapter && filmable(chapter) && local >= BLEND ? shotFov(chapter, shot.index) : null
+    const baseFov = filmFov !== null
+      ? filmFov
       : chapter > 0 && local < BLEND
         ? THREE.MathUtils.lerp(fovFor(chapter - 1), fovFor(chapter), ease(local / BLEND))
         : fovFor(chapter)
@@ -830,13 +1029,21 @@ function CinematicCamera({
 
     /* the six shots: the camera takes the shot's own setup; at a cut it
        jumps there (the page has faded to black) */
-    const shotHere = shot.index > 0 && shot.chapter === chapter && planet && local >= BLEND
+    const shotHere = shot.index > 0 && shot.chapter === chapter && filmable(chapter) && local >= BLEND
     let shotNear = 0.08
     if (shotHere) {
       shot.clock += reducedMotion ? 0 : delta
-      const radius = shotPose(shot.index, chapter - 2, safeProgress, shot.clock, _scratchPos, _scratchTarget)
-      // low over the surface the near plane follows the small worlds
-      shotNear = shot.index === 4 ? 0.004 : Math.min(0.08, radius * 0.01)
+      if (planet || (chapter === 10 && shot.index < 6)) {
+        const radius = shotPose(shot.index, planet ? chapter - 2 : 2, safeProgress, shot.clock, _scratchPos, _scratchTarget)
+        // low over the surface the near plane follows the small worlds
+        shotNear = shot.index === 4 ? 0.004 : Math.min(0.08, radius * 0.01)
+      } else if (chapter === 10) {
+        paleBlueDotPose(_scratchPos, _scratchTarget)
+        shotUp.set(0, 1, 0)
+      } else {
+        shotNear = chapterShotPose(shot.index, chapter, shot.clock, _scratchPos, _scratchTarget)
+        if (shot.index === 4) shotNear = 0.004
+      }
       if (shot.cut) {
         smoothPosition.current.copy(_scratchPos)
         shot.cut = false

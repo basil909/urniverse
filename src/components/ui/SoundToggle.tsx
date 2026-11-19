@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react'
 import Icon from './Icon'
 import { Soundscape } from './soundscape'
 import { SOUND_EVENT, soundSwitch } from './flightAudio'
+import { FILM_SCORE_EVENT } from './filmScore'
 
 /* The sound switch: off by default. On, a quiet generative score fades
    in and follows the journey's chapters. */
@@ -17,6 +18,13 @@ export default function SoundToggle({ section }: { section: number }) {
   }, [section])
 
   useEffect(() => () => engine.current?.stop(), [])
+
+  // the film's score plays: the ambient soundtrack steps back
+  useEffect(() => {
+    const onScore = (event: Event) => engine.current?.duck((event as CustomEvent<boolean>).detail)
+    window.addEventListener(FILM_SCORE_EVENT, onScore)
+    return () => window.removeEventListener(FILM_SCORE_EVENT, onScore)
+  }, [])
 
   const toggle = async () => {
     if (on) {

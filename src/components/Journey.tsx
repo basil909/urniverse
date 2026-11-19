@@ -34,6 +34,7 @@ import { lens } from './experience/lens'
 import { PLANETS, getPlanetHeliocentricAU, julianDate } from './experience/orbit'
 import { REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal, revealFigures } from './experience/scaleReveal'
 import { SHOTS, SHOT_SECONDS, shot } from './experience/shots'
+import { FILM_SCORE_EVENT, FilmScore } from './ui/filmScore'
 import { formatKm } from './ui/WorldLive'
 
 
@@ -1272,6 +1273,38 @@ export default function Journey() {
   const [playing, setPlaying] = useState(false)
   const [cutting, setCutting] = useState(false)
   const cutTimers = useRef<number[]>([])
+  /* the film's score (ui/filmScore.ts): on unless switched off */
+  const score = useRef<FilmScore | null>(null)
+  const [music, setMusic] = useState(true)
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('urniverse-film-music') === 'off') setMusic(false)
+    } catch {}
+  }, [])
+  const stopScore = useCallback(() => {
+    score.current?.stop()
+    score.current = null
+    window.dispatchEvent(new CustomEvent(FILM_SCORE_EVENT, { detail: false }))
+  }, [])
+  const startScore = (at: number) => {
+    try {
+      score.current?.stop()
+      score.current = new FilmScore()
+      void score.current.start(at)
+      window.dispatchEvent(new CustomEvent(FILM_SCORE_EVENT, { detail: true }))
+    } catch {
+      score.current = null // no Web Audio: a silent film
+    }
+  }
+  const toggleMusic = () => {
+    const next = !music
+    setMusic(next)
+    try {
+      localStorage.setItem('urniverse-film-music', next ? 'on' : 'off')
+    } catch {}
+    if (next) startScore(Math.max(1, shot.index))
+    else stopScore()
+  }
   const cutTo = useCallback((next: number) => {
     cutTimers.current.forEach((t) => window.clearTimeout(t))
     setCutting(true)
@@ -1280,6 +1313,7 @@ export default function Journey() {
         shot.index = next
         shot.clock = 0
         shot.cut = true
+        if (next > 0) score.current?.setShot(next)
       }, 300),
       // the words once the camera has its new figures
       window.setTimeout(() => setFilm(next), 420),
@@ -1289,6 +1323,8 @@ export default function Journey() {
   const startFilm = () => {
     shot.chapter = section
     lenisRef.current?.stop()
+    // (in the click itself: browsers allow sound only after one)
+    if (music) startScore(1)
     setPlaying(true)
     setFilm(-1) // on, before the first shot's words
     cutTo(1)
@@ -1297,14 +1333,18 @@ export default function Journey() {
     if (shot.index === 0) return
     setPlaying(false)
     cutTo(0)
+    stopScore()
     lenisRef.current?.start()
-  }, [cutTo])
+  }, [cutTo, stopScore])
   // playing: the next shot when this one has held
   useEffect(() => {
     if (!playing || film < 1) return
     const timer = window.setTimeout(() => {
       if (film < SHOTS.length) cutTo(film + 1)
-      else setPlaying(false)
+      else {
+        setPlaying(false)
+        score.current?.finish()
+      }
     }, SHOT_SECONDS * 1000)
     return () => window.clearTimeout(timer)
   }, [playing, film, cutTo])
@@ -1341,17 +1381,60 @@ export default function Journey() {
       shot.index = 0
       setFilm(0)
       setPlaying(false)
+      stopScore()
       lenisRef.current?.start()
     }
-  }, [section])
-  useEffect(() => () => cutTimers.current.forEach((t) => window.clearTimeout(t)), [])
+  }, [section, stopScore])
+  useEffect(
+    () => () => {
+      cutTimers.current.forEach((t) => window.clearTimeout(t))
+      score.current?.stop()
+    },
+    [],
+  )
 
   const kmWords = (km: number) =>
     km >= 1e6
       ? `${(km / 1e6).toFixed(km >= 1e7 ? 0 : 1)} million km`
       : `${Number(km.toPrecision(km >= 1000 ? 2 : 3)).toLocaleString('en-GB')} km`
   const filmIndex = sizeIndex
+  const chapterId = activeChapter?.id ?? ''
+  const OTHER_LINES: Record<string, string[]> = {
+    sun: [
+      'The Sun: 1.39 million km across, 99.8% of the Solar System’s mass.',
+      'Over the photosphere: cells of rising gas, each the size of a country.',
+      'Venus crossing the face of the Sun. The next transit is in December 2117.',
+      'The Shuttle, 37 m long, before a star 1.39 million km across.',
+      'Sunrise over Earth’s horizon, from orbit: sixteen of them every day.',
+      'The Sun and its inner worlds: Mercury, Venus, Earth and Mars.',
+    ],
+    beyond: [
+      'Earth, half-lit by the Sun.',
+      'Over the clouds of home.',
+      'The Sun behind Earth: what the Moon sees in a lunar eclipse.',
+      'The Shuttle, 37 m long. Earth is 12,742 km across.',
+      'Earth’s horizon: the whole of its air, a thin blue line.',
+      'Voyager 1’s view in 1990, from 6 billion km: Earth, less than a pixel wide.',
+    ],
+    galaxy: [
+      'The Milky Way: some 100,000 light-years across, 100 to 400 billion stars.',
+      'Over the spiral arms: star clouds, and the dark dust between them.',
+      'Edge-on: a disc a thousand light-years thin, round a glowing bulge.',
+      'The Shuttle, 37 m long, before a galaxy 100,000 light-years wide.',
+      'From the Sun’s place, 26,000 light-years out: the band we see across our night sky.',
+      'From far above: one of perhaps two trillion galaxies.',
+    ],
+    'local-group': [
+      'Andromeda: 2.5 million light-years away, and coming closer.',
+      'Andromeda’s core: a trillion stars around a black hole 100 million Suns heavy.',
+      'Our galaxy edge-on, with Andromeda somewhere beyond.',
+      'The Shuttle, 37 m long, before a galaxy wider than our own.',
+      'Andromeda over the Milky Way. In some 4.5 billion years they will merge.',
+      'The Local Group: two great spirals and some 80 smaller galaxies.',
+    ],
+  }
   const shotLine = (n: number) => {
+    if (OTHER_LINES[chapterId]) return OTHER_LINES[chapterId][n - 1] ?? ''
     const name = planetName
     const rocky = filmIndex !== undefined && (filmIndex <= 3)
     switch (n) {
@@ -1547,6 +1630,9 @@ export default function Journey() {
             </button>
             <button type="button" className="film-button" aria-label="Next shot" disabled={film >= SHOTS.length} onClick={() => { setPlaying(false); cutTo(Math.min(SHOTS.length, film + 1)) }}>
               <Icon name="arrow" />
+            </button>
+            <button type="button" className="film-button" aria-pressed={music} aria-label={music ? 'Music off' : 'Music on'} title={music ? 'Music: on' : 'Music: off'} onClick={toggleMusic}>
+              <Icon name={music ? 'sound' : 'muted'} />
             </button>
             <span className="film-dots">
               {SHOTS.map((s, i) => (
@@ -1973,7 +2059,7 @@ export default function Journey() {
                     <span className="true-size-hint">beside Earth</span>
                   </motion.button>
                 )}
-                {flyTarget !== undefined && (
+                {(flyTarget !== undefined || ['sun', 'beyond', 'galaxy', 'local-group'].includes(activeChapter.id)) && (
                   <motion.button
                     type="button"
                     className="true-size film-start"

@@ -141,6 +141,15 @@ export class Soundscape {
     window.setTimeout(() => this.context.close(), 1500)
   }
 
+  /** step back (almost silent) while another score plays, or return */
+  duck(on: boolean) {
+    if (this.stopped) return
+    const now = this.context.currentTime
+    this.master.gain.cancelScheduledValues(now)
+    this.master.gain.setValueAtTime(this.master.gain.value, now)
+    this.master.gain.linearRampToValueAtTime(on ? MASTER_LEVEL * 0.08 : MASTER_LEVEL, now + (on ? 1.2 : 3))
+  }
+
   /** glide to the chord of a section */
   setSection(section: number) {
     this.section = Math.max(0, Math.min(CHORDS.length - 1, section))

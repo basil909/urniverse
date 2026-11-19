@@ -62,6 +62,7 @@ import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens, whenOpened } from './lens'
 import { reveal } from './scaleReveal'
+import { shot } from './shots'
 import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import Belts from './Belts'
 import Comet from './Comet'
@@ -1794,7 +1795,11 @@ export default function SolarSystem({
     // as the camera flies out (and grows back if you scroll back)
     const local = progress - 11
     const inFinale = local >= 0 && local < 0.97
-    const target = inFinale
+    // (and in the film at the galaxies' scale, where it is a point)
+    const galacticFilm = shot.index > 0 && shot.chapter >= 11 && Math.floor(progress) === shot.chapter
+    const target = galacticFilm
+      ? 0.0001
+      : inFinale
       ? Math.max(0.0001, Math.pow(1 - THREE.MathUtils.clamp(local / 0.16, 0, 1), 3))
       : 1
     systemScale.current +=
@@ -2371,7 +2376,11 @@ function RimRays({
     if (!plane) return
     // only for the planet that is the subject of the current chapter
     const chapter = Math.floor(progressRef.current ?? 0)
-    const strength = chapter - 2 === index ? lens.backlit : 0
+    // (and Earth's in the Pale Blue Dot's film, Venus's in transit at the Sun)
+    const strength =
+      chapter - 2 === index || (chapter === 10 && index === 2) || (chapter === 1 && index === 1 && shot.index === 3)
+        ? lens.backlit
+        : 0
     material.uniforms.uStrength.value = strength
     plane.visible = strength > 0.01
     if (!plane.visible) return
@@ -4131,7 +4140,8 @@ function PaleBlueDotMarker({ progressRef }: { progressRef: RefObject<number> }) 
     if (!element.current) return
     const progress = progressRef.current ?? 0
     const local = progress - PALE_BLUE_DOT_CHAPTER
-    const target = local >= 0.2 && local < 0.93 ? 1 : 0
+    // (not over the film's close shots, where Earth fills the frame)
+    const target = (local >= 0.2 && local < 0.93 ? 1 : 0) * (shot.index >= 1 && shot.index <= 5 ? 0 : 1)
     opacity.current += (target - opacity.current) * (1 - Math.exp(-delta * 3))
     element.current.style.opacity = opacity.current.toFixed(3)
   })

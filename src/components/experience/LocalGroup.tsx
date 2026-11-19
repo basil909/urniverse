@@ -6,6 +6,7 @@ import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 
 import { GALAXY_POSITION, GALAXY_RADIUS, GALAXY_SCALE, GALAXY_TILT, SUN_ANGLE, SUN_RADIUS } from './Galaxy'
+import { shot } from './shots'
 
 /* ============================================================
    THE LOCAL GROUP
@@ -369,7 +370,8 @@ export default function LocalGroup({ progressRef }: { progressRef: RefObject<num
     smudgeMaterial.opacity = 0.7 * fade.current
     haloMaterial.opacity = 0.22 * fade.current
     const local = progress - LOCAL_GROUP_CHAPTER
-    const named = local >= 0.18 && local < 0.93 ? 1 : 0
+    // (the film's close shots go without names)
+    const named = (local >= 0.18 && local < 0.93 ? 1 : 0) * (shot.index >= 2 && shot.index <= 5 ? 0 : 1)
     labels.current.forEach((label) => {
       if (!label) return
       const now = Number(label.style.opacity || 0)
