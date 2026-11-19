@@ -523,15 +523,17 @@ const AIR: Record<string, Air> = {
     sun: 32,
   },
   // CO2 at 0.6% of Earth's pressure; dust of optical depth ~0.3 over an
-  // 11 km scale height, absorbing blue, forward-scattering blue hardest
+  // 11 km scale height, absorbing some blue, forward-scattering blue
+  // hardest (single-scattering albedo about 0.95 red, 0.8 green, 0.66 blue:
+  // the rovers' pale butterscotch sky, not an olive one)
   Mars: {
     rayleigh: [0.61, 1.42, 3.49],
-    mie: [92, 74, 54],
-    mieExt: [97, 98, 101],
+    mie: [93, 81, 76],
+    mieExt: [97, 99, 105],
     mieG: [0.62, 0.7, 0.88],
     hR: 11.1 / 3389.5,
     hM: 11 / 3389.5,
-    sun: 13,
+    sun: 22,
   },
   // above the cloud deck (the sphere drawn is the cloud tops): a thick
   // haze of sulfuric acid droplets, yellowed by an unknown absorber

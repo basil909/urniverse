@@ -1,11 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useRef } from 'react'
-import { useFrame } from '@react-three/fiber'
+import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 import { pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
+import { DETAIL_PERIOD, GROUND_DETAIL_GLSL, groundLookUniforms } from './groundDetail'
 import { SURFACE_PATCH_GLSL, surfacePatch } from './surfaceTiles'
 import { aimEarthGround, earthElevation, earthGround, releaseEarthGround } from './earthTiles'
 import { sphereUv } from './groundState'
@@ -153,6 +154,7 @@ vec3 waterShade(vec3 base, vec3 nView, float lit, float rough, float daylight) {
 }
 ${GROUND_GLSL}
 ${CLOSE_DETAIL_GLSL}
+${GROUND_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
 ${CLOUD_GLSL}
 ${MOON_SHADOW_GLSL}
@@ -216,9 +218,26 @@ void main() {
     float lum = clamp(dot(base, vec3(0.3, 0.5, 0.2)) / 0.12, 0.0, 1.0);
     base = mix(base, vec3(0.58, 0.62, 0.68) * (0.84 + 0.16 * lum), snowHere(uv, d, slope, base) * land);
   }
+  // the ground at your feet: per-pixel relief, craters, stones, sand and
+  // dust (groundDetail.ts), in metres from an anchor that keeps them still
+  vec3 pm = vRelP * uRadiusM + uDetailOrigin;
+  float distM = length(vViewPos) / uWorldRadius * uRadiusM;
+  float pxM = max(length(fwidth(vRelP)) * uRadiusM, 1e-4);
+  float nearM = 1.0 - smoothstep(1500.0, 4500.0, distM);
+  GroundBits gb;
+  gb.grad = vec3(0.0);
+  gb.albedo = vec3(1.0);
+  gb.shade = 0.0;
+  if (nearM > 0.0 && land > 0.5) gb = groundDetail(pm, d, pxM, uSunL, nearM);
+  // (close in, the ground's colour as it looks on the ground)
+  base *= gb.albedo * mix(vec3(1.0), uLookNear, uLookNearAmount);
+  n = normalize(n - (gb.grad - n * dot(gb.grad, n)));
   float sunUp = dot(d, uSunL);
   float day = smoothstep(-0.12, 0.08, sunUp);
-  float lit = max(dot(n, uSunL), 0.0) * smoothstep(-0.05, 0.05, sunUp);
+  vec3 viewL = normalize(uCamL - vRelP);
+  float lit = regolithLight(dot(n, uSunL), dot(n, viewL), dot(viewL, uSunL)) * smoothstep(-0.05, 0.05, sunUp);
+  // (shadows keep a little light from the sunlit ground round them)
+  lit *= 1.0 - 0.78 * gb.shade;
   lit *= 1.0 - 0.88 * shipShade(vViewPos, normalize(vSunView));
   // Earth: the shadows of the clouds overhead
   if (uEarth > 0.5) lit *= 1.0 - 0.8 * cloudShade(d, uSunL);
@@ -310,6 +329,7 @@ const _e1 = new THREE.Vector3()
 const _e2 = new THREE.Vector3()
 const _sun = new THREE.Vector3()
 const _scale = new THREE.Vector3()
+const _anchor = new THREE.Vector3()
 
 export default function Terrain({
   index,
@@ -333,6 +353,7 @@ export default function Terrain({
   night?: () => THREE.Texture | null
 }) {
   const mesh = useRef<THREE.Mesh>(null)
+  const camera = useThree((state) => state.camera)
   const seaTime = useRef(0)
   const config = GROUND[index]
   const model = useMemo(() => new GroundModel(config), [config])
@@ -416,6 +437,7 @@ export default function Terrain({
           uRadiusKm: { value: config.radiusKm },
           uLakes: { value: index === 17 ? 1 : 0 },
           uRadiusM: { value: config.radiusKm * 1000 },
+          ...groundLookUniforms(index),
         },
         vertexShader: TERRAIN_VERTEX,
         fragmentShader: TERRAIN_FRAGMENT,
@@ -485,6 +507,20 @@ export default function Terrain({
     }
     const h0 = model.height(_c, fade)
     patch.position.copy(_c).multiplyScalar(1 + h0)
+    // the close detail's anchor: metres, stepping in whole periods (so its
+    // patterns stay put), and the camera, both from the patch's centre
+    {
+      const metres = config.radiusKm * 1000
+      _anchor.copy(patch.position).multiplyScalar(metres)
+      _anchor.set(
+        _anchor.x - Math.round(_anchor.x / DETAIL_PERIOD) * DETAIL_PERIOD,
+        _anchor.y - Math.round(_anchor.y / DETAIL_PERIOD) * DETAIL_PERIOD,
+        _anchor.z - Math.round(_anchor.z / DETAIL_PERIOD) * DETAIL_PERIOD,
+      )
+      material.uniforms.uDetailOrigin.value.copy(_anchor)
+      material.uniforms.uCamL.value.copy(camera.position).applyMatrix4(ground.inverse).sub(patch.position)
+      material.uniforms.uLookNearAmount.value = 1 - THREE.MathUtils.smoothstep(altitude * config.radiusKm, 2, 25)
+    }
     const u = material.uniforms
     u.uC.value.copy(_c)
     u.uE1.value.copy(_e1)
