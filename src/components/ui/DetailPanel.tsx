@@ -11,6 +11,7 @@ import { DistanceLadder, GalaxyMap, SpacecraftMap } from './SkyGraphics'
 import Icon from './Icon'
 import YouThere from './YouThere'
 import TonightSky from './TonightSky'
+import Compare from './Compare'
 
 /* The deep-dive for the current world. It sits over the text column and
    scrolls on its own (data-lenis-prevent keeps the page from gliding
@@ -25,7 +26,7 @@ const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1]
 
 export type PanelStep = { name: string; go: () => void }
 
-type Tab = 'overview' | 'now' | 'story' | 'missions'
+type Tab = 'overview' | 'now' | 'story' | 'missions' | 'compare'
 
 export default function DetailPanel({
   open,
@@ -66,7 +67,7 @@ export default function DetailPanel({
   /* this chapter's address, to copy and share */
   link?: string
   /* the tab it opens on (the command palette can open any) */
-  startTab?: 'overview' | 'now' | 'story' | 'missions'
+  startTab?: Tab
 }) {
   const panel = useRef<HTMLElement>(null)
   const marker = useRef<HTMLDivElement>(null)
@@ -143,10 +144,12 @@ export default function DetailPanel({
   const live = sky === 'distances' ? 'voyager' : sky === 'galaxy' ? undefined : worldIndex
   // (short names on a narrow screen)
   const tabs: { id: Tab; label: string; short: string }[] = [
-    { id: 'overview', label: 'Overview', short: 'Overview' },
+    { id: 'overview', label: 'Overview', short: 'About' },
     { id: 'now', label: 'Right now', short: 'Now' },
     { id: 'story', label: 'Story', short: 'Story' },
     { id: 'missions', label: detail.missionsHeading ?? 'Exploration', short: 'Timeline' },
+    // the planets: this one beside any other
+    ...(worldIndex !== undefined && worldIndex >= 0 ? [{ id: 'compare' as const, label: 'Compare', short: 'Compare' }] : []),
   ]
 
   return (
@@ -197,7 +200,7 @@ export default function DetailPanel({
             <span className="dp-bar-name" aria-hidden={!stuck}>
               {name}
             </span>
-            <div className="dp-tabs" role="tablist" aria-label={`About ${name}`}>
+            <div className={`dp-tabs ${tabs.length > 4 ? 'is-compact' : ''}`} role="tablist" aria-label={`About ${name}`}>
               {tabs.map((entry) => (
                 <button
                   key={entry.id}
@@ -335,6 +338,8 @@ export default function DetailPanel({
                     )}
                   </>
                 )}
+
+                {tab === 'compare' && worldIndex !== undefined && worldIndex >= 0 && <Compare index={worldIndex} />}
 
                 {tab === 'missions' && (
                   <ol className="detail-missions">

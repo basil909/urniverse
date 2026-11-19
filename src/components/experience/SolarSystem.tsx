@@ -67,6 +67,7 @@ import Cutaway from './Cutaway'
 import { cutaway } from './cutawayState'
 import { BitmapTextureLoader } from './textures'
 import { WORLD_DETAILS } from '../../data/worlds'
+import { pickBodies } from './PlanetPicker'
 import {
   SHARP_EARTH_MAPS,
   SHARP_PLANET_MAPS,
@@ -1938,7 +1939,12 @@ function Sun() {
 
   return (
     <group ref={sunGroup} position={SYSTEM_BASE}>
-      <mesh ref={sun}>
+      <mesh
+        ref={(mesh) => {
+          sun.current = mesh
+          pickBodies[-1] = mesh
+        }}
+      >
         <sphereGeometry args={[1, 128, 128]} />
         <shaderMaterial
           ref={material}
@@ -2946,7 +2952,13 @@ function Planet({
 
       <group ref={orbit}>
         <group quaternion={poleQuaternion}>
-          <mesh ref={body} scale={[visualRadius, visualRadius * (1 - (FLATTENING[planet.name] ?? 0)), visualRadius]}>
+          <mesh
+            ref={(mesh) => {
+              body.current = mesh
+              pickBodies[index] = mesh
+            }}
+            scale={[visualRadius, visualRadius * (1 - (FLATTENING[planet.name] ?? 0)), visualRadius]}
+          >
             {HOTSPOTS[index] && (
               <Hotspots
                 index={index}

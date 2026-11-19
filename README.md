@@ -32,6 +32,8 @@ Scroll (or use the arrow keys) and the camera flies from world to world. Each pl
 - **Search everything.** Ctrl K (or /, or the search button) opens a command palette: every chapter, every panel tab ("mars miss" opens Mars's Exploration), every place the Shuttle can fly to (Enter takes off and warps there), and the actions (Live time, sound, the link, back to the start). Arrow keys to choose, Enter to go.
 - **A live figure from the start.** Under the opening title, how far Earth has carried you round the Sun since you arrived, ticking at 29.78 km/s.
 - **Figures as tiles.** A panel's At a glance figures sit in a grid of tiles with the first (the diameter, say) as a large headline tile; the drawings are numbered Fig. 01, Fig. 02.
+- **Pick a world.** In the opening view and at the end, point at any world for a ring and its name; a click (or Enter) flies the journey to its chapter. Each has a finger-sized target, so even Mercury is easy to hit.
+- **Compare.** Each planet's panel has a Compare tab: pick any other planet to see both drawn to scale, a line on how they differ (how many would fit inside, what you would weigh), and their diameter, gravity, temperature, spin, year, distance and moons side by side, the larger of each picked out.
 - **A sense of scale.** Every planet chapter shrinks the Sun to a 2 m door and tells you how big that planet would be and how far away, with a track showing true relative distances.
 - **A Pale Blue Dot finale.** From beyond Neptune the camera looks back through a long lens at Earth, a single speck beside the Sun's glare, as Voyager 1 saw it in 1990. Then a long pull-back: the lens opens, the Solar System collapses to a point, and a "You are here" marker appears on a spiral arm of the Milky Way.
 - **Quiet, editorial interface.** Two typefaces, a slim chapter rail and a hairline progress bar; the planet is always the hero.
@@ -132,6 +134,8 @@ src/
    │  ├─ YouThere.tsx     Your weight and age on each world
    │  ├─ TonightSky.tsx   When each world is up in your sky tonight
    │  ├─ skyNow.ts        The sky calculations behind it
+   │  ├─ Compare.tsx      One planet beside another
+   │  ├─ CommandPalette.tsx  Search everything (Ctrl K)
    │  └─ SkyGraphics.tsx  The galaxy sketch and the distance ladder
    └─ experience/
       ├─ UniverseCanvas.tsx  Canvas, camera choreography, post-processing

@@ -27,7 +27,8 @@ function formatDate(jd: number) {
 export default function TimeBar() {
   const [real, setReal] = useState(simClock.real)
   const [speed, setSpeed] = useState(() => REAL_SPEEDS.findIndex((option) => option.days === simClock.realRate))
-  const [shown, setShown] = useState(() => formatDate(simClock.jd))
+  // (set on the client only: a date rendered on the server never matches)
+  const [shown, setShown] = useState<{ day: string; time: string } | null>(null)
   const [offToday, setOffToday] = useState(false)
 
   useEffect(() => {
@@ -62,8 +63,8 @@ export default function TimeBar() {
         <span className="time-bar-dot" aria-hidden="true" />
         <span className="time-bar-state">{live ? 'Live' : real ? 'Fast' : 'Cinematic'}</span>
         <span className="time-bar-date">
-          {shown.day}
-          <small>{shown.time} UTC</small>
+          {shown?.day ?? ' '}
+          {shown && <small>{shown.time} UTC</small>}
         </span>
       </div>
       <div className="time-bar-speeds">

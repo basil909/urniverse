@@ -3713,3 +3713,134 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
 }
 .palette-list, .chapter-menu-list, .detail-panel { scrollbar-color: rgba(255, 255, 255, 0.18) transparent; }
 .bento .detail-glance-row:not(.is-hero):last-child:nth-child(even) { grid-column: 1 / -1; }
+
+/* ---- picking a world in the wide views ---- */
+.planet-picker { position: absolute; inset: 0; pointer-events: none; }
+.planet-pick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  pointer-events: auto;
+  cursor: pointer;
+  outline: none;
+}
+.planet-pick::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 0 18px rgba(170, 200, 255, 0.35);
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.25s, transform 0.35s var(--ease);
+}
+.planet-pick-name {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 10px);
+  translate: -50% 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--surface-edge);
+  border-radius: 999px;
+  background: rgba(7, 9, 15, 0.82);
+  font: 600 10.5px / 1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--text-1);
+  opacity: 0;
+  transition: opacity 0.2s, translate 0.3s var(--ease);
+}
+.planet-pick:hover::before,
+.planet-pick:focus-visible::before { opacity: 1; transform: none; }
+.planet-pick:hover .planet-pick-name,
+.planet-pick:focus-visible .planet-pick-name { opacity: 1; translate: -50% 0; }
+
+/* ---- Compare ---- */
+.compare { display: grid; gap: 14px; }
+.compare-pick-label {
+  display: block;
+  margin-bottom: 10px;
+  font: var(--label);
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.compare-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.compare-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  font: 500 12.5px / 1 var(--sans);
+  color: var(--text-2);
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.compare-chip:hover { color: var(--text-1); border-color: rgba(255, 255, 255, 0.3); }
+.compare-chip[aria-pressed='true'] {
+  color: var(--text-1);
+  border-color: color-mix(in srgb, var(--planet-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--planet-accent) 14%, transparent);
+}
+.compare-chip:focus-visible { outline: 1.5px solid var(--planet-accent); outline-offset: 2px; }
+.compare-chip-dot { width: 7px; height: 7px; border-radius: 50%; }
+.compare-figure svg { max-height: 190px; }
+.compare-figure text { font-size: 10px; }
+.compare-disc {
+  fill: color-mix(in srgb, var(--disc) 26%, transparent);
+  stroke: var(--disc);
+  stroke-width: 1;
+}
+.compare-figure figcaption { font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.compare-table th,
+.compare-table td {
+  padding: 11px 6px;
+  border-top: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+.compare-table thead th {
+  border-top: 0;
+  padding-top: 0;
+  font-family: var(--serif);
+  font-size: 19px;
+  font-weight: 400;
+  color: var(--text-1);
+}
+.compare-table tbody th {
+  width: 34%;
+  font: var(--label);
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding-top: 13px;
+}
+.compare-table td { color: var(--text-2); }
+.compare-table td.is-more { color: var(--text-1); font-weight: 500; }
+.compare-table td.is-more::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin: 0 7px 2px 0;
+  border-radius: 50%;
+  background: var(--planet-accent);
+}
+.dp-tabs.is-compact .dp-tab-full { display: none; }
+.dp-tabs.is-compact .dp-tab-short { display: inline; }
+.planet-picker { position: fixed; inset: 0; z-index: 4; }
+@media (max-width: 520px) {
+  .dp-tabs.is-compact .dp-tab { padding: 0 9px; font-size: 11.5px; }
+  .dp-actions .icon-btn:not(:last-child) { display: none; }
+}

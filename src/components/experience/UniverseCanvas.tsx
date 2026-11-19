@@ -24,6 +24,7 @@ import Galaxy, {
 } from './Galaxy'
 import Starfield from './Starfield'
 import LocalGroup, { LOCAL_GROUP_VIEW } from './LocalGroup'
+import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
 import { lens } from './lens'
 import Pilot, { GroundCarry } from './Pilot'
@@ -1514,6 +1515,8 @@ function Scene({
         <Galaxy progressRef={progressRef} />
 
         <LocalGroup progressRef={progressRef} />
+
+        <PlanetPicker progressRef={progressRef} />
 
       </Suspense>
 

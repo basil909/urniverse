@@ -21,6 +21,8 @@ import ChapterMenu from './ui/ChapterMenu'
 import TimeBar from './ui/TimeBar'
 import CommandPalette, { type Command } from './ui/CommandPalette'
 import LiveCounter from './ui/LiveCounter'
+import { PICK_EVENT } from './experience/PlanetPicker'
+import PickLayer from './ui/PickLayer'
 import { Glyph, PARENT_NAMES, WORLDS } from './ui/FlightHud'
 import { REAL_SPEEDS, setRealMotion, simClock } from './experience/simClock'
 import Icon from './ui/Icon'
@@ -738,7 +740,7 @@ export default function Journey() {
   // deep-dive panel for the current world
   const [detailOpen, setDetailOpen] = useState(false)
   // the tab the panel opens on, and the command palette
-  const [panelTab, setPanelTab] = useState<'overview' | 'now' | 'story' | 'missions'>('overview')
+  const [panelTab, setPanelTab] = useState<'overview' | 'now' | 'story' | 'missions' | 'compare'>('overview')
   const [paletteOpen, setPaletteOpen] = useState(false)
   const paletteOpenRef = useRef(false)
   paletteOpenRef.current = paletteOpen
@@ -1107,6 +1109,14 @@ export default function Journey() {
     )
   }, [])
 
+  // a world picked in the wide view: go to its chapter
+  useEffect(() => {
+    const onPick = (event: Event) => goToSection((event as CustomEvent<number>).detail)
+    window.addEventListener(PICK_EVENT, onPick)
+    return () => window.removeEventListener(PICK_EVENT, onPick)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
       if (flyingRef.current) return
@@ -1204,6 +1214,7 @@ export default function Journey() {
               ['now', 'Right now', 'today distance tonight sky weight age live'],
               ['story', 'Story', 'story moons history'],
               ['missions', WORLD_DETAILS[chapter.id].missionsHeading ?? 'Exploration', 'missions exploration timeline spacecraft milestones'],
+              ...(PLANET_INDEX[chapter.id] !== undefined ? ([['compare', 'Compare', 'compare versus vs size gravity']] as const) : []),
             ] as const
           ).map(([tab, label, words]) => ({
             id: `panel-${chapter.id}-${tab}`,
@@ -1314,6 +1325,8 @@ export default function Journey() {
       <Loader />
 
       {flying && <FlightHud onLand={land} />}
+
+      {!flying && <PickLayer />}
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
 
