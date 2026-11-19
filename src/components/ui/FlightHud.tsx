@@ -636,6 +636,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         return
       }
       if (event.key.toLowerCase() === 'g' && !event.repeat) {
+        // (or the search box, focused as it opens, gets the "g" typed into it)
+        event.preventDefault()
         setGoTo((open) => !open)
         return
       }
