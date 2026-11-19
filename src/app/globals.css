@@ -4327,3 +4327,120 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   box-shadow: 0 0 14px rgba(120, 170, 255, 0.25);
 }
 .reveal-name { position: absolute; left: 0; transform: translateX(-50%); }
+
+/* ============================================================
+   THE SIX SHOTS: cuts, a lower third, quiet controls
+   ============================================================ */
+
+/* the chapter's two ways in, one to a line */
+.true-size { display: flex; width: max-content; }
+.true-size:has(+ .film-start) { margin-bottom: 12px; }
+.film-start .icon { font-size: 15px; margin: 0 2px; }
+
+.cut {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.28s ease;
+}
+.cut.is-on { opacity: 1; transition-duration: 0.26s; }
+
+.is-filming .stage,
+.is-filming .rail,
+.is-filming .time-bar,
+.is-filming .hud-bottom,
+.is-filming .hotspot,
+.is-filming .moon-tag,
+.is-filming .planet-pick {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.6s;
+}
+.is-filming .letterbox { transform: none; }
+.is-filming .hud-top { opacity: 0.25; }
+
+.film {
+  position: fixed;
+  left: var(--pad);
+  right: var(--pad);
+  bottom: calc(9vh + 26px);
+  z-index: 70;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  pointer-events: none;
+}
+.film-caption { max-width: 34em; }
+.film-name {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font: 500 11px / 1 var(--sans);
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--planet-accent);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.9);
+}
+.film-num { color: var(--text-3); letter-spacing: 0.12em; }
+.film-line {
+  margin-top: 10px;
+  font-family: var(--serif);
+  font-size: clamp(22px, 2.1vw, 30px);
+  line-height: 1.15;
+  color: var(--text-1);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.8);
+}
+.film-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+.film-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  color: var(--text-2);
+  font-size: 16px;
+  transition: color 0.2s, background 0.2s;
+}
+.film-button:hover:not(:disabled) { color: var(--text-1); background: rgba(255, 255, 255, 0.08); }
+.film-button:disabled { opacity: 0.3; cursor: default; }
+.film-dots { display: flex; gap: 2px; margin: 0 10px 0 4px; }
+.film-dot {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+}
+.film-dot::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: background 0.3s, transform 0.3s;
+}
+.film-dot.is-on::before { background: var(--planet-accent); transform: scale(1.3); }
+.film-progress {
+  position: fixed;
+  left: 0;
+  bottom: 9vh;
+  height: 1px;
+  width: 100%;
+  background: color-mix(in srgb, var(--planet-accent) 70%, transparent);
+  transform-origin: left;
+  animation: film-progress linear forwards;
+}
+@keyframes film-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@media (max-width: 760px) {
+  .film { flex-direction: column; align-items: stretch; bottom: calc(7vh + 16px); }
+  .film-controls { justify-content: space-between; flex-wrap: wrap; }
+  .film-progress { bottom: 7vh; }
+}

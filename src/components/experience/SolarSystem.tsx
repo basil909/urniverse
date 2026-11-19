@@ -4380,6 +4380,9 @@ void main() {
   float soft = max(-b * uSunAng, fwidth(miss));
   float shade = b >= 0.0 ? 1.0 : smoothstep(uRadius - soft, uRadius + soft, miss);
   vec3 color = uColor * glow * face * shade * uLight;
+  /* from among them (a few radii out) the faint rings all but vanish, as
+     from Juno: up close their thin glow read as a flat, hard-edged slab */
+  color *= smoothstep(2.2, 4.5, length(cameraPosition - uCenter) / uRadius);
   // dusty rings only add light; dense ones (Uranus's) also hide a little
   gl_FragColor = vec4(color * a, a * 0.7 * (1.0 - dust));
 }`

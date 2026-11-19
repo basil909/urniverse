@@ -6,9 +6,16 @@
    button says otherwise; coloured by the text.
 ============================================================ */
 
-export type IconName = 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
+export type IconName = 'play' | 'pause' | 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
 
 const PATHS: Record<IconName, React.ReactNode> = {
+  play: <path d="M8.2 5.6v12.8L18.4 12z" />,
+  pause: (
+    <>
+      <path d="M9 6v12" />
+      <path d="M15 6v12" />
+    </>
+  ),
   // a small world beside a great one: true size
   scale: (
     <>

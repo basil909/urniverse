@@ -449,6 +449,9 @@ const SUN_GM = 1.32712e11
 /* the objects the end-of-frame correction moves (see GroundCarry) */
 export const pilotObjects = {
   jet: null as THREE.Group | null,
+  /** the built Shuttle (length 1, nose to -z), once loaded: the journey's
+      exploration shot borrows its shape */
+  shuttleBody: null as THREE.Mesh | null,
   visual: null as THREE.Group | null,
   camera: null as THREE.PerspectiveCamera | null,
   shipLength: 0,
@@ -1302,6 +1305,7 @@ function useShuttle() {
           })
         stackParts.forEach((piece) => piece.dispose())
         built = { body, engines, tank, boosters }
+        pilotObjects.shuttleBody = body
         setModel(built)
       },
       undefined,

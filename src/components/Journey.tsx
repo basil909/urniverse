@@ -33,6 +33,7 @@ import { cutaway } from './experience/cutawayState'
 import { lens } from './experience/lens'
 import { PLANETS, getPlanetHeliocentricAU, julianDate } from './experience/orbit'
 import { REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal, revealFigures } from './experience/scaleReveal'
+import { SHOTS, SHOT_SECONDS, shot } from './experience/shots'
 import { formatKm } from './ui/WorldLive'
 
 
@@ -1264,6 +1265,114 @@ export default function Journey() {
   useEffect(() => {
     if (reveal.active && reveal.chapter !== section) endReveal()
   }, [section, endReveal])
+
+  /* The six shots (shots.ts): the chapter as a short film. A cut is a
+     moment of black: the camera jumps while the screen is dark. */
+  const [film, setFilm] = useState(0)
+  const [playing, setPlaying] = useState(false)
+  const [cutting, setCutting] = useState(false)
+  const cutTimers = useRef<number[]>([])
+  const cutTo = useCallback((next: number) => {
+    cutTimers.current.forEach((t) => window.clearTimeout(t))
+    setCutting(true)
+    cutTimers.current = [
+      window.setTimeout(() => {
+        shot.index = next
+        shot.clock = 0
+        shot.cut = true
+      }, 300),
+      // the words once the camera has its new figures
+      window.setTimeout(() => setFilm(next), 420),
+      window.setTimeout(() => setCutting(false), 460),
+    ]
+  }, [])
+  const startFilm = () => {
+    shot.chapter = section
+    lenisRef.current?.stop()
+    setPlaying(true)
+    setFilm(-1) // on, before the first shot's words
+    cutTo(1)
+  }
+  const endFilm = useCallback(() => {
+    if (shot.index === 0) return
+    setPlaying(false)
+    cutTo(0)
+    lenisRef.current?.start()
+  }, [cutTo])
+  // playing: the next shot when this one has held
+  useEffect(() => {
+    if (!playing || film < 1) return
+    const timer = window.setTimeout(() => {
+      if (film < SHOTS.length) cutTo(film + 1)
+      else setPlaying(false)
+    }, SHOT_SECONDS * 1000)
+    return () => window.clearTimeout(timer)
+  }, [playing, film, cutTo])
+  // keys while it runs: arrows step, space plays, Esc leaves (before the
+  // journey's own arrow keys, which would change chapter)
+  useEffect(() => {
+    if (film === 0) return
+    const onKey = (event: KeyboardEvent) => {
+      const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
+      if (step) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        setPlaying(false)
+        cutTo(Math.min(SHOTS.length, Math.max(1, shot.index + step)))
+      } else if (event.key === ' ') {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        setPlaying((p) => !p)
+      } else if (event.key === 'Escape') {
+        event.stopImmediatePropagation()
+        endFilm()
+      }
+    }
+    const onWheel = () => endFilm()
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('wheel', onWheel, { passive: true })
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('wheel', onWheel)
+    }
+  }, [film === 0, cutTo, endFilm]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (shot.index > 0 && shot.chapter !== section) {
+      shot.index = 0
+      setFilm(0)
+      setPlaying(false)
+      lenisRef.current?.start()
+    }
+  }, [section])
+  useEffect(() => () => cutTimers.current.forEach((t) => window.clearTimeout(t)), [])
+
+  const kmWords = (km: number) =>
+    km >= 1e6
+      ? `${(km / 1e6).toFixed(km >= 1e7 ? 0 : 1)} million km`
+      : `${Number(km.toPrecision(km >= 1000 ? 2 : 3)).toLocaleString('en-GB')} km`
+  const filmIndex = sizeIndex
+  const shotLine = (n: number) => {
+    const name = planetName
+    const rocky = filmIndex !== undefined && (filmIndex <= 3)
+    switch (n) {
+      case 1:
+        return `${name}, half-lit by the Sun.`
+      case 2:
+        return `${rocky ? 'Low over the ground' : 'Over the cloud tops'}, ${kmWords(shot.altitudeKm)} up.`
+      case 3:
+        return `The Sun behind ${name}: its light through the edge of the ${filmIndex === 0 ? 'world' : 'air'}.`
+      case 4:
+        return `The Shuttle, 37 m long, about 100 m from the lens. ${name}'s centre is ${kmWords(shot.distanceKm)} away.`
+      case 5:
+        return `${name}'s horizon, from ${kmWords(shot.altitudeKm)} up.`
+      case 6:
+        return filmIndex !== undefined && filmIndex <= 1
+          ? `${name}, from ${kmWords(shot.distanceKm)} away.`
+          : `${name} and its moons, from ${kmWords(shot.distanceKm)} away.`
+      default:
+        return ''
+    }
+  }
   const stepTo = (chapterIndex: number) => {
     reopenAfter.current = true
     goToSection(chapterIndex + 1)
@@ -1395,7 +1504,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${revealStep > 0 ? 'is-revealing' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textOn && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
+      className={`universe-page ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 ? 'is-filming' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textOn && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -1413,6 +1522,51 @@ export default function Journey() {
       <Loader />
 
       {flying && <FlightHud onLand={land} />}
+
+      {/* a cut: a moment of black between shots */}
+      <div className={`cut ${cutting ? 'is-on' : ''}`} aria-hidden="true" />
+
+      {/* the six shots: a lower third naming the shot, and the controls */}
+      {film !== 0 && (
+        <div className="film" role="group" aria-label="Six shots">
+          {film > 0 && (
+            <motion.div key={film} className="film-caption" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}>
+              <p className="film-name">
+                <span className="film-num">{String(film).padStart(2, '0')}</span>
+                {SHOTS[film - 1].name}
+              </p>
+              <p className="film-line">{shotLine(film)}</p>
+            </motion.div>
+          )}
+          <div className="film-controls">
+            <button type="button" className="film-button" aria-label="Previous shot" disabled={film <= 1} onClick={() => { setPlaying(false); cutTo(Math.max(1, film - 1)) }}>
+              <Icon name="arrow" className="is-back" />
+            </button>
+            <button type="button" className="film-button" aria-label={playing ? 'Pause' : 'Play'} onClick={() => setPlaying((p) => !p)}>
+              <Icon name={playing ? 'pause' : 'play'} />
+            </button>
+            <button type="button" className="film-button" aria-label="Next shot" disabled={film >= SHOTS.length} onClick={() => { setPlaying(false); cutTo(Math.min(SHOTS.length, film + 1)) }}>
+              <Icon name="arrow" />
+            </button>
+            <span className="film-dots">
+              {SHOTS.map((s, i) => (
+                <button
+                  key={s.short}
+                  type="button"
+                  className={`film-dot ${film === i + 1 ? 'is-on' : ''}`}
+                  aria-label={`${String(i + 1).padStart(2, '0')} ${s.name}`}
+                  title={s.short}
+                  onClick={() => { setPlaying(false); cutTo(i + 1) }}
+                />
+              ))}
+            </span>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={endFilm}>
+              Back to the story
+            </button>
+          </div>
+          {playing && film > 0 && <span key={`p${film}`} className="film-progress" style={{ animationDuration: `${SHOT_SECONDS}s` }} />}
+        </div>
+      )}
 
       {/* true size: words over the reveal, like a documentary's */}
       {revealStep > 0 && sizeKm !== undefined && (
@@ -1817,6 +1971,20 @@ export default function Journey() {
                     <Icon name="scale" />
                     See its true size
                     <span className="true-size-hint">beside Earth</span>
+                  </motion.button>
+                )}
+                {flyTarget !== undefined && (
+                  <motion.button
+                    type="button"
+                    className="true-size film-start"
+                    onClick={startFilm}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.66, ease: EASE_OUT_EXPO }}
+                  >
+                    <Icon name="play" />
+                    Watch it as a film
+                    <span className="true-size-hint">six shots</span>
                   </motion.button>
                 )}
 

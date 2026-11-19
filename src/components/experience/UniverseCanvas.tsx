@@ -30,7 +30,7 @@ import NightSky from './NightSky'
 import { lens } from './lens'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
-import Pilot, { GroundCarry } from './Pilot'
+import Pilot, { GroundCarry, pilotObjects } from './Pilot'
 import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
 import FocusCull from './FocusCull'
@@ -45,6 +45,7 @@ import {
   getPlanetVisualRadius,
 } from './orbit'
 import { EARTH_KM, REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal } from './scaleReveal'
+import { shot } from './shots'
 
 /* ============================================================
    CINEMATIC SOLAR SYSTEM JOURNEY
@@ -455,6 +456,106 @@ function revealPose(
 }
 
 /* ============================================================
+   THE SIX SHOTS (see shots.ts): each a camera of its own round the
+   chapter's planet, drifting slowly while it holds
+============================================================ */
+
+const _sC = new THREE.Vector3()
+const _sS = new THREE.Vector3()
+const _sSide = new THREE.Vector3()
+const _sN = new THREE.Vector3()
+const _sF = new THREE.Vector3()
+const _sHero = new THREE.Vector3()
+const _sArrival = new THREE.Vector3()
+const _sTarget = new THREE.Vector3()
+const KM_PER_UNIT = EARTH_KM / getPlanetVisualRadius(2)
+/** the camera's up for the shot (the local vertical, low over a world) */
+const shotUp = new THREE.Vector3(0, 1, 0)
+
+function shotPose(
+  which: number,
+  index: number,
+  progress: number,
+  time: number,
+  outPos: THREE.Vector3,
+  outTarget: THREE.Vector3,
+) {
+  shotUp.set(0, 1, 0)
+  calculatePlanetPose(index, progress, _sHero, _sArrival, _sTarget)
+  getPlanetPosition(index, simClock.jd, _sC)
+  const radius = getPlanetVisualRadius(index)
+  _sS.copy(SYSTEM_OFFSET).sub(_sC).normalize()
+  _sSide.crossVectors(_worldUp, _sS).normalize()
+  const hero = _sHero.distanceTo(_sC)
+  // a slow turn about the planet while the shot holds
+  const turn = time * 0.012
+
+  switch (which) {
+    case 2: {
+      // over the sunlit side, the Sun some 45 degrees up (bright enough
+      // to read the clouds, low enough for relief), looking along the
+      // surface towards the limb
+      _sN.copy(_sS).multiplyScalar(0.72).addScaledVector(_sSide, 0.64).addScaledVector(_worldUp, 0.26).normalize()
+      _sN.applyAxisAngle(_worldUp, turn)
+      _sF.crossVectors(_worldUp, _sN).normalize()
+      outPos.copy(_sC).addScaledVector(_sN, radius * 1.3)
+      outTarget.copy(_sC).addScaledVector(_sN.clone().addScaledVector(_sF, 0.55).addScaledVector(_worldUp, 0.12).normalize(), radius)
+      break
+    }
+    case 3: {
+      // the night side, the Sun almost straight behind
+      // (straight back from the Sun: the planet hides it, an eclipse)
+      _sN.copy(_sS).multiplyScalar(-1).addScaledVector(_sSide, 0.02).addScaledVector(_worldUp, 0.06).normalize()
+      _sN.applyAxisAngle(_worldUp, Math.sin(time * 0.15) * 0.01)
+      outPos.copy(_sC).addScaledVector(_sN, hero * 1.05)
+      outTarget.copy(_sC)
+      break
+    }
+    case 4: {
+      // a wider three-quarter view: the ship is in the foreground (ExplorerShip)
+      _sN.copy(_sS).multiplyScalar(0.34).addScaledVector(_sSide, 0.92).addScaledVector(_worldUp, 0.2).normalize()
+      _sN.applyAxisAngle(_worldUp, -turn * 0.6)
+      outPos.copy(_sC).addScaledVector(_sN, hero * 1.3)
+      outTarget.copy(_sC).addScaledVector(_sSide, -radius * 0.2)
+      break
+    }
+    case 5: {
+      // just above the air, looking along the curve to the horizon
+      _sN.copy(_sS).multiplyScalar(0.5).addScaledVector(_sSide, 0.78).addScaledVector(_worldUp, 0.38).normalize()
+      _sN.applyAxisAngle(_worldUp, turn * 0.8)
+      _sF.crossVectors(_sN, _worldUp).normalize()
+      outPos.copy(_sC).addScaledVector(_sN, radius * 1.045)
+      outTarget.copy(outPos).addScaledVector(_sF, radius).addScaledVector(_sN, -radius * 0.2)
+      // the camera's up is the local vertical: the ground below, the sky above
+      shotUp.copy(_sN)
+      break
+    }
+    case 6: {
+      // far out, above the plane of its moons
+      // from the Sun's side, looking out (back towards the Sun the
+      // journey's shortened distances would show it, near and large)
+      // (near the plane of the moons: they string out in a line, and faint
+      // rings stay a thread)
+      _sN.copy(_sSide).multiplyScalar(0.55).addScaledVector(_worldUp, 0.12).addScaledVector(_sS, 0.62).normalize()
+      _sN.applyAxisAngle(_worldUp, turn * 0.6)
+      // (from the Sun's side, no further than most of the way to it: the
+      // journey's distances are shortened, and further out the camera
+      // would pass it; a wide lens, below, takes in the moons)
+      outPos.copy(_sC).addScaledVector(_sN, Math.min(hero * 6.5, _sC.distanceTo(SYSTEM_OFFSET) * 0.85))
+      outTarget.copy(_sC)
+      break
+    }
+    default: {
+      outPos.copy(_sHero)
+      outTarget.copy(_sTarget)
+    }
+  }
+  shot.distanceKm = outPos.distanceTo(_sC) * KM_PER_UNIT
+  shot.altitudeKm = (outPos.distanceTo(_sC) - radius) * KM_PER_UNIT
+  return radius
+}
+
+/* ============================================================
    CAMERA CONTROLLER
 ============================================================ */
 
@@ -564,8 +665,10 @@ function CinematicCamera({
 
     // lens changes travel with the flight (e.g. the long lens on Earth
     // opening up to the wide galaxy view during the pull-back)
-    const baseFov =
-      chapter > 0 && local < BLEND
+    // the establishing shot: a wide lens
+    const baseFov = shot.index === 6 && shot.chapter === chapter && planet
+      ? 64
+      : chapter > 0 && local < BLEND
         ? THREE.MathUtils.lerp(fovFor(chapter - 1), fovFor(chapter), ease(local / BLEND))
         : fovFor(chapter)
     // Portrait screens: widen the vertical FOV so planets fit the narrow width
@@ -723,8 +826,24 @@ function CinematicCamera({
         camera.near = near
         camera.updateProjectionMatrix()
       }
-    } else if (camera.near !== 0.08) {
-      camera.near = 0.08
+    }
+
+    /* the six shots: the camera takes the shot's own setup; at a cut it
+       jumps there (the page has faded to black) */
+    const shotHere = shot.index > 0 && shot.chapter === chapter && planet && local >= BLEND
+    let shotNear = 0.08
+    if (shotHere) {
+      shot.clock += reducedMotion ? 0 : delta
+      const radius = shotPose(shot.index, chapter - 2, safeProgress, shot.clock, _scratchPos, _scratchTarget)
+      // low over the surface the near plane follows the small worlds
+      shotNear = shot.index === 4 ? 0.004 : Math.min(0.08, radius * 0.01)
+      if (shot.cut) {
+        smoothPosition.current.copy(_scratchPos)
+        shot.cut = false
+      }
+    }
+    if (revealBlend.current === 0 && Math.abs(camera.near - shotNear) > 1e-6) {
+      camera.near = shotNear
       camera.updateProjectionMatrix()
     }
 
@@ -781,7 +900,7 @@ function CinematicCamera({
     // planet sits left of the words (as a film frames a subject off-centre)
     const wide = camera.aspect > 1.2
     heroFrame.closer = wide ? 0.8 : 1
-    const shiftTarget = planet && wide && revealBlend.current === 0 ? 1 : 0
+    const shiftTarget = planet && wide && revealBlend.current === 0 && !shotHere ? 1 : 0
     const shiftBefore = lensShift.current
     lensShift.current += (shiftTarget - lensShift.current) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
     if (Math.abs(lensShift.current - shiftBefore) > 1e-5 || (shiftTarget === 0 && camera.filmOffset !== 0 && lensShift.current < 1e-4)) {
@@ -800,6 +919,8 @@ function CinematicCamera({
       camera.updateProjectionMatrix()
     }
 
+    // a shot low over a world stands the camera on its local vertical
+    camera.up.copy(shotHere ? shotUp : _worldUp)
     camera.lookAt(_scratchTarget)
 
     // bank: roll gently into sideways motion, level out when it stops
@@ -1706,6 +1827,51 @@ function RevealEarth() {
   )
 }
 
+/* The exploration shot's spacecraft: the Shuttle (the flight's own,
+   once built), close to the lens, banking gently across the frame with
+   the planet beyond, as films give a world its scale */
+const _shipForward = new THREE.Vector3()
+const _shipRight = new THREE.Vector3()
+const _shipUp = new THREE.Vector3()
+const _shipLook = new THREE.Vector3()
+
+function ExplorerShip() {
+  const camera = useThree((state) => state.camera)
+  const holder = useRef<THREE.Group>(null)
+  const [mesh, setMesh] = useState<THREE.Mesh | null>(null)
+
+  useFrame(() => {
+    const g = holder.current
+    if (!g) return
+    const on = shot.index === 4 && !pilot.active
+    if (on && !mesh && pilotObjects.shuttleBody) {
+      const body = pilotObjects.shuttleBody
+      setMesh(new THREE.Mesh(body.geometry, body.material))
+    }
+    g.visible = on && !!mesh
+    if (!g.visible) return
+    camera.getWorldDirection(_shipForward)
+    _shipRight.crossVectors(_shipForward, camera.up).normalize()
+    _shipUp.crossVectors(_shipRight, _shipForward).normalize()
+    // drifting slowly across the frame, lower right to centre
+    const t = Math.min(shot.clock / 8, 1)
+    const d = 0.05
+    g.position
+      .copy(camera.position)
+      .addScaledVector(_shipForward, d * (1 + t * 0.35))
+      .addScaledVector(_shipRight, d * (0.34 - t * 0.12))
+      .addScaledVector(_shipUp, -d * (0.16 - t * 0.04))
+    // nose towards the planet, a little across the view, banked
+    _shipLook.copy(g.position).addScaledVector(_shipForward, 1).addScaledVector(_shipRight, -0.45)
+    g.lookAt(_shipLook)
+    g.rotateY(Math.PI) // the model's nose is -z; lookAt points +z
+    g.rotateZ(0.22)
+    g.scale.setScalar(d * 0.42)
+  })
+
+  return <group ref={holder} visible={false}>{mesh && <primitive object={mesh} />}</group>
+}
+
 /* How far into a backlit hero shot we are (0..1): the planet's rim rays
    read it (see RimRays in SolarSystem) */
 function BacklitDriver({ progressRef }: { progressRef: MutableRefObject<number> }) {
@@ -1713,9 +1879,11 @@ function BacklitDriver({ progressRef }: { progressRef: MutableRefObject<number> 
     const progress = progressRef.current ?? 0
     const chapter = Math.floor(progress)
     lens.backlit =
-      isPlanetChapter(chapter) && HERO_BACKLIT.has(chapter - 2)
-        ? heroDrift[chapter] ?? 0
-        : 0
+      shot.index === 3 && shot.chapter === chapter
+        ? 1
+        : isPlanetChapter(chapter) && HERO_BACKLIT.has(chapter - 2)
+          ? heroDrift[chapter] ?? 0
+          : 0
   })
   return null
 }
@@ -1739,6 +1907,7 @@ function Scene({
 
       <Lens progressRef={progressRef} glare={glare} />
       <RevealEarth />
+      <ExplorerShip />
       <TextShield />
 
       <Pilot />
