@@ -29,6 +29,7 @@ import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
 import { lens } from './lens'
 import TextShield from './TextShield'
+import { GradeEffect } from './grade'
 import Pilot, { GroundCarry } from './Pilot'
 import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
@@ -204,14 +205,21 @@ const ease = (value: number) => {
    Rocky planets: framed by how much of the view they fill (radius /
    distance) so small worlds like Mercury and Mars are not lost; Earth
    keeps ~0.063, smaller worlds stay smaller. Giants: by their radius. */
+/* hero shots: on a wide screen the planet is drawn large, a film's hero
+   shot, and set left of the words (a lens shift, below); a tall screen
+   keeps it whole above them */
+const heroFrame = { closer: 1 }
+
 function heroDistanceFor(planetIndex: number) {
   const config = PLANET_CONFIG[planetIndex]
   const visualRadius = getPlanetVisualRadius(planetIndex)
   const rockyFill = ROCKY_FILL[planetIndex]
-  return rockyFill !== undefined
-    ? visualRadius / rockyFill
-    : Math.max(config.minHeroDistance, visualRadius * config.radiusMultiplier) *
-        (planetIndex === 5 ? 1.9 : planetIndex === 4 ? 1.08 : 1.2)
+  return (
+    (rockyFill !== undefined
+      ? visualRadius / rockyFill
+      : Math.max(config.minHeroDistance, visualRadius * config.radiusMultiplier) *
+        (planetIndex === 5 ? 1.9 : planetIndex === 4 ? 1.08 : 1.2)) * heroFrame.closer
+  )
 }
 
 function calculatePlanetPose(
@@ -243,14 +251,14 @@ function calculatePlanetPose(
 
   // Three-quarter view: mostly from the side, partly sunward, so the camera
   // never sits on the Sun line (at Mercury it ended up inside the Sun's glow);
-  // some 65 degrees off it, so a dark limb shows the planet is round (on
-  // the side of the words, the lit face away from them)
+  // some 77 degrees off it: half-lit, the terminator across the disc and
+  // the night side falling away into the dark beside the words
   // Jupiter: almost in the plane of its moons, so they line up across the
   // disc and pass in front of it (with their shadows), as in a telescope
   _viewDir
     .copy(_toSun)
-    .multiplyScalar(0.42)
-    .addScaledVector(_side, 0.91)
+    .multiplyScalar(0.22)
+    .addScaledVector(_side, 0.975)
     .addScaledVector(_worldUp, planetIndex === 4 ? 0.035 : 0.16)
     .normalize()
 
@@ -402,11 +410,18 @@ function CinematicCamera({
   )
 
   const piloting = useRef(false)
+  // the lens shift that sets a planet left of the words (0..1)
+  const lensShift = useRef(0)
 
   useFrame((_, delta) => {
     // flying the jet: the jet's camera has the controls
     if (pilot.active) {
       piloting.current = true
+      if (camera.filmOffset !== 0) {
+        camera.filmOffset = 0
+        lensShift.current = 0
+        camera.updateProjectionMatrix()
+      }
       return
     }
     if (piloting.current) {
@@ -626,6 +641,20 @@ function CinematicCamera({
       pointer.x * 0.18 * parallaxWeight.current
     camera.position.y +=
       pointer.y * 0.10 * parallaxWeight.current
+
+    // the hero frame: closer on a wide screen, and the lens shifted so the
+    // planet sits left of the words (as a film frames a subject off-centre)
+    const wide = camera.aspect > 1.2
+    heroFrame.closer = wide ? 0.8 : 1
+    const shiftTarget = planet && wide ? 1 : 0
+    const shiftBefore = lensShift.current
+    lensShift.current += (shiftTarget - lensShift.current) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
+    if (Math.abs(lensShift.current - shiftBefore) > 1e-5 || (shiftTarget === 0 && camera.filmOffset !== 0 && lensShift.current < 1e-4)) {
+      // 0.15 of the half-width, in the film's millimetres
+      const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect
+      camera.filmOffset = lensShift.current < 1e-4 ? 0 : lensShift.current * 0.15 * camera.getFilmWidth() * halfWidth
+      camera.updateProjectionMatrix()
+    }
 
     // breathe: open the field of view a little with speed, settle on arrival
     const fovDiff = targetFov + flight.intensity * FOV_BREATH - camera.fov
@@ -1464,6 +1493,8 @@ function Scene({
   progressRef: MutableRefObject<number>
   glare: RefObject<HTMLDivElement | null>
 }) {
+  const grade = useMemo(() => new GradeEffect(), [])
+  useEffect(() => () => grade.dispose(), [grade])
 
   return (
 
@@ -1570,6 +1601,9 @@ function Scene({
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
         <Bloom intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />
+
+        {/* a documentary's colour: navy blacks, cool shade, warm sun */}
+        <primitive object={grade} />
 
         {/* edge smoothing, before the grain so the grain stays crisp */}
         <SMAA />
