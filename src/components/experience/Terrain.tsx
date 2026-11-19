@@ -10,7 +10,7 @@ import { DETAIL_PERIOD, GROUND_DETAIL_GLSL, groundLookUniforms } from './groundD
 import { SURFACE_PATCH_GLSL, surfacePatch } from './surfaceTiles'
 import { aimEarthGround, earthElevation, earthGround, releaseEarthGround } from './earthTiles'
 import { sphereUv } from './groundState'
-import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, shipShadow } from './groundState'
+import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, groundWorlds, shipShadow } from './groundState'
 import { CLOUD_GLSL, cloudVolume } from './clouds'
 import { earthToday } from './earthToday'
 import { earthEclipse, MOON_SHADOW_GLSL } from './eclipse'
@@ -190,7 +190,7 @@ void main() {
   vec3 d = normalize(vDir);
   vec2 uv = gUv(d);
   vec3 base = texture2D(uMap, uv).rgb;
-  if (uPatchPlanet == uPlanetId) base = patched(base, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, uv, uPatchGain).rgb;
+  if (uPatchPlanet == uPlanetId) base = withDetail(patched(base, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, uv, uPatchGain).rgb, uv);
   // Earth, low down: Sentinel-2 imagery, about 10 m a pixel
   if (uEarth > 0.5) base = patched(base, uImgFine, uImgFineRect, uImgCoarse, uImgCoarseRect, vec2(uv.x, gMercV(uv)), vec3(1.0)).rgb;
   base *= uAlbedo;
@@ -228,7 +228,16 @@ void main() {
   gb.grad = vec3(0.0);
   gb.albedo = vec3(1.0);
   gb.shade = 0.0;
-  if (nearM > 0.0 && land > 0.5) gb = groundDetail(pm, d, pxM, uSunL, nearM);
+  // (Earth: what the imagery shows decides it: grass where it is green,
+  // sand where it is bare, bright and warm)
+  float veg = 0.0;
+  float sandy = 0.0;
+  if (uEarth > 0.5) {
+    float lumB = dot(base, vec3(0.3, 0.5, 0.2));
+    veg = smoothstep(0.004, 0.025, base.g - max(base.r, base.b) * 0.9);
+    sandy = (1.0 - veg) * smoothstep(0.12, 0.3, lumB) * smoothstep(0.01, 0.06, base.r - base.b);
+  }
+  if (nearM > 0.0 && land > 0.5) gb = groundDetail(pm, d, pxM, uSunL, nearM, veg, sandy);
   // (close in, the ground's colour as it looks on the ground)
   base *= gb.albedo * mix(vec3(1.0), uLookNear, uLookNearAmount);
   n = normalize(n - (gb.grad - n * dot(gb.grad, n)));
@@ -458,6 +467,7 @@ export default function Terrain({
     const patch = mesh.current
     const body = patch?.parent
     if (!patch || !body) return
+    groundWorlds[index] = { model, body }
     if (pilot.active && pilot.nearestIndex === index) fetchGround()
     const near = pilot.active && pilot.nearestIndex === index && model.ready
     if (near) {

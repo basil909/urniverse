@@ -17,6 +17,19 @@ import { CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
 export const CLOUD_BASE_KM = 1.5
 export const CLOUD_TOP_KM = 9
 
+/* the layer as it is now: lifted over high ground, so a cloud base sits
+   at least 1.2 km above the ground under you (over the Andes or Tibet a
+   layer from 1.5 km would bury the land in fog); set by the flight */
+export const cloudLayer = { baseKm: CLOUD_BASE_KM, topKm: CLOUD_TOP_KM }
+
+export function liftCloudLayer(groundKm: number, delta: number) {
+  const base = Math.max(CLOUD_BASE_KM, groundKm + 1.2)
+  cloudLayer.baseKm += (base - cloudLayer.baseKm) * (1 - Math.exp(-delta * 0.8))
+  cloudLayer.topKm = Math.max(CLOUD_TOP_KM, cloudLayer.baseKm + 4)
+  cloudVolume.uCloudBase.value = 1 + cloudLayer.baseKm / 6371
+  cloudVolume.uCloudTop.value = 1 + cloudLayer.topKm / 6371
+}
+
 export const cloudVolume = {
   uCloudMap: { value: null as THREE.Texture | null },
   uCloudShift: { value: 0 },

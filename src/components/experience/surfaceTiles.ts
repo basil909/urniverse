@@ -13,7 +13,13 @@ import { pilot } from './pilotState'
    NASA's own imagery, fetched tile by tile as you go:
      Earth   Blue Marble Next Generation, ~500 m/pixel, and the VIIRS
              city lights (2012) on the night side (NASA GIBS)
-     Mars    Viking MDIM 2.1 colour mosaic, ~300 m/pixel (NASA Trek)
+     Mars    Viking MDIM 2.1 colour mosaic, ~300 m/pixel (NASA Trek), and
+             under it the MRO Context Camera's global mosaic, down to
+             about 5 m a pixel (Murray Lab, Caltech; served by Esri):
+             grey, so laid over the colour as light and shade only, each
+             sharp tile divided by a copy four times coarser (which
+             cancels the mosaic's strip-to-strip brightness and leaves
+             the craters, dunes and channels)
      Mercury MESSENGER MDIS basemap, ~230 m/pixel (NASA Trek)
    Mars's Viking mosaic is greyer and Mercury's basemap darker than the
    maps used everywhere else, so each is scaled, channel by channel, to
@@ -54,6 +60,15 @@ const gibs = (layer: string, ext: string): Source => ({
   degrees: (z) => 288 / 2 ** z,
 })
 
+/* Mars's Context Camera mosaic (CTX beta01): 512-pixel tiles, levels as
+   Trek's (180 degrees a tile at level 0), to 5 m a pixel at level 12 */
+const ctx: Source = {
+  url: (z, row, col) => `https://astro.arcgis.com/arcgis/rest/services/OnMars/CTX/MapServer/tile/${z}/${row}/${col}`,
+  tile: 512,
+  maxLevel: 12,
+  degrees: (z) => 180 / 2 ** z,
+}
+
 const trek = (body: string, layer: string, maxLevel: number, ext = 'jpg', uShift = 0): Source => ({
   url: (z, row, col) =>
     `https://trek.nasa.gov/tiles/${body}/EQ/${layer}/1.0.0/default/default028mm/${z}/${row}/${col}.${ext}`,
@@ -67,7 +82,15 @@ const trek = (body: string, layer: string, maxLevel: number, ext = 'jpg', uShift
    gain: the colour match to the local maps */
 const SOURCES: Record<
   number,
-  { day: Source; night?: Source; radiusKm: number; mapWidth: number; gain: [number, number, number] }
+  {
+    day: Source
+    night?: Source
+    /** grey detail laid over the colour (in the night patches' place) */
+    detail?: Source
+    radiusKm: number
+    mapWidth: number
+    gain: [number, number, number]
+  }
 > = {
   0: {
     day: trek('Mercury', 'Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m', 7),
@@ -119,6 +142,7 @@ const SOURCES: Record<
   },
   3: {
     day: trek('Mars', 'Mars_Viking_MDIM21_ClrMosaic_global_232m', 7),
+    detail: ctx,
     radiusKm: 3389.5,
     mapWidth: 4096,
     gain: [1.48, 0.946, 0.659],
@@ -145,6 +169,8 @@ export const surfacePatch = {
   uNightFineRect: { value: new THREE.Vector4() },
   uNightCoarse: { value: null as THREE.Texture | null },
   uNightCoarseRect: { value: new THREE.Vector4() },
+  /** the night patches hold grey detail instead (Mars's CTX): 1 */
+  uPatchDetail: { value: 0 },
 }
 
 export const SURFACE_PATCH_GLSL = /* glsl */ `
@@ -153,6 +179,7 @@ uniform sampler2D uPatchFine; uniform vec4 uPatchFineRect;
 uniform sampler2D uPatchCoarse; uniform vec4 uPatchCoarseRect;
 uniform sampler2D uNightFine; uniform vec4 uNightFineRect;
 uniform sampler2D uNightCoarse; uniform vec4 uNightCoarseRect;
+uniform float uPatchDetail;
 /* a patch's texel at a map UV (premultiplied: zero outside the patch,
    where no tile has arrived, and fading over its last few percent) */
 vec4 patchTexel(sampler2D map, vec4 rect, vec2 uv) {
@@ -170,6 +197,18 @@ vec4 patched(vec3 base, sampler2D fine, vec4 fineRect, sampler2D coarse, vec4 co
   vec4 f = patchTexel(fine, fineRect, uv);
   color = color * (1.0 - f.a) + f.rgb * gain;
   return vec4(color, max(c.a, f.a));
+}
+/* grey detail over the colour (Mars's CTX): the sharp patch's brightness
+   over the coarse one's, where both have arrived */
+vec3 withDetail(vec3 color, vec2 uv) {
+  if (uPatchDetail < 0.5) return color;
+  vec4 f = patchTexel(uNightFine, uNightFineRect, uv);
+  vec4 c = patchTexel(uNightCoarse, uNightCoarseRect, uv);
+  if (f.a <= 0.001 || c.a <= 0.001) return color;
+  float lf = dot(f.rgb / f.a, vec3(0.3, 0.5, 0.2));
+  float lc = dot(c.rgb / c.a, vec3(0.3, 0.5, 0.2));
+  float ratio = clamp(lf / max(lc, 0.03), 0.3, 2.6);
+  return color * mix(1.0, ratio, min(f.a, c.a));
 }
 `
 
@@ -487,6 +526,7 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
       if (owner === index) {
         owner = -1
         surfacePatch.uPatchPlanet.value = -1
+        surfacePatch.uPatchDetail.value = 0
         const all = getLayers()
         all.dayFine.release()
         all.dayCoarse.release()
@@ -543,6 +583,7 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     owner = index
     surfacePatch.uPatchPlanet.value = index
     surfacePatch.uPatchGain.value.fromArray(source.gain)
+    surfacePatch.uPatchDetail.value = source.detail ? 1 : 0
     const mapKm = (2 * Math.PI * source.radiusKm) / source.mapWidth
 
     const space = index === 2 || index >= 12 ? THREE.SRGBColorSpace : THREE.NoColorSpace
@@ -560,6 +601,7 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     }
     aimPair(source.day, all.dayFine, all.dayCoarse, sunUp > -0.3)
     if (source.night) aimPair(source.night, all.nightFine, all.nightCoarse, sunUp < 0.3)
+    else if (source.detail) aimPair(source.detail, all.nightFine, all.nightCoarse, sunUp > -0.3)
     else {
       all.nightFine.hide()
       all.nightCoarse.hide()

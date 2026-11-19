@@ -171,9 +171,15 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         `/* the cloud map, sharp round the view where the patch has arrived */
       diffuseColor.a *= cloudFromMaps(alphaMap, vAlphaMapUv);
       float cloudCover = diffuseColor.a;
-      /* real cloud fields have firm edges: thin haze fades away, thick
-         cloud is solid (not a grey veil over the ground) */
-      diffuseColor.a = smoothstep(0.16, 0.66, cloudCover);
+      /* real cloud fields have firm edges, and part cover is not a thin
+         veil but broken cloud: cells some 10-40 km across with ground
+         between them, closing up into a solid deck as the cover nears full */
+      {
+        vec3 Pc = normalize(vSurfaceP);
+        float broken = cdNoise(Pc * 160.0) * 0.55 + cdNoise(Pc * 640.0 + 7.1) * 0.3 + cdNoise(Pc * 2560.0 + 3.3) * 0.15;
+        float c2 = cloudCover + (broken - 0.5) * 0.8 * (1.0 - cloudCover * 0.7);
+        diffuseColor.a = smoothstep(0.22, 0.8, c2);
+      }
       {
         vec3 cd = closeDetail(normalize(vSurfaceP), 0.0, 1.0);
         diffuseColor.a *= clamp(1.0 + cd.y * 1.5, 0.0, 1.6);
@@ -1559,7 +1565,7 @@ void main() {
     /* flying low: NASA's imagery of the ground below, streamed in */
     if (uPatchPlanet == uPlanet) {
       vec4 streamed = patched(surface, uPatchFine, uPatchFineRect, uPatchCoarse, uPatchCoarseRect, vUv, uPatchGain);
-      surface = streamed.rgb;
+      surface = withDetail(streamed.rgb, vUv);
       streamedCover = streamed.a;
     }
     /* Venus: the faint dark chevrons seen in ultraviolet, sweeping round */

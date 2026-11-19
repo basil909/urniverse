@@ -65,7 +65,11 @@ export function skyWorkerMain(setup: SkySetup) {
     return canvas.getContext('2d', { willReadFrequently: true })!
   }
 
-  /* a pixel's cloud from a true-colour picture: bright and colourless (-1: no data) */
+  /* a pixel's cloud from a true-colour picture: bright and colourless (-1: no data).
+     A pixel is some 16 km: scattered small cumulus over forest average to
+     a pale grey, and the Sun's glint off the sea to a grey streak, so the
+     cover rises only from fairly bright, and is full only where it is
+     white (a solid deck) */
   function cloudOf(data: Uint8ClampedArray, i: number) {
     const r = data[i]
     const g = data[i + 1]
@@ -74,7 +78,7 @@ export function skyWorkerMain(setup: SkySetup) {
     const max = Math.max(r, g, b)
     const min = Math.min(r, g, b)
     const sat = max > 0 ? (max - min) / max : 0
-    return smoothstep(0.3, 0.72, (r + g + b) / 765) * (1 - smoothstep(0.1, 0.28, sat))
+    return smoothstep(0.4, 0.86, (r + g + b) / 765) * (1 - smoothstep(0.08, 0.24, sat))
   }
 
   /* ---- the global map */

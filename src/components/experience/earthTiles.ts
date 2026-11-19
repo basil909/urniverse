@@ -159,8 +159,12 @@ class ElevationLayer {
         this.half[i * 2] = THREE.DataUtils.toHalfFloat(h)
         this.half[i * 2 + 1] = 0x3c00 // 1.0
       }
-      // (only this tile's part of each row goes up)
-      if (!this.full) this.texture.addUpdateRange((row * SIZE + slotX * TILE) * 2, TILE * 2)
+      // (only this tile's part of each row goes up; three.js reads update
+      // ranges as if every texture were RGBA, four values a pixel, so they
+      // are given in those units: in two-value units this texture's tiles
+      // went up to the wrong places, and the GPU drew the ground flat
+      // where the ship stood on real heights)
+      if (!this.full) this.texture.addUpdateRange((row * SIZE + slotX * TILE) * 4, TILE * 4)
     }
     this.dirty = true
   }

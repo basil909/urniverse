@@ -333,6 +333,10 @@ export class GroundModel {
   }
 }
 
+/* every world's ground model and body, whether or not its ground is
+   showing (the landing looks ahead for a coast from high up) */
+export const groundWorlds: Record<number, { model: GroundModel; body: THREE.Object3D }> = {}
+
 /* The planet the ground is under, for the flight: written by the terrain
    (which knows the planet's frame), read by the pilot. */
 export const ground = {

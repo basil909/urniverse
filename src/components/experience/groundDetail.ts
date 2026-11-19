@@ -46,7 +46,7 @@ export type GroundLook = {
 
 export const GROUND_LOOK: Record<number, GroundLook> = {
   0: { rough: 0.05, craters: 1, stones: 0.35, ripples: 0, regolith: 0.7, surge: 0.35, sand: '#c9c6c2', dust: '#ffffff', stone: '#8c8780', near: '#ffffff' },
-  2: { rough: 0.035, craters: 0, stones: 0.15, ripples: 0, regolith: 0, surge: 0, sand: '#ffffff', dust: '#ffffff', stone: '#c7c2bb', near: '#ffffff' },
+  2: { rough: 0.045, craters: 0, stones: 0.35, ripples: 0, regolith: 0, surge: 0, sand: '#ffffff', dust: '#ffffff', stone: '#c7c2bb', near: '#ffffff' },
   // dark basaltic sand in rippled patches, bright dust, rock everywhere;
   // up close (rover pictures) a browner butterscotch than the orbital map
   3: { rough: 0.04, craters: 0.35, stones: 0.9, ripples: 1, regolith: 0.25, surge: 0.12, sand: '#b29e92', dust: '#fff0e2', stone: '#6a5246', near: '#e8d0bc' },
@@ -131,8 +131,10 @@ vec4 gdAt(vec3 pm, float lambda, float seed) {
 struct GroundBits { vec3 grad; vec3 albedo; float shade; };
 
 /* pm: metres (anchored); up: the ground's up; px: metres a pixel;
-   sunL: towards the Sun; near: 1 close in, 0 far off */
-GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near) {
+   sunL: towards the Sun; near: 1 close in, 0 far off; on Earth, from the
+   imagery's colour: veg (green: grass and scrub) and sandy (bare, bright
+   and warm: desert sand) */
+GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float veg, float sandy) {
   GroundBits g;
   g.grad = vec3(0.0);
   g.albedo = vec3(1.0);
@@ -147,11 +149,12 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near) {
   float patchy = m1.x * 0.45 + gdAt(pw, 64.0, 5.0).x * 0.3 + gdAt(pw, 32.0, 9.0).x * 0.15 + m2.x * 0.1;
   float rough = mix(0.45, 1.3, smoothstep(0.3, 0.7, gdAt(pm, 128.0, 11.0).x));
   // (soft-edged, and lying thinner or thicker from place to place)
-  float sand = uLookRipples > 0.0 ? smoothstep(0.54, 0.72, patchy + (m2.x - 0.5) * 0.1) : 0.0;
+  float rippled = max(uLookRipples, sandy);
+  float sand = rippled > 0.0 ? smoothstep(0.54, 0.72, patchy + (m2.x - 0.5) * 0.1) * max(step(0.001, uLookRipples), sandy) : 0.0;
   float dust = smoothstep(0.46, 0.3, patchy);
   // ---- relief: octaves from 16 m to a centimetre, each once it spans pixels
   float lambda = 16.0;
-  float amp = uLookRough * rough * (1.0 - sand * 0.7);
+  float amp = uLookRough * rough * (1.0 - sand * 0.7) * (1.0 - veg * 0.4);
   for (int k = 0; k < 11; k++) {
     float seen = 1.0 - smoothstep(lambda * 0.18, lambda * 0.5, px);
     if (seen <= 0.0) break;
@@ -161,7 +164,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near) {
   }
   // ---- sand ripples: a metre and a half apart, crests across the wind,
   // bent by the eddies (the wave vector is whole turns per period)
-  if (sand > 0.0 && uLookRipples > 0.0) {
+  if (sand > 0.0 && rippled > 0.0) {
     vec3 K = 6.2831853 * vec3(925.0, 375.0, 800.0) / GD_PERIOD;
     vec4 bend = gdAt(pm, 8.0, 41.0);
     float phase = dot(pm, K) + bend.x * 5.0;
@@ -169,7 +172,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near) {
     // a long gentle stoss side, a steeper lee
     float s = sin(phase);
     float c = cos(phase);
-    g.grad += (K + bend.yzw * 5.0) * (c * (1.0 + 0.35 * s)) * 0.045 * sand * seen * uLookRipples;
+    g.grad += (K + bend.yzw * 5.0) * (c * (1.0 + 0.35 * s)) * 0.045 * sand * seen * rippled;
   }
   // ---- small craters (airless worlds): scales from 2 m to 128 m
   if (uLookCraters > 0.0) {
@@ -238,7 +241,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near) {
     for (int s = 0; s < 1; s++) {
       if (cell < px * 4.0) { cell *= 4.0; continue; }
       float seenAll = 1.0 - smoothstep(cell * 0.08, cell * 0.25, px);
-      float chance = uLookStones * 0.2 * mix(0.4, 1.3, rough * 0.8) * (1.0 - sand * 0.85);
+      float chance = uLookStones * 0.2 * mix(0.4, 1.3, rough * 0.8) * (1.0 - sand * 0.85) * (1.0 - veg * 0.9);
       vec3 x = pm / cell;
       vec3 base = floor(x - 0.5);
       float period = GD_PERIOD / cell;
@@ -275,6 +278,19 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near) {
   float mottle = (fine.x - 0.5) * 0.14 * (1.0 - smoothstep(0.08, 0.3, px)) + (grain.x - 0.5) * 0.1 * (1.0 - smoothstep(0.012, 0.04, px));
   vec3 patchColour = mix(vec3(1.0), uLookSand, sand) * mix(vec3(1.0), uLookDust, dust * 0.6);
   g.albedo *= patchColour * (1.0 + mottle) * (1.0 + (m2.x - 0.5) * 0.18);
+  // grass and scrub: clumps and tufts, light and dark, some of it dry
+  if (veg > 0.0) {
+    vec4 clump = gdAt(pm, 2.0, 61.0);
+    vec4 tuft = gdAt(pm, 0.25, 67.0);
+    vec4 blade = gdAt(pm, 0.0625, 71.0);
+    float seenT = 1.0 - smoothstep(0.05, 0.18, px);
+    float seenB = 1.0 - smoothstep(0.012, 0.045, px);
+    float shade = (clump.x - 0.5) * 0.5 + (tuft.x - 0.5) * 0.6 * seenT + (blade.x - 0.5) * 0.5 * seenB;
+    float dry = smoothstep(0.55, 0.8, gdAt(pm, 8.0, 73.0).x);
+    vec3 grass = mix(vec3(1.0), vec3(1.25, 1.12, 0.62), dry * 0.7) * (1.0 + shade);
+    g.albedo *= mix(vec3(1.0), grass, veg);
+    g.grad += (tuft.yzw * 0.25 * 0.08 * seenT + blade.yzw * 0.0625 * 0.12 * seenB) * veg;
+  }
   g.grad *= near;
   g.albedo = mix(vec3(1.0), g.albedo, near);
   g.shade *= near;

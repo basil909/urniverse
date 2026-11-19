@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 
 import { pilot } from './pilotState'
-import { GROUND, ground, groundAltitude } from './groundState'
+import { GROUND, ground, groundAltitude, groundWorlds, sphereUv } from './groundState'
 import { aimShip, flyHeading, KM_PER_UNIT, ON_WHEELS, SHIP_LENGTH } from './flightShip'
 import { runwayGlide, runwayToGo } from './flightMission'
 
@@ -63,10 +63,60 @@ export const entryProgress = (top: number, km: number) => THREE.MathUtils.clamp(
 /** the heating, 0..1 of this world's peak: building, holding, fading */
 export const entryHeat = (e: number) => THREE.MathUtils.smoothstep(e, 0, 0.22) * (1 - THREE.MathUtils.smoothstep(e, 0.55, 0.92))
 
+/* ---- over the sea, Earth: the nearest coast, and a point some 40 km
+   inland (the glide carries on past where it starts), found from the
+   land/sea map by looking out along 48 bearings, 20 km a step, to
+   3,000 km. Kept in the world's own frame (radius 1). */
+let landTarget: THREE.Vector3 | null = null
+const _site = new THREE.Vector3()
+const _east = new THREE.Vector3()
+const _north = new THREE.Vector3()
+const _probe = new THREE.Vector3()
+const _targetWorld = new THREE.Vector3()
+const _toTarget = new THREE.Vector3()
+
+function out(from: THREE.Vector3, bearing: number, angle: number, target: THREE.Vector3) {
+  return target
+    .copy(_east)
+    .multiplyScalar(Math.sin(bearing))
+    .addScaledVector(_north, Math.cos(bearing))
+    .multiplyScalar(Math.sin(angle))
+    .addScaledVector(from, Math.cos(angle))
+    .normalize()
+}
+
+function landAt(model: { land: (u: number, v: number) => number }, d: THREE.Vector3) {
+  const [u, v] = sphereUv(d)
+  return model.land(u, v)
+}
+
+/** the nearest coast from a point (world's own frame), and which way, or null */
+function findCoast(model: { land: (u: number, v: number) => number }, site: THREE.Vector3, radiusKm: number) {
+  _east.set(0, 1, 0).cross(site)
+  if (_east.lengthSq() < 1e-10) _east.set(1, 0, 0)
+  _east.normalize()
+  _north.copy(site).cross(_east).normalize()
+  const step = 20 / radiusKm
+  const inland = 40 / radiusKm
+  for (let k = 1; k * step < 3000 / radiusKm; k += 1) {
+    for (let j = 0; j < 48; j += 1) {
+      const bearing = (j / 48) * Math.PI * 2
+      if (landAt(model, out(site, bearing, k * step, _probe)) < 0.6) continue
+      // and land on past it (not a sliver of an island)
+      if (landAt(model, out(site, bearing, k * step + inland, _probe)) < 0.6) continue
+      return { point: out(site, bearing, k * step + inland, new THREE.Vector3()), km: k * 20, bearing: (bearing * 180) / Math.PI }
+    }
+  }
+  return null
+}
+
+const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']
+
 const _forward = new THREE.Vector3()
 const _wanted = new THREE.Vector3()
 const _groundUp = new THREE.Vector3()
 const _bodyQuat = new THREE.Quaternion()
+const _inverse = new THREE.Matrix4()
 const _bodyPosDummy = new THREE.Vector3()
 const _bodyScaleDummy = new THREE.Vector3()
 const _turn = new THREE.Quaternion()
@@ -105,6 +155,21 @@ export function flyLanding(frame: LandingFrame) {
       pilot.runwayApproach = false
       // the heading: as the ship moves, or as it points
       heading.current.copy(velocity.current.lengthSq() > 1e-16 ? velocity.current : shipForward)
+      // over the sea (Earth): come down on the nearest coast instead
+      landTarget = null
+      const world = groundWorlds[nearestIndex]
+      if (world && GROUND[nearestIndex]?.seaMap) {
+        world.body.updateWorldMatrix(true, false)
+        _site.copy(jet.position).applyMatrix4(_inverse.copy(world.body.matrixWorld).invert()).normalize()
+        if (landAt(world.model, _site) < 0.5) {
+          const coast = findCoast(world.model, _site, GROUND[nearestIndex].radiusKm)
+          if (coast) {
+            landTarget = coast.point
+            pilot.landState = 'descending'
+            pilot.missionNote = `Over the sea: heading for the nearest coast\n${Math.round(coast.km).toLocaleString('en-GB')} km to the ${COMPASS[Math.round(coast.bearing / 45) % 8]}`
+          }
+        }
+      }
     } else if (pilot.landState === 'descending' || pilot.landState === 'landing') {
       pilot.landState = 'flying'
       speed.current = velocity.current.length()
@@ -139,7 +204,26 @@ export function flyLanding(frame: LandingFrame) {
           ? entry.speed + (km - entry.top) * (0.12 + 0.38 * THREE.MathUtils.smoothstep(km - entry.top, 100, 600))
           : 2 + (entry.speed - 2) * THREE.MathUtils.smoothstep(km, 20, 20 + 0.55 * (entry.top - 20))
     }
-    const along = Math.min(2.5, km * 0.02 + 0.3)
+    let along = Math.min(2.5, km * 0.02 + 0.3)
+    // making for a coast: across to it as the height comes down, held at
+    // 20 km until it is near, then the glide takes over
+    let far = 0
+    const world = groundWorlds[nearestIndex]
+    if (landTarget && world) {
+      _targetWorld.copy(landTarget).applyMatrix4(world.body.matrixWorld)
+      _toTarget.copy(_targetWorld).sub(jet.position)
+      _toTarget.addScaledVector(radial, -_toTarget.dot(radial))
+      far = _toTarget.length() * KM_PER_UNIT
+      if (far > 1e-6) heading.current.copy(_toTarget).normalize()
+      // time left coming down (to 20 km), and the crossing in that time:
+      // a long way off, across above the air (fast), then in through it
+      // within 300 km of the coast at orbital speed at most, glowing as
+      // the Shuttle did, and held at 20 km until the coast is near
+      const left = Math.max(km - 20, 0) / Math.max(down, 0.5) + 6
+      along = Math.max(along, Math.min(far / left, km > 110 ? 60 : 7.8))
+      if (far > 300 && km < 135) down = Math.max(0, (km - 125) * 0.5)
+      else if (far > 30 && km < 24) down = Math.max(0, (km - 20) * 0.5)
+    }
     flyHeading(heading.current, radial, steerX, delta)
     _wanted.copy(heading.current).multiplyScalar(along).addScaledVector(radial, -down).divideScalar(KM_PER_UNIT)
     velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 2))
@@ -148,8 +232,12 @@ export function flyLanding(frame: LandingFrame) {
     speed.current = velocity.current.length()
     const floor = nearestRadius * 1.002
     if (jet.position.distanceTo(centre) < floor) jet.position.copy(centre).addScaledVector(radial, floor)
-    if (onGround && groundHere * KM_PER_UNIT < 20) pilot.landState = 'landing'
+    if (onGround && groundHere * KM_PER_UNIT < 20 && far <= 30) {
+      pilot.landState = 'landing'
+      landTarget = null
+    }
   }
+  if (pilot.landState === 'flying') landTarget = null
   if (pilot.landState !== 'flying' && pilot.landState !== 'descending' && onGround) {
     ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
     _groundUp.copy(jet.position).applyMatrix4(ground.inverse).normalize().applyQuaternion(_bodyQuat)
