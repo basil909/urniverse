@@ -46,13 +46,13 @@ function formatShort(km: number) {
 /* the worlds, as the markers list them (index -1: the Sun). Each is of
    a kind, and each kind has its own mark and tint, so a glance tells a
    planet from a moon, a spacecraft or a star; hovering says what it is */
-type Kind = 'sun' | 'planet' | 'dwarf' | 'moon' | 'comet' | 'craft' | 'star'
+export type Kind = 'sun' | 'planet' | 'dwarf' | 'moon' | 'comet' | 'craft' | 'star'
 /* which markers show: the Sun and the planets always; everything else
    only near it (a moon at its planet, an asteroid or the comet within
    60 million km, a spacecraft close by, the stars once past the
    planets), so the HUD stays quiet. `show` gets the distance, km. The
    one being warped to always shows; all of them are in the Go to list. */
-type World = {
+export type World = {
   index: number
   name: string
   key: string
@@ -85,7 +85,7 @@ const STARS: [string, string][] = [
   ['Spica', 'Blue giants, a close pair'],
   ['Canopus', 'White bright giant · second in our sky'],
 ]
-const WORLDS: World[] = [
+export const WORLDS: World[] = [
   { index: -1, name: 'Sun', key: '0', kind: 'sun', what: 'Our star' },
   { index: 0, name: 'Mercury', key: '1', kind: 'planet', what: 'Rocky planet · nearest the Sun' },
   { index: 1, name: 'Venus', key: '2', kind: 'planet', what: 'Rocky planet · under acid clouds' },
@@ -189,7 +189,7 @@ const GROUPS: { kind: Kind; title: string }[][] = [
   ],
   [{ kind: 'star', title: 'Other stars' }],
 ]
-const PARENT_NAMES: Record<number, string> = { 2: 'Earth', 3: 'Mars', 4: 'Jupiter', 5: 'Saturn' }
+export const PARENT_NAMES: Record<number, string> = { 2: 'Earth', 3: 'Mars', 4: 'Jupiter', 5: 'Saturn' }
 
 /* the world being warped to, from the name the pilot gives */
 const worldNamed = (name: string) => WORLDS.find((world) => name !== '' && name.replace(/^the /, '') === world.name)
@@ -208,7 +208,7 @@ function warpLine(name: string) {
 /* each kind's mark: the Sun rayed, a planet a ring, an asteroid a
    diamond, a moon a crescent, the comet a head and tail, a spacecraft a
    tracking bracket, a star a four-pointed glint */
-function Glyph({ kind }: { kind: Kind }) {
+export function Glyph({ kind }: { kind: Kind }) {
   return (
     <svg className="flight-glyph" viewBox="0 0 12 12" aria-hidden="true">
       {kind === 'sun' && (

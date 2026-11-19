@@ -19,6 +19,10 @@ import SoundToggle from './ui/SoundToggle'
 import FlightHud from './ui/FlightHud'
 import ChapterMenu from './ui/ChapterMenu'
 import TimeBar from './ui/TimeBar'
+import CommandPalette, { type Command } from './ui/CommandPalette'
+import LiveCounter from './ui/LiveCounter'
+import { Glyph, PARENT_NAMES, WORLDS } from './ui/FlightHud'
+import { REAL_SPEEDS, setRealMotion, simClock } from './experience/simClock'
 import Icon from './ui/Icon'
 import { pilot } from './experience/pilotState'
 import { WORLD_DETAILS } from '../data/worlds'
@@ -733,6 +737,11 @@ export default function Journey() {
   const [today, setToday] = useState('')
   // deep-dive panel for the current world
   const [detailOpen, setDetailOpen] = useState(false)
+  // the tab the panel opens on, and the command palette
+  const [panelTab, setPanelTab] = useState<'overview' | 'now' | 'story' | 'missions'>('overview')
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const paletteOpenRef = useRef(false)
+  paletteOpenRef.current = paletteOpen
   // flight mode: the journey pauses while you fly the jet
   const [flying, setFlying] = useState(false)
   const flyingRef = useRef(false)
@@ -1099,8 +1108,21 @@ export default function Journey() {
   }, [])
 
   useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (flyingRef.current) return
+      const typing = (event.target as HTMLElement | null)?.closest?.('input, textarea')
+      if (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') || (event.key === '/' && !typing)) {
+        event.preventDefault()
+        setPaletteOpen((value) => !value)
+      }
+    }
+    window.addEventListener('keydown', onShortcut)
+    return () => window.removeEventListener('keydown', onShortcut)
+  }, [])
+
+  useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (detailOpenRef.current || flyingRef.current) return
+      if (paletteOpenRef.current || detailOpenRef.current || flyingRef.current) return
       const forward = ['ArrowDown', 'ArrowRight', 'PageDown']
       const back = ['ArrowUp', 'ArrowLeft', 'PageUp']
       if (forward.includes(event.key)) {
@@ -1158,6 +1180,116 @@ export default function Journey() {
       ? { name: panelTitle(chapter), go: () => stepTo(chapterIndex) }
       : undefined
   }
+  /* everything the command palette can do */
+  const openPanel = (chapterIndex: number, tab: typeof panelTab) => {
+    setPanelTab(tab)
+    if (active === chapterIndex && textOn) setDetailOpen(true)
+    else stepTo(chapterIndex)
+  }
+  const commands: Command[] = [
+    ...JOURNEY.map((chapter, i) => ({
+      id: `chapter-${chapter.id}`,
+      group: 'Chapters',
+      title: panelTitle(chapter),
+      hint: `${chapterNo(i + 1)} · ${chapter.title}`,
+      keywords: `${chapter.id} go chapter`,
+      icon: <span className="palette-dot" style={{ background: chapter.accent }} />,
+      run: () => goToSection(i + 1),
+    })),
+    ...JOURNEY.flatMap((chapter, i) =>
+      WORLD_DETAILS[chapter.id]
+        ? (
+            [
+              ['overview', 'About', 'overview figures facts size'],
+              ['now', 'Right now', 'today distance tonight sky weight age live'],
+              ['story', 'Story', 'story moons history'],
+              ['missions', WORLD_DETAILS[chapter.id].missionsHeading ?? 'Exploration', 'missions exploration timeline spacecraft milestones'],
+            ] as const
+          ).map(([tab, label, words]) => ({
+            id: `panel-${chapter.id}-${tab}`,
+            group: 'Panels',
+            title: `${panelTitle(chapter)}: ${label}`,
+            keywords: words,
+            icon: <Icon name="plus" />,
+            run: () => openPanel(i, tab),
+          }))
+        : [],
+    ),
+    ...WORLDS.map((world) => ({
+      id: `fly-${world.index}`,
+      group: 'Fly to',
+      title: world.name,
+      hint: `${world.what}${world.parent !== undefined ? ` · ${PARENT_NAMES[world.parent]}` : ''}`,
+      keywords: 'fly warp shuttle go',
+      icon: <Glyph kind={world.kind} />,
+      run: () => {
+        pilot.warpRequest = world.index
+        takeOff()
+      },
+    })),
+    {
+      id: 'action-fly',
+      group: 'Actions',
+      title: 'Fly the Shuttle',
+      hint: 'free flight from here',
+      keywords: 'shuttle fly flight start',
+      icon: <Icon name="shuttle" />,
+      run: takeOff,
+    },
+    {
+      id: 'action-live',
+      group: 'Actions',
+      title: 'Time: Live',
+      hint: 'everything on the real clock, now',
+      keywords: 'time live real clock now',
+      icon: <Icon name="clock" />,
+      run: () => {
+        simClock.realRate = REAL_SPEEDS[0].days
+        setRealMotion(true)
+      },
+    },
+    {
+      id: 'action-cinematic',
+      group: 'Actions',
+      title: 'Time: Cinematic',
+      hint: 'the planets drift gently',
+      keywords: 'time cinematic drift',
+      icon: <Icon name="clock" />,
+      run: () => setRealMotion(false),
+    },
+    {
+      id: 'action-sound',
+      group: 'Actions',
+      title: 'Sound on or off',
+      hint: 'the soundtrack',
+      keywords: 'sound music audio mute',
+      icon: <Icon name="sound" />,
+      run: () => document.querySelector<HTMLButtonElement>('.sound-toggle')?.click(),
+    },
+    ...(activeChapter
+      ? [
+          {
+            id: 'action-link',
+            group: 'Actions',
+            title: `Copy a link to ${panelTitle(activeChapter)}`,
+            keywords: 'link share copy url',
+            icon: <Icon name="link" />,
+            run: () => {
+              navigator.clipboard?.writeText(`${window.location.origin}${window.location.pathname}#${slugOf(activeChapter)}`)
+            },
+          },
+        ]
+      : []),
+    {
+      id: 'action-start',
+      group: 'Actions',
+      title: 'Back to the start',
+      keywords: 'start beginning top home intro',
+      icon: <Icon name="arrow" className="is-up-straight" />,
+      run: () => goToSection(0),
+    },
+  ]
+
   // this chapter's world, if it is a planet you can fly to
   const flyTarget = activeChapter ? PLANET_INDEX[activeChapter.id] : undefined
   const scale = activeChapter ? scaleSentence(activeChapter.id, planetName) : null
@@ -1183,6 +1315,8 @@ export default function Journey() {
 
       {flying && <FlightHud onLand={land} />}
 
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
+
       <DetailPanel
         open={detailOpen}
         name={activeChapter ? panelTitle(activeChapter) : ''}
@@ -1205,6 +1339,7 @@ export default function Journey() {
         next={active >= 0 ? panelStep(active + 1) : undefined}
         detail={activeChapter ? WORLD_DETAILS[activeChapter.id] ?? null : null}
         onClose={() => setDetailOpen(false)}
+        startTab={panelTab}
         description={activeChapter?.description}
         scaleNote={
           scale
@@ -1266,8 +1401,19 @@ export default function Journey() {
           />
         )}
 
-        {/* three small tools: fly, real motion, sound */}
+        {/* three small tools: fly, real motion, sound; and search */}
         <div className="hud-tools">
+          {!flying && (
+            <button
+              type="button"
+              className="tool-button palette-button"
+              aria-label="Search everything (Ctrl K)"
+              data-tip="Search · Ctrl K"
+              onClick={() => setPaletteOpen(true)}
+            >
+              <Icon name="search" />
+            </button>
+          )}
           <button
             type="button"
             className="tool-button"
@@ -1439,6 +1585,7 @@ export default function Journey() {
                   Planets start where they are today, {today}
                 </p>
               )}
+              <LiveCounter />
             </motion.div>
           )}
 
@@ -1519,7 +1666,10 @@ export default function Journey() {
                   <button
                     type="button"
                     className="btn btn--primary"
-                    onClick={() => setDetailOpen(true)}
+                    onClick={() => {
+                      setPanelTab('overview')
+                      setDetailOpen(true)
+                    }}
                     aria-expanded={detailOpen}
                   >
                     More about {moreAbout(activeChapter)}

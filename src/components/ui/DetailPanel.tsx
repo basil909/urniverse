@@ -43,6 +43,7 @@ export default function DetailPanel({
   previous,
   next,
   link,
+  startTab = 'overview',
 }: {
   open: boolean
   name: string
@@ -64,6 +65,8 @@ export default function DetailPanel({
   next?: PanelStep
   /* this chapter's address, to copy and share */
   link?: string
+  /* the tab it opens on (the command palette can open any) */
+  startTab?: 'overview' | 'now' | 'story' | 'missions'
 }) {
   const panel = useRef<HTMLElement>(null)
   const marker = useRef<HTMLDivElement>(null)
@@ -80,12 +83,13 @@ export default function DetailPanel({
     return () => window.clearTimeout(timer)
   }, [copied])
 
-  // a new world opens on its overview
+  // each opening starts on its tab (the overview, unless asked)
   useEffect(() => {
-    setTab('overview')
+    if (!open) return
+    setTab(startTab)
     setManual(false)
     setStuck(false)
-  }, [name])
+  }, [name, open, startTab])
 
   const copyLink = () => {
     if (!link) return
@@ -280,9 +284,9 @@ export default function DetailPanel({
                     {worldIndex !== undefined && <WorldGraphics index={worldIndex} name={name} />}
                     {scaleNote && <p className="detail-scale">{scaleNote}</p>}
                     <h3 className="dp-label">At a glance</h3>
-                    <dl className="detail-glance">
-                      {detail.glance.map((item) => (
-                        <div key={item.label} className="detail-glance-row">
+                    <dl className="detail-glance bento">
+                      {detail.glance.map((item, i) => (
+                        <div key={item.label} className={`detail-glance-row ${i === 0 ? 'is-hero' : ''}`}>
                           <dt>{item.label}</dt>
                           <dd>{item.value}</dd>
                         </div>
