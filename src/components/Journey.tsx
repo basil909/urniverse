@@ -775,6 +775,34 @@ export default function Journey() {
   const lastSection = useRef(0)
   const lastTextOn = useRef(true)
 
+  /* Watching: after a few still seconds the controls fade away (and the
+     pointer with them), as a film player's do; any move brings them back */
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    // on <html>: React rewrites the page's own class list as chapters change
+    const html = document.documentElement
+    let timer = 0
+    const wake = () => {
+      html.classList.remove('is-idle')
+      window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        // not while flying, reading the panel, or in a menu
+        if (root.classList.contains('is-flying') || root.classList.contains('detail-is-open')) return
+        if (document.querySelector('.hud-top :focus-within, .hud-top [aria-expanded="true"], [role="dialog"]')) return
+        html.classList.add('is-idle')
+      }, 4200)
+    }
+    const events = ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart'] as const
+    events.forEach((name) => window.addEventListener(name, wake, { passive: true }))
+    wake()
+    return () => {
+      window.clearTimeout(timer)
+      html.classList.remove('is-idle')
+      events.forEach((name) => window.removeEventListener(name, wake))
+    }
+  }, [])
+
   /* Inertial smooth scrolling: scrollY (and so the camera) glides */
   useEffect(() => {
     // Respect "reduce motion": keep native scrolling, no inertia
@@ -1313,7 +1341,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''}`}
+      className={`universe-page ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textOn && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -1323,6 +1351,10 @@ export default function Journey() {
       <div className="universe-canvas">
         <UniverseCanvas progressRef={progressRef} />
       </div>
+
+      {/* between chapters the frame narrows to a wide screen, as in a film */}
+      <div className="letterbox letterbox-top" aria-hidden="true" />
+      <div className="letterbox letterbox-bottom" aria-hidden="true" />
 
       <Loader />
 

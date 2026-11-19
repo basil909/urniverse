@@ -3,6 +3,7 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import {
   Bloom,
+  ChromaticAberration,
   EffectComposer,
   Noise,
   SMAA,
@@ -1575,7 +1576,10 @@ function Scene({
 
 
         {/* the only film grain on the page (the CSS grain layer was removed) */}
-        <Noise opacity={0.02} />
+        <Noise opacity={0.032} />
+
+        {/* a lens's colour fringe, only towards the corners */}
+        <ChromaticAberration offset={CA_OFFSET} radialModulation modulationOffset={0.42} />
 
         <Vignette eskil={false} offset={0.3} darkness={0.56} />
 
@@ -1648,6 +1652,8 @@ class CanvasBoundary extends Component<{ children: ReactNode }, { failed: boolea
     return this.state.failed ? <StillView /> : this.props.children
   }
 }
+
+const CA_OFFSET = new THREE.Vector2(0.0009, 0.0006)
 
 function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number> }) {
   // Adaptive resolution: drops pixel ratio when frame rate dips, restores when healthy

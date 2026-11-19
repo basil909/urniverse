@@ -4160,3 +4160,54 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 
 /* the chapter figures: one line each, aligned */
 .inline-stat span { white-space: nowrap; }
+
+/* ============================================================
+   CINEMA: wide-screen bars between chapters, controls that step back
+   while you watch, titles set like a film's
+   ============================================================ */
+
+.letterbox {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  height: 9vh;
+  background: #000;
+  pointer-events: none;
+  transition: transform 1.1s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.letterbox-top { top: 0; transform: translateY(-101%); }
+.letterbox-bottom { bottom: 0; transform: translateY(101%); }
+.is-travelling .letterbox { transform: none; transition-duration: 0.9s; }
+@media (max-width: 760px) { .letterbox { height: 7vh; } }
+@media (prefers-reduced-motion: reduce) { .letterbox { display: none; } }
+
+/* watching: the controls and the pointer fade away; back on any move */
+.hud-top,
+.rail,
+.time-bar,
+.hud-bottom {
+  transition: opacity 0.9s var(--ease);
+}
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .rail,
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .time-bar,
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .hud-bottom { opacity: 0; }
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .hud-top { opacity: 0.18; }
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .hud-top:focus-within { opacity: 1; }
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) { cursor: none; }
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .rail,
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .time-bar { pointer-events: none; }
+
+/* the chapter line, spaced like a title card */
+.chapter {
+  letter-spacing: 0.26em;
+  font-weight: 500;
+  font-size: 11px;
+}
+.chapter-index { letter-spacing: 0.12em; }
+/* titles sit on the scene with a little shade, never a box */
+.story-title,
+.hero-title,
+.return-title {
+  text-shadow: 0 2px 30px rgba(0, 0, 0, 0.55);
+}
