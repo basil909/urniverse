@@ -5,6 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { pilot } from './pilotState'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
+import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 
 /* The real night sky: the brightest stars at their true positions
    (J2000 right ascension and declination) and colours (from their B-V
@@ -187,9 +188,11 @@ void main() {
     a = (core + disc) * lane;
     color = mix(vOuter, vInner, exp(-r * 6.0));
   } else if (kind < 2.5) {
-    /* ring nebula (the Rosette): a glowing shell around a dark centre */
-    float ring = exp(-pow((r - 0.45) / 0.22, 2.0)) * (0.5 + 0.9 * cloud);
-    a = ring;
+    /* ring nebula (the Rosette): a clumpy, broken shell round a dimmer
+       centre (a clean, even ring reads as a lens reflection) */
+    float shell = exp(-pow((r - 0.42) / 0.26, 2.0));
+    float clumps = smoothstep(0.38, 0.8, cloud);
+    a = shell * clumps * 1.1 + exp(-r * r * 5.0) * 0.15 * cloud;
     color = mix(vOuter, vInner, cloud);
   } else {
     /* irregular galaxy: a clumpy, starry cloud */
@@ -291,9 +294,10 @@ void main() {
 }`
 
 const LINE_FRAGMENT = /* glsl */ `
+${SHIELD_GLSL}
 uniform float uOpacity;
 void main() {
-  gl_FragColor = vec4(vec3(0.62, 0.72, 0.95) * uOpacity, 1.0);
+  gl_FragColor = vec4(vec3(0.62, 0.72, 0.95) * uOpacity * shieldFade(), 1.0);
 }`
 
 const _nameAt = new THREE.Vector3()
@@ -434,7 +438,7 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
   const lineMaterial = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms: { uOpacity: { value: 0 } },
+        uniforms: { uOpacity: { value: 0 }, ...shieldUniforms },
         vertexShader: LINE_VERTEX,
         fragmentShader: LINE_FRAGMENT,
         blending: THREE.AdditiveBlending,

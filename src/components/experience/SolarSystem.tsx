@@ -61,6 +61,7 @@ import Aurora, { AURORA } from './Aurora'
 import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
 import { lens } from './lens'
+import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import Belts from './Belts'
 import Comet from './Comet'
 import Cutaway from './Cutaway'
@@ -323,16 +324,23 @@ uniform sampler2D uRelief; uniform float uHasRelief; uniform sampler2D uSnow; un
       totalEmissiveRadiance *= 1.0 - smoothstep(-0.2, 0.12, sunFacing);
       #ifdef USE_MAP
       {
-        /* aurora ovals near 67 degrees from the equator, rippling curtains */
-        float lat = (vMapUv.y - 0.5) * 180.0;
-        float oval = exp(-pow((abs(lat) - 67.0) / 2.6, 2.0));
+        /* aurora ovals some 67 degrees from the magnetic equator (the
+           magnetic pole sits off the geographic one, so the ovals do too),
+           in patches that come and go: never a closed, even ring */
+        float latR = (vMapUv.y - 0.5) * 3.14159;
+        float lonR = (vMapUv.x - 0.5) * 6.28318;
+        vec3 at = vec3(cos(latR) * cos(lonR), sin(latR), cos(latR) * sin(lonR));
+        vec3 magPole = vec3(cos(1.408) * cos(-1.268), sin(1.408), cos(1.408) * sin(-1.268));
+        float lat = asin(clamp(dot(at, magPole), -1.0, 1.0)) * 57.2958;
         float x = vMapUv.x * 6.28318;
+        float oval = exp(-pow((abs(lat) - 67.0) / 2.2, 2.0))
+          * smoothstep(0.35, 0.85, 0.5 + 0.5 * sin(x * 3.0 + uTime * 0.03) * sin(x * 5.0 - 1.7 + uTime * 0.02));
         /* fine, folding curtains rather than separate patches */
         float curtain = 0.6
           + 0.25 * sin(x * 46.0 + uTime * 0.6 + 3.0 * sin(x * 7.0 - uTime * 0.15))
           + 0.15 * sin(x * 13.0 - uTime * 0.4);
         float dark = 1.0 - smoothstep(-0.3, 0.02, sunFacing);
-        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.36 * (1.0 - uAurora3D);
+        totalEmissiveRadiance += vec3(0.22, 1.0, 0.55) * oval * curtain * dark * 0.2 * (1.0 - uAurora3D);
       }
       #endif`,
       )
@@ -462,11 +470,12 @@ void main() {
 }`
 
 const TRAIL_FRAGMENT = /* glsl */ `
+${SHIELD_GLSL}
 uniform vec3 uColor;
 uniform float uOpacity;
 varying float vFade;
 void main() {
-  gl_FragColor = vec4(uColor, vFade * uOpacity);
+  gl_FragColor = vec4(uColor, vFade * uOpacity * shieldFade());
 }`
 
 /* Atmosphere character per planet: day colour, dusk colour (near the
@@ -717,10 +726,12 @@ void main() {
     float along = -dot(o, d);
     vec3 closest = o + d * max(along, 0.0);
     float above = length(closest) - 1.0;
+    // faded while thinner than a pixel (a ring of dots otherwise)
+    float glowPixel = max(fwidth(above), 1e-7);
     if (above > 0.0 && (tg.x < 0.0 || tg.x > 1e8)) {
       float night = 1.0 - smoothstep(-0.2, 0.05, dot(normalize(closest), sunDir));
-      float green = exp(-pow((above - 0.0149) / 0.0014, 2.0));
-      float red = exp(-pow((above - 0.036) / 0.006, 2.0));
+      float green = exp(-pow((above - 0.0149) / 0.0014, 2.0)) * smoothstep(0.6, 1.6, 0.0014 / glowPixel);
+      float red = exp(-pow((above - 0.036) / 0.006, 2.0)) * smoothstep(0.6, 1.6, 0.006 / glowPixel);
       color += (vec3(0.32, 1.0, 0.45) * green * 0.3 + vec3(1.0, 0.35, 0.25) * red * 0.04) * night;
     }
   }
@@ -1164,11 +1175,13 @@ void main() {
   /* Earth's airglow: on the night side, seen edge-on, a thin green line
      about 95 km up (oxygen, glowing as it recombines) under a fainter red
      layer near 250 km, as in photographs from the Space Station. Thinner
-     than a pixel from afar; it appears only as you come close. */
+     than a pixel from afar; it appears only as you come close (faded
+     while thinner than a pixel, or it breaks into a ring of dots). */
+  float glowPixel = max(fwidth(above), 1e-7);
   if (uAirglow > 0.5 && above > 0.0) {
     float night = 1.0 - smoothstep(-0.2, 0.05, ndl);
-    float green = exp(-pow((above - 0.0149) / 0.0014, 2.0));
-    float red = exp(-pow((above - 0.036) / 0.006, 2.0));
+    float green = exp(-pow((above - 0.0149) / 0.0014, 2.0)) * smoothstep(0.6, 1.6, 0.0014 / glowPixel);
+    float red = exp(-pow((above - 0.036) / 0.006, 2.0)) * smoothstep(0.6, 1.6, 0.006 / glowPixel);
     vec3 airglow = (vec3(0.32, 1.0, 0.45) * green * 0.3 + vec3(1.0, 0.35, 0.25) * red * 0.04) * night;
     glow += airglow;
     a += dot(airglow, vec3(0.33));
@@ -1680,7 +1693,9 @@ void main() {
   if (uPlanet == 5) surface *= vec3(1.1, 1.0, 0.82);
 
   float rim = pow(1.0 - facing, 3.5);
-  vec3 color = surface * (vec3(0.035) + light * shadow * 0.965 * uLight * uLightTint) * limb;
+  /* night sides near black (a 3.5% floor read as a lit grey disc in sRGB,
+     hiding the terminator); just enough left to keep the outline */
+  vec3 color = surface * (vec3(0.009) + light * shadow * 0.991 * uLight * uLightTint) * limb;
   /* Mars: thin dust suspended in the air softens the limb to a warm haze */
   if (uPlanet == 3) {
     color = mix(color, vec3(0.92, 0.66, 0.48) * light * uLight, pow(1.0 - facing, 2.4) * 0.42);
@@ -2186,14 +2201,16 @@ void main() {
   float a = atan(c.y, c.x);
   float t = uTime * 0.04;
 
-  float streamers = 0.55
-    + 0.25 * sin(a * 5.0 + 1.3 + t)
-    + 0.14 * sin(a * 11.0 - t * 1.7)
-    + 0.08 * sin(a * 23.0 + t * 0.6);
+  /* faint streamers, smooth in angle (strong low-order lobes read as a
+     square or a cross round the disc) */
+  float streamers = 0.86
+    + 0.08 * noise2(vec2(a * 2.2 + t, 0.5))
+    + 0.06 * noise2(vec2(a * 7.0 - t * 1.7, 3.5));
 
   float above = max(r - 1.0, 0.0);
-  float glow = exp(-above * 3.4) * 0.55 + exp(-above * 1.0) * 0.16 * streamers;
-  glow *= 1.0 - smoothstep(uHalf * 0.72, uHalf, r);
+  float glow = exp(-above * 3.4) * 0.5 + exp(-above * 1.15) * 0.15 * streamers;
+  /* eased to nothing over the outer half, so no edge shows */
+  glow *= 1.0 - smoothstep(uHalf * 0.4, uHalf, r);
 
   /* hydrogen-alpha red, as prominences look at the solar limb */
   vec3 plasma = vec3(1.0, 0.3, 0.16) * prominences(r, a) * 1.5;
@@ -2293,15 +2310,14 @@ void main() {
   /* stronger towards the Sun, a faint ring all round */
   float sunward = pow(max(dot(radial, uSun), 0.0), 2.0);
   float weight = 0.06 + 0.94 * sunward;
-  /* fine streaks of differing length, drifting very slowly */
-  float streaks = pow(rimNoise(a * 34.0 + uTime * 0.02), 2.0) * 0.7
-    + pow(rimNoise(a * 91.0 - uTime * 0.015 + 13.0), 3.0) * 0.5;
-  float reach = 0.12 + 0.45 * rimNoise(a * 17.0 + 5.0);
-  float rays = streaks * exp(-above / reach);
-  float halo = exp(-above / 0.06);
+  /* sunlight scattered forward through the air at the limb: a thin,
+     bright edge and a soft glow beyond it (no starburst: a backlit
+     planet shows none, only a lens would) */
+  float halo = exp(-above / 0.035);
+  float glowOut = exp(-above / 0.22) * (0.9 + 0.1 * rimNoise(a * 6.0 + uTime * 0.01));
   /* gone well before the plane's edge */
-  float edge = 1.0 - smoothstep(1.0, 2.6, r);
-  float glow = (rays * 0.16 + halo * 0.22) * weight * edge * uStrength;
+  float edge = 1.0 - smoothstep(0.8, 2.4, r);
+  float glow = (halo * 0.26 + glowOut * 0.07) * weight * edge * uStrength;
   gl_FragColor = vec4(uColor * glow, 1.0);
 }`
 
@@ -2764,6 +2780,7 @@ function Planet({
           ),
         },
         uOpacity: { value: 0.5 },
+        ...shieldUniforms,
       },
       vertexShader: TRAIL_VERTEX,
       fragmentShader: TRAIL_FRAGMENT,

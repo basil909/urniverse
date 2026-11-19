@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { orbitalDisplayDistance, solveKepler } from './orbit'
 import { simClock } from './simClock'
 import { lens } from './lens'
+import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 
 /* An illustrative comet (not a real one): a long, eccentric orbit, timed
    to swing past the Sun about
@@ -97,6 +98,7 @@ void main() {
 }`
 
 const TAIL_FRAGMENT = /* glsl */ `
+${SHIELD_GLSL}
 uniform float uBright;
 varying float vAlpha;
 varying float vKind;
@@ -105,15 +107,16 @@ void main() {
   float a = pow(1.0 - smoothstep(0.0, 0.5, d), 2.0);
   vec3 ion = vec3(0.45, 0.7, 1.0);
   vec3 dust = vec3(1.0, 0.92, 0.75);
-  gl_FragColor = vec4(mix(ion, dust, vKind) * a * vAlpha * uBright, 1.0);
+  gl_FragColor = vec4(mix(ion, dust, vKind) * a * vAlpha * uBright * shieldFade(), 1.0);
 }`
 
 const HEAD_FRAGMENT = /* glsl */ `
+${SHIELD_GLSL}
 uniform float uBright;
 void main() {
   float d = length(gl_PointCoord - 0.5);
   float coma = exp(-d * 9.0) + exp(-d * 30.0) * 1.5;
-  gl_FragColor = vec4(vec3(0.85, 0.95, 1.0) * coma * uBright, 1.0);
+  gl_FragColor = vec4(vec3(0.85, 0.95, 1.0) * coma * uBright * shieldFade(), 1.0);
 }`
 
 const HEAD_VERTEX = /* glsl */ `
@@ -165,6 +168,7 @@ export default function Comet() {
 
   const shared = useMemo(
     () => ({
+      ...shieldUniforms,
       uHead: { value: new THREE.Vector3() },
       uAntiSun: { value: new THREE.Vector3(1, 0, 0) },
       uTrail: { value: new THREE.Vector3(0, 0, 1) },

@@ -27,6 +27,7 @@ import LocalGroup, { LOCAL_GROUP_VIEW } from './LocalGroup'
 import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
 import { lens } from './lens'
+import TextShield from './TextShield'
 import Pilot, { GroundCarry } from './Pilot'
 import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
@@ -240,13 +241,15 @@ function calculatePlanetPose(
   }
 
   // Three-quarter view: mostly from the side, partly sunward, so the camera
-  // never sits on the Sun line (at Mercury it ended up inside the Sun's glow)
+  // never sits on the Sun line (at Mercury it ended up inside the Sun's glow);
+  // some 65 degrees off it, so a dark limb shows the planet is round (on
+  // the side of the words, the lit face away from them)
   // Jupiter: almost in the plane of its moons, so they line up across the
   // disc and pass in front of it (with their shadows), as in a telescope
   _viewDir
     .copy(_toSun)
-    .multiplyScalar(0.62)
-    .addScaledVector(_side, 0.78)
+    .multiplyScalar(0.42)
+    .addScaledVector(_side, 0.91)
     .addScaledVector(_worldUp, planetIndex === 4 ? 0.035 : 0.16)
     .normalize()
 
@@ -1465,6 +1468,7 @@ function Scene({
       <Clock progressRef={progressRef} />
 
       <Lens progressRef={progressRef} glare={glare} />
+      <TextShield />
 
       <Pilot />
       <PhotoCapture />

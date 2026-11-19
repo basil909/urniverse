@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { AU_UNITS, layout, orbitalDisplayDistance } from './orbit'
 import { simClock } from './simClock'
 import { lens } from './lens'
+import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import { pilot } from './pilotState'
 
 /* The small bodies: the main asteroid belt (with its Kirkwood gaps),
@@ -186,6 +187,7 @@ void main() {
 }`
 
 const BELT_FRAGMENT = /* glsl */ `
+${SHIELD_GLSL}
 uniform vec3 uColor;
 uniform float uOpacity;
 varying float vShade;
@@ -193,7 +195,7 @@ varying float vAlpha;
 void main() {
   float d = length(gl_PointCoord - 0.5);
   float a = 1.0 - smoothstep(0.15, 0.5, d);
-  gl_FragColor = vec4(uColor * vShade, a * vAlpha * uOpacity);
+  gl_FragColor = vec4(uColor * vShade, a * vAlpha * uOpacity * shieldFade());
 }`
 
 function useBeltMaterial(color: string, size: number, opacity: number) {
@@ -211,6 +213,7 @@ function useBeltMaterial(color: string, size: number, opacity: number) {
           uPixelRatio: { value: 1 },
           uColor: { value: new THREE.Color(color) },
           uOpacity: { value: opacity },
+          ...shieldUniforms,
         },
         vertexShader: BELT_VERTEX,
         fragmentShader: BELT_FRAGMENT,
