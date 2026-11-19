@@ -11,7 +11,7 @@ import {
 } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import { PerformanceMonitor, useProgress } from '@react-three/drei'
-import { memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from 'react'
+import { Component, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
 
 import SolarSystem from './SolarSystem'
@@ -1597,6 +1597,58 @@ function Scene({
 
 
 
+/* ============================================================
+   WHEN 3D CANNOT RUN
+   No WebGL 2 (an old browser, or graphics turned off), or the canvas
+   could not start: a still of the journey instead, and the words and
+   the panels work as ever. If the graphics card resets mid-visit (it
+   happens on laptops: a driver update, sleep, too many tabs) the view
+   says so and comes back on its own, on a fresh canvas.
+============================================================ */
+
+function hasWebGL2() {
+  try {
+    const canvas = document.createElement('canvas')
+    return !!canvas.getContext('webgl2')
+  } catch {
+    return false
+  }
+}
+
+function markNoWebGL() {
+  document.documentElement.classList.add('no-webgl')
+  // nothing to wait for: the loading screen lifts at once
+  lens.revealed = true
+}
+
+function StillView() {
+  return (
+    <div className="gl-fallback">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/still.jpg" alt="" aria-hidden="true" />
+      <p className="gl-fallback-note">
+        This browser can&rsquo;t show the 3D view, so here is a still. The journey&rsquo;s words and
+        facts all work; for the full experience, try a recent Chrome, Edge, Firefox or Safari with
+        hardware acceleration on.
+      </p>
+    </div>
+  )
+}
+
+class CanvasBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  componentDidCatch(error: unknown) {
+    console.error('The 3D view could not start:', error)
+    markNoWebGL()
+  }
+  render() {
+    return this.state.failed ? <StillView /> : this.props.children
+  }
+}
+
 function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number> }) {
   // Adaptive resolution: drops pixel ratio when frame rate dips, restores when healthy
   // start at up to 1.5x; if the frame rate struggles, step down once and
@@ -1605,10 +1657,50 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
     Math.min(1.5, typeof window === 'undefined' ? 1 : window.devicePixelRatio),
   )
   const glare = useRef<HTMLDivElement>(null)
+  const [supported, setSupported] = useState(true)
+  // a fresh canvas after the graphics context was lost
+  const [generation, setGeneration] = useState(0)
+  const current = useRef(0)
+  current.current = generation
+  const [lost, setLost] = useState(false)
+
+  useEffect(() => {
+    if (hasWebGL2()) return
+    markNoWebGL()
+    setSupported(false)
+  }, [])
+
+  // lost: wait a moment for the browser to give it back, then start over
+  useEffect(() => {
+    if (!lost) return
+    const timer = window.setTimeout(() => {
+      setLost(false)
+      setGeneration((n) => n + 1)
+    }, 2500)
+    return () => window.clearTimeout(timer)
+  }, [lost])
+
+  if (!supported) return <StillView />
 
   return (
-    <>
+    <CanvasBoundary>
     <Canvas
+      key={generation}
+      onCreated={({ gl }) => {
+        // only the canvas in use: a replaced one gives its context up on
+        // purpose as it goes, which is not a loss
+        const mine = generation
+        gl.domElement.addEventListener('webglcontextlost', (event) => {
+          if (mine !== current.current) return
+          event.preventDefault() // ask for it back
+          setLost(true)
+        })
+        gl.domElement.addEventListener('webglcontextrestored', () => {
+          if (mine !== current.current) return
+          setLost(false)
+          setGeneration((n) => n + 1)
+        })
+      }}
 
       camera={{ position: [0, 0, 8], fov: 42, near: 0.08, far: 2000 }}
 
@@ -1654,7 +1746,12 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
 
     </Canvas>
     <div ref={glare} className="sun-glare" aria-hidden="true" />
-    </>
+    {lost && (
+      <div className="gl-restoring" role="status">
+        Restoring the view&hellip;
+      </div>
+    )}
+    </CanvasBoundary>
 
   )
 

@@ -1007,6 +1007,8 @@ export default function Journey() {
   /* take off from the journey: remember where we were, pause scrolling,
      and put the scene in its wide view so every planet is full size */
   const takeOff = () => {
+    // no 3D here (see UniverseCanvas): nothing to fly
+    if (document.documentElement.classList.contains('no-webgl')) return
     const lenis = lenisRef.current
     savedScroll.current = window.scrollY
     setDetailOpen(false)

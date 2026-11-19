@@ -10,3 +10,30 @@ export const lens = {
   /* true once the loading screen starts to lift: the opening sweep waits for it */
   revealed: false,
 }
+
+/* Run a load once the opening is on screen and the first frames are
+   drawn (maps only needed close up: the loading screen need not wait
+   for them). Returns a cancel. */
+export function whenOpened(run: () => void, settleMs = 2500) {
+  let timer = 0
+  let idle = 0
+  let stopped = false
+  const go = () => {
+    if (stopped) return
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number }
+    if (w.requestIdleCallback) idle = w.requestIdleCallback(() => !stopped && run(), { timeout: 2000 })
+    else run()
+  }
+  const wait = () => {
+    if (stopped) return
+    if (lens.revealed) timer = window.setTimeout(go, settleMs)
+    else timer = window.setTimeout(wait, 200)
+  }
+  wait()
+  return () => {
+    stopped = true
+    window.clearTimeout(timer)
+    const w = window as Window & { cancelIdleCallback?: (id: number) => void }
+    if (idle && w.cancelIdleCallback) w.cancelIdleCallback(idle)
+  }
+}

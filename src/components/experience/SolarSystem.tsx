@@ -60,7 +60,7 @@ import CloudVolume from './CloudVolume'
 import Aurora, { AURORA } from './Aurora'
 import { bodyFrames } from './spaceBodies'
 import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTiles'
-import { lens } from './lens'
+import { lens, whenOpened } from './lens'
 import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import Belts from './Belts'
 import Comet from './Comet'
@@ -2652,7 +2652,8 @@ function Planet({
     if (!relief) return
     let disposed = false
     let owned: THREE.Texture | null = null
-    new BitmapTextureLoader().load(relief.url, (texture) => {
+    // shading for close-ups: after the opening is up
+    const stop = whenOpened(() => new BitmapTextureLoader().load(relief.url, (texture) => {
       if (disposed) {
         texture.dispose()
         return
@@ -2666,8 +2667,9 @@ function Planet({
       uniforms.uHeight.value = texture
       uniforms.uHasHeight.value = 1
       owned = texture
-    })
+    }))
     return () => {
+      stop()
       disposed = true
       uniforms.uHasHeight.value = 0
       uniforms.uHeight.value = null
@@ -3440,10 +3442,14 @@ function Moon({ sharp }: { sharp: boolean }) {
       })
     }
 
-    load(MOON_LOCAL_TEXTURES.color, true, setMap)
-    load(MOON_LOCAL_TEXTURES.height, false, setHeight, THREE.RedFormat) // a bump map: read as .x
+    // a speck in the opening: its maps after the opening is up
+    const stop = whenOpened(() => {
+      load(MOON_LOCAL_TEXTURES.color, true, setMap)
+      load(MOON_LOCAL_TEXTURES.height, false, setHeight, THREE.RedFormat) // a bump map: read as .x
+    })
 
     return () => {
+      stop()
       cancelled = true
       owned.forEach((asset) => asset.dispose())
       setMap(null)
@@ -3617,16 +3623,23 @@ function MoonSystem({
   // loading screen's progress mid-render)
   const [moonMaps, setMoonMaps] = useState<(THREE.Texture | null)[]>([])
   useEffect(() => {
-    const loader = new BitmapTextureLoader()
-    const maps = system.moons.map((moon) => {
-      if (!moon.map) return null
-      const texture = loader.load(moon.map)
-      texture.colorSpace = THREE.SRGBColorSpace
-      texture.wrapS = THREE.RepeatWrapping
-      return texture
-    })
-    setMoonMaps(maps)
-    return () => maps.forEach((texture) => texture?.dispose())
+    let maps: (THREE.Texture | null)[] = []
+    // specks in the opening: their maps after the opening is up
+    const stop = whenOpened(() => {
+      const loader = new BitmapTextureLoader()
+      maps = system.moons.map((moon) => {
+        if (!moon.map) return null
+        const texture = loader.load(moon.map)
+        texture.colorSpace = THREE.SRGBColorSpace
+        texture.wrapS = THREE.RepeatWrapping
+        return texture
+      })
+      setMoonMaps(maps)
+    }, 3500)
+    return () => {
+      stop()
+      maps.forEach((texture) => texture?.dispose())
+    }
   }, [system])
   const arms = useRef<(THREE.Group | null)[]>([])
   const bodies = useRef<(THREE.Mesh | null)[]>([])

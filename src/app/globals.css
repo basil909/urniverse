@@ -201,6 +201,59 @@ a:focus-visible {
   );
 }
 
+/* no 3D in this browser: a still of the journey, the words over it */
+.gl-fallback {
+  position: absolute;
+  inset: 0;
+  background: #020308;
+}
+.gl-fallback img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 70% 50%;
+  opacity: 0.85;
+}
+.gl-fallback-note {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 40px));
+  margin: 0;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(6, 8, 14, 0.72);
+  backdrop-filter: blur(8px);
+  color: rgba(230, 232, 240, 0.78);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  z-index: 3;
+}
+.no-webgl .hero-actions .btn--ghost,
+.no-webgl .story-actions .btn--ghost,
+.no-webgl .return-content .btn--ghost,
+.no-webgl [data-tip='Fly the Shuttle'] {
+  display: none;
+}
+/* the graphics card reset: a quiet note while the view comes back */
+.gl-restoring {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(6, 8, 14, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(230, 232, 240, 0.85);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+
 /* colour grade: a faint soft-light wash, warm near the Sun, cool far out */
 .universe-grade {
   position: fixed;
@@ -3999,4 +4052,43 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .landed-card { animation: none; }
+}
+
+/* ============================================================
+   TOUCH: every target at least 44px to a finger, the look unchanged
+   (an invisible margin of hit area round the small ones)
+   ============================================================ */
+@media (pointer: coarse) {
+  /* the header's round buttons: a full 44px (their row still fits a phone) */
+  :root { --control-height: 44px; }
+  .brand,
+  .moon-tag > button {
+    position: relative;
+  }
+  .brand::after,
+  .moon-tag > button::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
+  .brand::after { width: 44px; height: 44px; }
+  .hud-tools { gap: 8px; }
+  /* the hotspot's ring and dot stay 14px; the button round them is 44 */
+  .hotspot-dot { inset: -15px; }
+  .hotspot-dot::before { inset: 19.5px; }
+  .hotspot-dot::after { inset: 15px; }
+  .planet-pick::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+  }
 }
