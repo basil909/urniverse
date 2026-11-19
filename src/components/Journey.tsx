@@ -18,6 +18,7 @@ import MotionControl from './ui/MotionControl'
 import SoundToggle from './ui/SoundToggle'
 import FlightHud from './ui/FlightHud'
 import ChapterMenu from './ui/ChapterMenu'
+import TimeBar from './ui/TimeBar'
 import Icon from './ui/Icon'
 import { pilot } from './experience/pilotState'
 import { WORLD_DETAILS } from '../data/worlds'
@@ -560,6 +561,34 @@ const PANEL_TITLE: Record<string, string> = {
 const panelTitle = (chapter: Chapter) => PANEL_TITLE[chapter.id] ?? titleCase(chapter.label)
 const moreAbout = (chapter: Chapter) =>
   PANEL_TITLE[chapter.id] ? PANEL_TITLE[chapter.id].replace(/^The /, 'the ') : titleCase(chapter.label)
+
+/* the key fact of each chapter's sentence, picked out as you read it */
+const KEY_WORDS: Record<string, string> = {
+  sun: 'almost all of the Solar System’s mass',
+  mercury: 'the smallest planet and the closest to the Sun',
+  venus: 'profoundly different',
+  earth: 'the reference point',
+  mars: 'liquid water once flowed',
+  jupiter: 'more than twice the mass of all the other planets combined',
+  saturn: 'the most spectacular ring system',
+  uranus: 'an unusual orientation',
+  neptune: 'the farthest of the eight planets',
+  beyond: 'a single speck',
+  galaxy: 'a single point',
+  'local-group': 'has company',
+}
+function withKeyWords(text: string, id: string) {
+  const key = KEY_WORDS[id]
+  const at = key ? text.indexOf(key) : -1
+  if (!key || at < 0) return text
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark>{key}</mark>
+      {text.slice(at + key.length)}
+    </>
+  )
+}
 
 const titleCase = (label: string) =>
   label
@@ -1299,6 +1328,9 @@ export default function Journey() {
         )}
       </AnimatePresence>
 
+      {/* the scene's time, and its speed (a wide screen) */}
+      {!flying && <TimeBar />}
+
       {/* BOTTOM HUD */}
       <footer className="hud-bottom" aria-hidden="true">
         <div className="hud-bar">
@@ -1458,7 +1490,7 @@ export default function Journey() {
                 </div>
 
                 <p className="story-description" aria-hidden="true">
-                  {brief(activeChapter.description)}
+                  {withKeyWords(brief(activeChapter.description), activeChapter.id)}
                 </p>
 
                 <div className="inline-stats" aria-hidden="true">

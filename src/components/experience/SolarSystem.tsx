@@ -750,7 +750,8 @@ function focusedPlanetIndex(progress: number) {
    Positions checked against the texture maps (lon -180..180, east +).
 ============================================================ */
 
-type Hotspot = { name: string; fact: string; lat: number; lon: number }
+/* `mission`: a landing or impact site (drawn as a diamond), and when */
+type Hotspot = { name: string; fact: string; lat: number; lon: number; mission?: string }
 
 const HOTSPOTS: Record<number, Hotspot[]> = {
   0: [
@@ -766,6 +767,13 @@ const HOTSPOTS: Record<number, Hotspot[]> = {
       lat: 57.8,
       lon: 16.8,
     },
+    {
+      name: 'MESSENGER',
+      mission: 'Impact · 30 April 2015',
+      fact: 'After four years mapping Mercury from orbit, NASA’s MESSENGER ran out of fuel and struck the surface near here, at 14,000 km/h.',
+      lat: 54.4,
+      lon: -149.9,
+    },
   ],
   1: [
     {
@@ -779,6 +787,13 @@ const HOTSPOTS: Record<number, Hotspot[]> = {
       fact: 'Beneath the clouds: a highland about the size of Africa, cut by deep rifts and volcanoes.',
       lat: -5.8,
       lon: 104.8,
+    },
+    {
+      name: 'Venera 13',
+      mission: 'Landed · 1 March 1982',
+      fact: 'The Soviet lander sent back the first colour pictures from the surface of Venus, and lasted 127 minutes in 460 °C heat and 90 times Earth’s air pressure.',
+      lat: -7.5,
+      lon: -56.5,
     },
   ],
   2: [
@@ -813,6 +828,41 @@ const HOTSPOTS: Record<number, Hotspot[]> = {
       fact: 'A canyon system more than 4,000 km long and up to 7 km deep.',
       lat: -13.9,
       lon: -59.2,
+    },
+    {
+      name: 'Perseverance',
+      mission: 'Landed · 18 February 2021',
+      fact: 'NASA’s rover in Jezero Crater, an ancient lake bed, collecting rock samples that may one day be brought back to Earth.',
+      lat: 18.44,
+      lon: 77.45,
+    },
+    {
+      name: 'Curiosity',
+      mission: 'Landed · 6 August 2012',
+      fact: 'Still climbing Mount Sharp in Gale Crater, reading layers of rock laid down in water billions of years ago.',
+      lat: -4.59,
+      lon: 137.44,
+    },
+    {
+      name: 'Opportunity',
+      mission: 'Landed · 25 January 2004',
+      fact: 'Built to last 90 days at Meridiani Planum, it drove 45 km over almost 15 years.',
+      lat: -1.95,
+      lon: -5.53,
+    },
+    {
+      name: 'Viking 1',
+      mission: 'Landed · 20 July 1976',
+      fact: 'The first spacecraft to work on the surface of Mars, for more than six years.',
+      lat: 22.27,
+      lon: -47.95,
+    },
+    {
+      name: 'Zhurong',
+      mission: 'Landed · 15 May 2021',
+      fact: 'China’s first Mars rover, on the plains of Utopia Planitia, where it looked for signs of ancient water.',
+      lat: 25.07,
+      lon: 109.93,
     },
   ],
   4: [
@@ -4098,6 +4148,10 @@ function Hotspots({
         : 0
       element.style.opacity = opacity.toFixed(3)
 
+      // the note opens towards the middle of the screen, away from the text
+      const side = _hotspotNormal.copy(_hotspotWorld).project(camera).x > -0.1 ? 'left' : 'right'
+      if (element.dataset.side !== side) element.dataset.side = side
+
       const usable = opacity > 0.5
       const button = element.firstElementChild as HTMLButtonElement | null
       if (button && button.tabIndex !== (usable ? 0 : -1)) {
@@ -4121,7 +4175,7 @@ function Hotspots({
             ref={(element) => {
               items.current[i] = element
             }}
-            className={`hotspot ${open === i ? 'is-open' : ''}`}
+            className={`hotspot ${spot.mission ? 'is-mission' : ''} ${open === i ? 'is-open' : ''}`}
             style={{ opacity: 0 }}
             onPointerEnter={() => {
               hovered.current = true
@@ -4139,6 +4193,7 @@ function Hotspots({
               onClick={() => setOpen(open === i ? null : i)}
             />
             <div className="hotspot-card" role="note">
+              {spot.mission && <span className="hotspot-kind">{spot.mission}</span>}
               <b>{spot.name}</b>
               <span>{spot.fact}</span>
             </div>

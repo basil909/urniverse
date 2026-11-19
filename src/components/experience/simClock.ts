@@ -43,6 +43,7 @@ export const BODY_RATE = 0.02
 
 /** real-motion speeds offered by the button, in days per second */
 export const REAL_SPEEDS = [
+  { label: 'Live', days: 1 / 86400 },
   { label: '1 hour / s', days: 1 / 24 },
   { label: '1 day / s', days: 1 },
   { label: '1 week / s', days: 7 },

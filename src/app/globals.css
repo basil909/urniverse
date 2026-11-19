@@ -3409,3 +3409,135 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   .fr-figures { justify-content: flex-start; }
   .fr-figure:first-child { padding-left: 0; }
 }
+
+/* ============================================================
+   DESIGN PASS 4: the time bar, key words, mission sites
+   ============================================================ */
+
+/* ---- the time bar ---- */
+.time-bar {
+  position: fixed;
+  left: var(--pad);
+  bottom: 22px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--surface-edge);
+  border-radius: 999px;
+  background: rgba(7, 9, 15, 0.55);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), var(--surface-light);
+  transition: opacity 0.4s;
+}
+.time-bar-now {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 12px 0 11px;
+}
+.time-bar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+.is-live .time-bar-dot {
+  background: #5fe39a;
+  box-shadow: 0 0 0 0 rgba(95, 227, 154, 0.6);
+  animation: live-dot 2s var(--ease) infinite;
+}
+@keyframes live-dot {
+  0% { box-shadow: 0 0 0 0 rgba(95, 227, 154, 0.55); }
+  70%, 100% { box-shadow: 0 0 0 7px rgba(95, 227, 154, 0); }
+}
+.time-bar-state {
+  font: 600 10.5px / 1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.is-live .time-bar-state { color: #5fe39a; }
+.time-bar-date {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font: 500 13px / 1 var(--sans);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.time-bar-date small { font-size: 11.5px; color: var(--text-3); }
+.time-bar-speeds {
+  display: flex;
+  gap: 2px;
+  padding-left: 6px;
+  border-left: 1px solid var(--hairline);
+}
+.time-bar-speeds button,
+.time-bar-reset {
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font: 500 12px / 1 var(--sans);
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s;
+}
+.time-bar-speeds button:hover,
+.time-bar-reset:hover { color: var(--text-1); background: rgba(255, 255, 255, 0.06); }
+.time-bar-speeds button[aria-pressed='true'] {
+  color: var(--text-1);
+  background: rgba(255, 255, 255, 0.1);
+}
+.time-bar-reset { color: var(--planet-accent); }
+.time-bar :focus-visible { outline: 1.5px solid var(--planet-accent); outline-offset: 1px; }
+.detail-is-open .time-bar { opacity: 0; pointer-events: none; }
+/* the hop caption sits above it */
+.leg { bottom: 86px; }
+/* a wide screen has the bar; the clock button is for a phone */
+@media (min-width: 900px) {
+  .hud-tools .motion-control { display: none; }
+}
+@media (max-width: 899px) {
+  .time-bar { display: none; }
+  .leg { bottom: 34px; }
+}
+
+/* ---- key words in the chapter's sentence ---- */
+.story-description mark,
+.hero-subtitle mark {
+  background: none;
+  color: var(--text-1);
+  font-weight: 500;
+}
+.story-description { color: color-mix(in srgb, var(--text-2) 82%, transparent); }
+
+/* ---- mission sites: a diamond, in the world's colour ---- */
+.hotspot.is-mission .hotspot-dot::before {
+  inset: 4px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--planet-accent);
+  box-shadow: 0 0 0 1.5px rgba(5, 7, 13, 0.9), 0 0 10px color-mix(in srgb, var(--planet-accent) 70%, transparent);
+}
+.hotspot.is-mission .hotspot-dot::after { border-radius: 3px; transform: rotate(45deg); }
+.hotspot-kind {
+  display: block;
+  margin-bottom: 4px;
+  font: 600 9.5px / 1 var(--sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--planet-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-live .time-bar-dot { animation: none; }
+}
+.hotspot[data-side='left'] .hotspot-card { left: auto; right: 22px; transform: translate(4px, -50%); }
+.hotspot[data-side='left']:hover .hotspot-card,
+.hotspot[data-side='left']:focus-within .hotspot-card,
+.hotspot[data-side='left'].is-open .hotspot-card { transform: translate(0, -50%); }
+.hotspot-card, .moon-tag-card { background: rgba(7, 9, 15, 0.9); }
