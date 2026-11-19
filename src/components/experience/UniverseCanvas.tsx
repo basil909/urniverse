@@ -445,7 +445,7 @@ function CinematicCamera({
       heroTime.current = 0
       heroDrift[chapter] = 0
     }
-    if (planet && local >= BLEND && !reducedMotion) {
+    if ((planet || chapter <= 1) && (local >= BLEND || chapter === 0) && !reducedMotion) {
       heroTime.current += delta
       heroDrift[chapter] = ease(
         (heroTime.current - HERO_DELAY) / HERO_DURATION,
@@ -525,10 +525,13 @@ function CinematicCamera({
        way round the planet and back (moons, rings and stars shift with
        real depth), then settles before the next flight. The backlit shots
        have their own drift. */
-    if (planet && local >= BLEND && !reducedMotion && !HERO_BACKLIT.has(chapter - 2)) {
+    const restful = (planet && !HERO_BACKLIT.has(chapter - 2)) || chapter <= 1
+    if (restful && (local >= BLEND || chapter === 0) && !reducedMotion) {
       const settle = ease((heroTime.current - 0.8) / 3)
       const leave = 1 - THREE.MathUtils.smoothstep(local, 0.86, 0.99)
-      const swing = Math.sin(heroTime.current * 0.09) * 0.2 * settle * leave
+      // the wide views barely turn (the words and the scene are composed)
+      const reach = planet ? 0.2 : 0.07
+      const swing = Math.sin(heroTime.current * 0.09) * reach * settle * leave
       const breathe = 1 + Math.sin(heroTime.current * 0.06 + 1.3) * 0.035 * settle * leave
       _driftOffset
         .copy(_scratchPos)
@@ -765,14 +768,14 @@ function StarStreaks() {
       material.uniforms.uGain.value = 0.9
       return
     }
-    material.uniforms.uGain.value = 0.16
+    material.uniforms.uGain.value = 0.3
     const intensity = flight.intensity
     lines.current.visible = intensity > 0.05
     if (!lines.current.visible) return
 
     // trail = how far each streak reaches back along the motion
     const speed = flight.velocity.length()
-    const length = Math.min(speed * 0.035, 1.6) * intensity
+    const length = Math.min(speed * 0.05, 2.2) * intensity
     _trail.copy(flight.velocity)
     if (speed > 1e-4) _trail.multiplyScalar(length / speed)
 
@@ -1402,6 +1405,7 @@ function Lens({
     const chapter = Math.floor(progress)
     const local = progress - chapter
 
+    lens.chapter = chapter
     // close-up: settled on a planet (its text is showing)
     const settled = chapter >= 2 && chapter <= 9 && local >= 0.16 && local < 0.93
     lens.closeUp += ((settled ? 1 : 0) - lens.closeUp) * (1 - Math.exp(-delta * 1.4))
@@ -1573,7 +1577,7 @@ function Scene({
         {/* the only film grain on the page (the CSS grain layer was removed) */}
         <Noise opacity={0.02} />
 
-        <Vignette eskil={false} offset={0.34} darkness={0.48} />
+        <Vignette eskil={false} offset={0.3} darkness={0.56} />
 
       </EffectComposer>
 

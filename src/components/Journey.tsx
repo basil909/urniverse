@@ -1606,10 +1606,9 @@ export default function Journey() {
             <motion.div
               key={activeChapter.id}
               className="story-content"
-              initial={{ opacity: 0, y: 28 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.7, ease: EASE_OUT_EXPO }}
+              initial={{ opacity: 0, y: 22 }}
+              animate={{ opacity: 1, y: 0, transition: { duration: 1.1, ease: EASE_OUT_EXPO } }}
+              exit={{ opacity: 0, y: -12, filter: 'blur(4px)', transition: { duration: 0.45, ease: 'easeIn' } }}
             >
               <div className="story-inner">
                 <div className="chapter" aria-hidden="true">
@@ -1649,9 +1648,15 @@ export default function Journey() {
                   })()}
                 </div>
 
-                <p className="story-description" aria-hidden="true">
+                <motion.p
+                  className="story-description"
+                  aria-hidden="true"
+                  initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
+                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                  transition={{ duration: 0.9, delay: 0.28, ease: EASE_OUT_EXPO }}
+                >
                   {withKeyWords(brief(activeChapter.description), activeChapter.id)}
-                </p>
+                </motion.p>
 
                 <div className="inline-stats" aria-hidden="true">
                   {activeChapter.stats.map((stat, statIndex) => (
@@ -1661,20 +1666,25 @@ export default function Journey() {
                       initial={{ opacity: 0, y: 14 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{
-                        duration: 0.55,
-                        delay: 0.22 + statIndex * 0.08,
+                        duration: 0.8,
+                        delay: 0.42 + statIndex * 0.09,
                         ease: EASE_OUT_EXPO,
                       }}
                     >
                       <strong>
-                        <CountUp value={stat.value} delay={0.3 + statIndex * 0.08} />
+                        <CountUp value={stat.value} delay={0.5 + statIndex * 0.09} />
                       </strong>
                       <span>{stat.label}</span>
                     </motion.div>
                   ))}
                 </div>
 
-                <div className="story-actions">
+                <motion.div
+                  className="story-actions"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.8, delay: 0.7, ease: EASE_OUT_EXPO }}
+                >
                 {WORLD_DETAILS[activeChapter.id] && (
                   <button
                     type="button"
@@ -1715,7 +1725,7 @@ export default function Journey() {
                     : 'Continue'}
                   <Icon name="arrow" />
                 </button>
-                </div>
+                </motion.div>
               </div>
             </motion.div>
           )}

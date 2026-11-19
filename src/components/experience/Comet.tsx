@@ -130,6 +130,7 @@ void main() {
 }`
 
 export default function Comet() {
+  const calm = useRef(0.6)
   const gl = useThree((state) => state.gl)
   const head = useRef(new THREE.Vector3())
 
@@ -236,8 +237,11 @@ export default function Comet() {
     // active only when the Sun warms it: tails grow inside ~3 AU
     const activity = THREE.MathUtils.clamp((3.2 - r) / 2.4, 0, 1)
     shared.uLength.value = 1.4 + 8 * activity * activity
-    // only in the wide views: during a close-up the comet steps aside
-    shared.uBright.value = (0.15 + 0.85 * activity) * (1 - lens.closeUp)
+    // only in the wide views: during a close-up the comet steps aside;
+    // a quiet guest even then, and quieter still beside the Sun (the
+    // subject there)
+    calm.current += ((lens.chapter === 1 ? 0.16 : 0.6) - calm.current) * (1 - Math.exp(-delta * 1.5))
+    shared.uBright.value = (0.15 + 0.85 * activity) * (1 - lens.closeUp) * calm.current
     shared.uTime.value += delta
     const ratio = gl.getPixelRatio()
     shared.uPixelRatio.value = ratio

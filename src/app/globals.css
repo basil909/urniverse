@@ -164,9 +164,9 @@ a:focus-visible {
   pointer-events: none;
   background: radial-gradient(
     ellipse at 50% 50%,
-    transparent 40%,
-    rgba(0, 0, 0, 0.35) 75%,
-    rgba(0, 0, 0, 0.8) 100%
+    transparent 36%,
+    rgba(0, 0, 0, 0.42) 72%,
+    rgba(0, 0, 0, 0.86) 100%
   );
 }
 
@@ -208,7 +208,9 @@ a:focus-visible {
   z-index: 1;
   pointer-events: none;
   mix-blend-mode: soft-light;
-  opacity: 0.22;
+  opacity: 0.3;
+  /* each chapter's light eases in as the camera travels */
+  transition: background-color 2.4s ease;
 }
 
 /* ============================================================

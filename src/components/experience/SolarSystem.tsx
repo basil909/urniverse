@@ -179,7 +179,11 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         vec3 Pc = normalize(vSurfaceP);
         float broken = cdNoise(Pc * 160.0) * 0.55 + cdNoise(Pc * 640.0 + 7.1) * 0.3 + cdNoise(Pc * 2560.0 + 3.3) * 0.15;
         float c2 = cloudCover + (broken - 0.5) * 0.8 * (1.0 - cloudCover * 0.7);
-        diffuseColor.a = smoothstep(0.22, 0.8, c2);
+        /* the cells are far smaller than a pixel from orbit, where they only
+           break the map into hard white blobs: there, the map's own soft
+           edges (a pixel some 1/400 of the radius and up) */
+        float fromOrbit = smoothstep(0.0015, 0.005, length(fwidth(Pc)));
+        diffuseColor.a = mix(smoothstep(0.22, 0.8, c2), smoothstep(0.08, 0.85, cloudCover), fromOrbit);
       }
       {
         vec3 cd = closeDetail(normalize(vSurfaceP), 0.0, 1.0);
@@ -2887,7 +2891,8 @@ function Planet({
     const inPlanetChapter = safeProgress >= 2.1 && safeProgress < 10
     const trailOpacity = (orbitLine.material as THREE.ShaderMaterial).uniforms.uOpacity
     // orbit trails are a diagram: none while flying among the real thing
-    const targetOpacity = pilot.active ? 0 : inPlanetChapter ? 0.012 : 0.5
+    // fainter in the opening, where the title is the subject
+    const targetOpacity = pilot.active ? 0 : inPlanetChapter ? 0.012 : safeProgress < 1 ? 0.28 : 0.5
     trailOpacity.value +=
       (targetOpacity - trailOpacity.value) * (1 - Math.exp(-delta * 4))
 

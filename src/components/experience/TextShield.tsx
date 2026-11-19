@@ -34,6 +34,10 @@ float shieldFade() {
 }
 `
 
+/* the same box in CSS pixels from the viewport's top left, for labels
+   drawn on the page (star names) */
+export const textBox = { left: 0, top: 0, right: 0, bottom: 0, on: false }
+
 const TEXT_BLOCKS = '.stage .intro-content, .stage .story-inner, .stage .return-content'
 const _size = new THREE.Vector2()
 
@@ -48,6 +52,7 @@ export default function TextShield() {
     if (clock.current > 0.12) {
       clock.current = 0
       target.current = 0
+      textBox.on = false
       const element = document.querySelector<HTMLElement>(TEXT_BLOCKS)
       const canvas = gl.domElement
       if (element && canvas.clientWidth > 0) {
@@ -67,6 +72,11 @@ export default function TextShield() {
             (view.bottom - rect.top + pad) * k,
           )
           target.current = Math.min(1, shown)
+          textBox.left = rect.left
+          textBox.top = rect.top
+          textBox.right = rect.right
+          textBox.bottom = rect.bottom
+          textBox.on = true
         }
       }
     }

@@ -5,7 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { pilot } from './pilotState'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
-import { SHIELD_GLSL, shieldUniforms } from './TextShield'
+import { SHIELD_GLSL, shieldUniforms, textBox } from './TextShield'
 
 /* The real night sky: the brightest stars at their true positions
    (J2000 right ascension and declination) and colours (from their B-V
@@ -467,11 +467,12 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     group.current.position.copy(camera.position)
     starMaterial.uniforms.uPixelRatio.value = gl.getPixelRatio()
 
-    // constellations only in the opening, wide view (at the end they ran
-    // through the closing words)
+    // constellations only at the end, looking back over the Solar System
+    // (the opening keeps to its title, the comet and the planets; the
+    // lines step aside where the closing words sit)
     const progress = progressRef.current ?? 0
     const chapter = Math.floor(progress)
-    const wide = chapter === 0 && !pilot.active
+    const wide = chapter === 13 && progress - chapter > 0.2 && !pilot.active
     linesOn.current += ((wide ? 1 : 0) - linesOn.current) * (1 - Math.exp(-delta * 1.5))
     lineMaterial.uniforms.uOpacity.value = linesOn.current * 0.09
     // the nebulae glow fully in the wide views, softer behind close-ups,
@@ -482,17 +483,17 @@ export default function NightSky({ progressRef }: { progressRef: MutableRefObjec
     const names = linesOn.current > 0.05
     if (names !== showNames) setShowNames(names)
     const opacity = (linesOn.current * 0.38).toFixed(3)
-    const portrait = camera instanceof THREE.PerspectiveCamera && camera.aspect < 1
     NAMED.forEach((name, i) => {
       const label = labels.current[i]
       if (!label) return
-      // never over the opening words: the left of a wide screen, the
-      // lower half of a tall one
+      // never over the words
       const p = positions.get(name)
       let hidden = false
-      if (p) {
+      if (p && textBox.on) {
         _nameAt.copy(p).add(group.current!.position).project(camera)
-        hidden = portrait ? _nameAt.y < 0.05 : _nameAt.x < -0.05 && _nameAt.y > -0.8 && _nameAt.y < 0.75
+        const x = (_nameAt.x * 0.5 + 0.5) * window.innerWidth
+        const y = (0.5 - _nameAt.y * 0.5) * window.innerHeight
+        hidden = x > textBox.left - 90 && x < textBox.right + 40 && y > textBox.top - 30 && y < textBox.bottom + 30
       }
       label.style.opacity = hidden ? '0' : opacity
     })

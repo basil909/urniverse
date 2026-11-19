@@ -5,6 +5,8 @@ export const lens = {
   closeUp: 0,
   /* 0..1 as the camera drifts round into a backlit hero shot */
   backlit: 0,
+  /* the journey's chapter (0 the opening, 1 the Sun, 2-9 the planets...) */
+  chapter: 0,
   /* true once the loading screen starts to lift: the opening sweep waits for it */
   revealed: false,
 }
