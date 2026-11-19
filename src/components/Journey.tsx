@@ -126,9 +126,9 @@ const JOURNEY: Chapter[] = [
 
       { value: '4,879', label: 'KM DIAMETER' },
 
-      { value: '88', label: 'EARTH DAYS / YEAR' },
+      { value: '88', label: 'DAYS PER ORBIT' },
 
-      { value: '0.39 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '0.39 AU', label: 'FROM THE SUN' },
 
     ],
 
@@ -164,7 +164,7 @@ const JOURNEY: Chapter[] = [
 
       { value: '12,104', label: 'KM DIAMETER' },
 
-      { value: '225', label: 'EARTH DAYS / YEAR' },
+      { value: '225', label: 'DAYS PER ORBIT' },
 
       { value: '~465°C', label: 'SURFACE TEMP.' },
 
@@ -204,7 +204,7 @@ const JOURNEY: Chapter[] = [
 
       { value: '4.54B', label: 'YEARS OLD' },
 
-      { value: '1 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '1 AU', label: 'FROM THE SUN' },
 
     ],
 
@@ -240,9 +240,9 @@ const JOURNEY: Chapter[] = [
 
       { value: '6,779', label: 'KM DIAMETER' },
 
-      { value: '687', label: 'EARTH DAYS / YEAR' },
+      { value: '687', label: 'DAYS PER ORBIT' },
 
-      { value: '1.52 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '1.52 AU', label: 'FROM THE SUN' },
 
     ],
 
@@ -278,9 +278,9 @@ const JOURNEY: Chapter[] = [
 
       { value: '139,820', label: 'KM DIAMETER' },
 
-      { value: '11.86', label: 'EARTH YEARS / YEAR' },
+      { value: '11.86', label: 'YEARS PER ORBIT' },
 
-      { value: '5.20 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '5.20 AU', label: 'FROM THE SUN' },
 
     ],
 
@@ -316,9 +316,9 @@ const JOURNEY: Chapter[] = [
 
       { value: '116,460', label: 'KM DIAMETER' },
 
-      { value: '29.45', label: 'EARTH YEARS / YEAR' },
+      { value: '29.45', label: 'YEARS PER ORBIT' },
 
-      { value: '9.54 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '9.54 AU', label: 'FROM THE SUN' },
 
     ],
 
@@ -354,9 +354,9 @@ const JOURNEY: Chapter[] = [
 
       { value: '50,724', label: 'KM DIAMETER' },
 
-      { value: '84', label: 'EARTH YEARS / YEAR' },
+      { value: '84', label: 'YEARS PER ORBIT' },
 
-      { value: '19.19 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '19.19 AU', label: 'FROM THE SUN' },
 
     ],
 
@@ -392,9 +392,9 @@ const JOURNEY: Chapter[] = [
 
       { value: '49,244', label: 'KM DIAMETER' },
 
-      { value: '164.8', label: 'EARTH YEARS / YEAR' },
+      { value: '164.8', label: 'YEARS PER ORBIT' },
 
-      { value: '30.07 AU', label: 'AVG. SUN DISTANCE' },
+      { value: '30.07 AU', label: 'FROM THE SUN' },
 
     ],
 

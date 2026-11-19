@@ -19,7 +19,7 @@
 
   --text-1: rgba(244, 246, 250, 0.96);
   --text-2: rgba(226, 231, 239, 0.72);
-  --text-3: rgba(206, 213, 225, 0.48);
+  --text-3: rgba(206, 213, 225, 0.58);
   --hairline: rgba(255, 255, 255, 0.12);
 
   --size-display: clamp(40px, 4.2vw, 64px);
@@ -4092,3 +4092,71 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
     border-radius: 50%;
   }
 }
+
+/* ============================================================
+   DESIGN PASS 8: quieter edges, tidier groups
+   ============================================================ */
+
+/* the time bar: the date and its mode at rest; the speeds open out when
+   pointed at (or reached by keyboard) */
+@media (hover: hover) {
+  .time-bar-speeds,
+  .time-bar-reset {
+    max-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-width 0.5s var(--ease), opacity 0.3s, padding 0.5s var(--ease);
+  }
+  .time-bar-speeds { padding-left: 0; border-left-color: transparent; }
+  .time-bar-reset { padding: 0; }
+  .time-bar:hover .time-bar-speeds,
+  .time-bar:focus-within .time-bar-speeds {
+    max-width: 420px;
+    opacity: 1;
+    padding-left: 6px;
+    border-left-color: var(--hairline);
+  }
+  .time-bar:hover .time-bar-reset,
+  .time-bar:focus-within .time-bar-reset {
+    max-width: 140px;
+    opacity: 1;
+    padding: 0 11px;
+  }
+  .time-bar-now { cursor: default; }
+  /* a hint that there is more: a small chevron after the date */
+  .time-bar-now::after {
+    content: '';
+    width: 5px;
+    height: 5px;
+    margin-left: 2px;
+    border-right: 1.5px solid var(--text-3);
+    border-bottom: 1.5px solid var(--text-3);
+    transform: rotate(-45deg);
+    transition: opacity 0.3s;
+  }
+  .time-bar:hover .time-bar-now::after,
+  .time-bar:focus-within .time-bar-now::after { opacity: 0; }
+}
+
+/* the reading panel: a soft edge into the scene, not a ruled line */
+.detail-panel { border-left-color: rgba(255, 255, 255, 0.05); }
+
+/* pinned panel bar: room for every tab beside the name */
+.dp-bar-name { text-overflow: ellipsis; flex: none; }
+.detail-panel.is-stuck .dp-bar-name { max-width: 6.5em; }
+.detail-panel.is-stuck .dp-bar { gap: 8px; }
+.detail-panel.is-stuck .dp-tab { padding: 0 8px; font-size: 12px; }
+
+/* landed: the actions in an even grid, the main one across the top */
+.landed-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.landed-actions .btn { justify-content: center; width: 100%; }
+.landed-actions .btn:first-child,
+.landed-actions .btn:last-child:nth-child(even) { grid-column: 1 / -1; }
+.landed-card.is-walking .landed-actions .btn:first-child:last-child { grid-column: 1 / -1; }
+
+/* the chapter figures: one line each, aligned */
+.inline-stat span { white-space: nowrap; }

@@ -1686,7 +1686,8 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
     <CanvasBoundary>
     <Canvas
       key={generation}
-      onCreated={({ gl }) => {
+      onCreated={(rootState) => {
+        const { gl } = rootState
         // only the canvas in use: a replaced one gives its context up on
         // purpose as it goes, which is not a loss
         const mine = generation
