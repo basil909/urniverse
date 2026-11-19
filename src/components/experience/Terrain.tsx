@@ -440,9 +440,13 @@ export default function Terrain({
     const near = pilot.active && pilot.nearestIndex === index && model.ready
     if (near) {
       _ship.copy(pilot.shipWorld)
+      // where the ship stands on this world: in the frame it was placed in
+      // (the world may have moved on since, sped up; it is carried after)
+      const here = ground.body === index
+      if (here) _c.copy(_ship).applyMatrix4(ground.shipFrame)
       body.updateWorldMatrix(true, false)
       ground.inverse.copy(body.matrixWorld).invert()
-      _c.copy(_ship).applyMatrix4(ground.inverse)
+      if (!here) _c.copy(_ship).applyMatrix4(ground.inverse)
     }
     const altitude = near ? _c.length() - 1 : Infinity
     const active = near && altitude < 0.05
@@ -461,9 +465,14 @@ export default function Terrain({
     }
     _c.normalize()
     const fade = 1 - THREE.MathUtils.smoothstep(altitude, 0.03, 0.05)
-    // the patch reaches past the horizon
+    // (the height here, as of the last streamed elevation)
+    const level = model.height(_c, fade)
+    // the patch reaches past the horizon; and far enough that where its
+    // rim eases back to the sphere (rising from a low plain, falling from a
+    // high one) is itself below the horizon, not a wall along it: a height
+    // h (radii) drops out of sight beyond sqrt(2h) radians
     const horizon = Math.acos(1 / (1 + Math.max(altitude, 1e-7)))
-    const reach = THREE.MathUtils.clamp(horizon * 1.35 + 0.002, 0.004, 0.45)
+    const reach = THREE.MathUtils.clamp(Math.max(horizon * 1.35 + 0.002, 1.5 * Math.sqrt(2 * Math.abs(level))), 0.004, 0.45)
     _e1.set(0, 1, 0).cross(_c)
     if (_e1.lengthSq() < 1e-10) _e1.set(1, 0, 0)
     _e1.normalize()

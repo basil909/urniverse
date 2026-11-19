@@ -28,6 +28,7 @@ import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
 import { lens } from './lens'
 import Pilot, { GroundCarry } from './Pilot'
+import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
 import FocusCull from './FocusCull'
 import { drainTextures, textureLoader } from './textures'
@@ -1466,6 +1467,7 @@ function Scene({
       <Lens progressRef={progressRef} glare={glare} />
 
       <Pilot />
+      <PhotoCapture />
 
       <BacklitDriver progressRef={progressRef} />
 

@@ -112,6 +112,32 @@ export const pilot = {
   orbitMinutes: 0,
   /** named features on screen (x, y in -1..1), for the HUD */
   features: [] as { name: string; x: number; y: number; shown: boolean }[],
+  /** coming down through air: how far through the entry (0 at its top,
+      1 at 20 km; -1 not entering), and the entry's top, km */
+  entry: -1,
+  entryTop: 0,
+  /** a jolt to the camera (touchdown), decaying */
+  jolt: 0,
+  /** standing on a world: the sky there (degrees above the horizon and
+      compass bearing of the Sun, local solar time in hours, and the
+      world that hangs in its sky: which, how high, which way) */
+  sky: { sunAlt: 0, sunAz: 0, hours: 12, otherIndex: -1, otherAlt: 0, otherAz: 0 },
+  /** outside on foot (landed): asked for, and on */
+  walkRequest: false,
+  walking: false,
+  /** looking around on foot: drag, in pixels, taken by the scene */
+  look: { dx: 0, dy: 0 },
+  /** on foot: height above the ground (m), the last jump's height (m) and
+      time in the air (s), and how much faster than real it is shown */
+  walkHeight: 0,
+  /** on foot: how far from the ship, metres */
+  walkFromShip: 0,
+  jump: { height: 0, seconds: 0, faster: 1, count: 0 },
+  /** asked to plant a flag beside the ship */
+  flagRequest: false,
+  flagPlanted: false,
+  /** a picture of the view asked for (a postcard: with its caption) */
+  photoRequest: null as null | { caption: string[] },
 }
 
 export const TIME_STEPS = [0, 1, 60, 600, 3600]
@@ -123,6 +149,8 @@ export const VIEW_STEPS = [3.2, 400, 30000]
 
 export function resetPilotInput() {
   pilot.keys.clear()
+  pilot.look.dx = 0
+  pilot.look.dy = 0
   pilot.steer.x = 0
   pilot.steer.y = 0
   pilot.touchThrust = false

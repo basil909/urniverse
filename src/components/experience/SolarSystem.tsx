@@ -642,8 +642,10 @@ void main() {
   vec3 bMs = uMie / E;
   vec3 bMe = uMieExt / E;
   float top = min(uShell, 1.0 + max(hR, hM) * 9.0);
-  // the ground: the mean radius, or where you stand if lower (Hellas)
-  float ground = min(1.0, camR - 1e-7);
+  // the ground: the mean radius, or where you stand if lower (Hellas); a
+  // little under you, so the sky reaches the real horizon (which dips a
+  // degree or so below level over uneven ground) and leaves no gap above it
+  float ground = min(1.0, camR - 2e-4);
 
   vec2 ta = sphereHit(o, d, top);
   float t0 = max(ta.x, 0.0);

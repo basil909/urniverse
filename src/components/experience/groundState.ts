@@ -347,6 +347,10 @@ export const ground = {
   worldRadius: 1,
   /** the body's own object (for the end-of-frame correction) */
   object: null as THREE.Object3D | null,
+  /** world -> local as it was when the ship was placed this frame: the
+      world may move on before the frame ends (fast, with time sped up),
+      and the ship is carried after it from this */
+  shipFrame: new THREE.Matrix4(),
 }
 
 /* Saturn's rings, for flying through them: written by Saturn each frame */

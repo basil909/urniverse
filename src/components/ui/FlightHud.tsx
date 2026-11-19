@@ -5,7 +5,10 @@ import { useEffect, useRef, useState } from 'react'
 import { pilot, resetPilotInput, setView, TIME_STEPS, VIEW_STEPS } from '../experience/pilotState'
 import { FlightAudio, SOUND_EVENT, soundSwitch } from './flightAudio'
 import { earthToday } from '../experience/earthToday'
+import { ENTRY } from '../experience/flightLanding'
 import Icon from './Icon'
+import LandedCard from './LandedCard'
+import { SURFACES } from './landingSite'
 
 /* the first flight's guide: three steps, shown once (remembered) */
 const GUIDE_KEY = 'urniverse-flight-guide'
@@ -159,6 +162,15 @@ const CONTROLS: [string, [string[], string][]][] = [
       [['L'], 'Land on the world below: the ship lands itself'],
       [['W'], 'Abort a landing, or take off'],
       [['O'], 'Orbit at this height'],
+    ],
+  ],
+  [
+    'On foot (landed)',
+    [
+      [['W', 'S'], 'Walk, back'],
+      [['A', 'D', 'Drag'], 'Turn, look around'],
+      [['Space'], 'Jump (the world’s own gravity)'],
+      [['Esc'], 'Back aboard'],
     ],
   ],
   [
@@ -316,6 +328,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [creditFresh, setCreditFresh] = useState(false)
   const lastCredit = useRef('')
   const [missionClock, setMissionClock] = useState(0)
+  // coming down through air: how far through, how hot (0..1)
+  const [entry, setEntry] = useState(-1)
+  const [heat, setHeat] = useState(0)
+  const [walking, setWalking] = useState(false)
+  const [walkFrom, setWalkFrom] = useState(0)
+  const [walkHeight, setWalkHeight] = useState(0)
+  const entryGlow = useRef<HTMLDivElement>(null)
   const goToOpen = useRef(false)
   const controlsOpen = useRef(false)
   useEffect(() => {
@@ -342,6 +361,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     let lastWarp = ''
     let lastZone = ''
     let lastNote = ''
+    let lastEntry = -1
+    let lastBlack = false
+    let lastJump = pilot.jump.count
     // notes about where you are wait their turn (arriving somewhere and
     // entering the belt can happen at once)
     const waiting: string[] = []
@@ -411,6 +433,28 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       if (pilot.missionNote !== lastNote && pilot.missionNote) showToast(pilot.missionNote)
       lastNote = pilot.missionNote
       setHullK(pilot.hullK)
+      // coming down through air: its top, then the blackout
+      setEntry(pilot.entry)
+      setHeat(pilot.heat)
+      if (pilot.entry >= 0 && lastEntry < 0) {
+        showToast(`Entering ${pilot.nearest}’s atmosphere\n${Math.round(pilot.entryTop)} km up, at ${pilot.kms.toFixed(1)} km/s`)
+      }
+      const entryPeak = ENTRY[pilot.nearestIndex]?.heat ?? 1
+      const black = pilot.entry >= 0 && pilot.heat > entryPeak * 0.6
+      if (black && !lastBlack) showToast('Plasma all round the ship\nthe radio goes quiet: blackout')
+      lastBlack = black
+      lastEntry = pilot.entry
+      setWalking(pilot.walking)
+      setWalkFrom(pilot.walkFromShip)
+      setWalkHeight(pilot.walkHeight)
+      // a jump: how high, how long
+      if (pilot.jump.count !== lastJump) {
+        lastJump = pilot.jump.count
+        const j = pilot.jump
+        const up = j.height >= 10 ? `${Math.round(j.height).toLocaleString('en-GB')} m` : `${j.height.toFixed(1)} m`
+        const time = j.seconds >= 120 ? `${Math.round(j.seconds / 60)} minutes` : `${j.seconds.toFixed(1)} s`
+        showToast(`A jump: ${up} up, ${time} in the air${j.faster > 1.5 ? `\nshown ${Math.round(j.faster)}× faster` : ''}`)
+      }
       // crossing the heliopause, where the Sun's wind meets the galaxy's
       if (lastSunAU < 120 && pilot.sunAU >= 120) showToast('Leaving the heliosphere: interstellar space begins')
       else if (lastSunAU >= 120 && pilot.sunAU < 120 && pilot.active) showToast('Back inside the heliosphere')
@@ -472,6 +516,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
       // the Sun close by: its glare floods in
       if (heatGlare.current) heatGlare.current.style.opacity = String(pilot.sunHeat * 0.7)
+      // entry: the hot air's glow creeping in from the edges, flickering
+      if (entryGlow.current) {
+        const glow = pilot.landState === 'descending' || pilot.landState === 'returning' ? pilot.heat : 0
+        const flicker = 0.85 + 0.15 * Math.sin(performance.now() * 0.031) * Math.sin(performance.now() * 0.017)
+        entryGlow.current.style.opacity = glow > 0.01 ? String(Math.min(1, glow * 0.95 * flicker)) : '0'
+      }
       // Earth's cloud deck: white mist by day, grey by night
       if (mist.current) {
         const light = Math.round(30 + pilot.mistLight * 205)
@@ -576,6 +626,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       if (event.key === 'Escape') {
         if (goToOpen.current) setGoTo(false)
         else if (controlsOpen.current) setControls(false)
+        else if (pilot.walking) pilot.walking = false
         else onLand()
         return
       }
@@ -656,18 +707,34 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       const k = key(event)
       if (['w', 'a', 's', 'd', 'q', 'e', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
         event.preventDefault()
-        pilot.keys.add(k === ' ' ? 'w' : k)
+        // (Space: on foot a jump, else thrust)
+        pilot.keys.add(k === ' ' ? (pilot.walking ? 'jump' : 'w') : k)
       }
     }
     const onKeyUp = (event: KeyboardEvent) => {
       const k = key(event)
-      pilot.keys.delete(k === ' ' ? 'w' : k)
+      if (k === ' ') {
+        pilot.keys.delete('jump')
+        pilot.keys.delete('w')
+      } else pilot.keys.delete(k)
     }
 
     // mouse: steer by the pointer's offset from the centre of the screen
     let dragFrom: { x: number; y: number } | null = null
     const onMove = (event: PointerEvent) => {
       if (goToOpen.current) return
+      if (pilot.walking) {
+        // on foot: a drag looks around
+        if (dragFrom) {
+          pilot.look.dx += event.clientX - dragFrom.x
+          pilot.look.dy += event.clientY - dragFrom.y
+          dragFrom = { x: event.clientX, y: event.clientY }
+        }
+        pilot.steer.x = 0
+        pilot.steer.y = 0
+        guide.current?.classList.remove('is-on')
+        return
+      }
       // reaching for a marker or a button should not turn the ship
       if (event.pointerType === 'mouse' && (event.target as Element).closest?.('button, .flight-goto, .flight-controls')) {
         pilot.steer.x = 0
@@ -688,13 +755,16 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
     }
     const onDown = (event: PointerEvent) => {
-      if ((event.target as Element).closest('button, .flight-goto')) return
-      if (event.pointerType === 'mouse') pilot.keys.add('w') // hold to fly
+      if ((event.target as Element).closest('button, .flight-goto, .landed-card')) return
+      if (pilot.walking) dragFrom = { x: event.clientX, y: event.clientY }
+      else if (event.pointerType === 'mouse') pilot.keys.add('w') // hold to fly
       else dragFrom = { x: event.clientX, y: event.clientY }
     }
     const onUp = (event: PointerEvent) => {
-      if (event.pointerType === 'mouse') pilot.keys.delete('w')
-      else {
+      if (event.pointerType === 'mouse') {
+        pilot.keys.delete('w')
+        dragFrom = null
+      } else {
         dragFrom = null
         pilot.steer.x = 0
         pilot.steer.y = 0
@@ -766,7 +836,17 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
             : landState === 'returning'
               ? { phase: 'Re-entry', figures: [`${Math.round(missionClock).toLocaleString('en-GB')} km to Kennedy`, formatAltitude(altitude), formatSpeed(kms)], key: '' }
               : landState === 'descending'
-                ? { phase: `Coming down to ${nearest}`, figures: [formatAltitude(altitude), formatSpeed(kms)], key: 'W aborts' }
+                ? entry >= 0
+                  ? {
+                      phase: heat > (ENTRY[pilot.nearestIndex]?.heat ?? 1) * 0.6 ? 'Peak heating' : 'Atmospheric entry',
+                      figures: [
+                        formatAltitude(altitude),
+                        formatSpeed(kms),
+                        `hull ${(Math.round((20 + ((ENTRY[pilot.nearestIndex]?.hullC ?? 1500) - 20) * Math.min(1, heat / (ENTRY[pilot.nearestIndex]?.heat ?? 1))) / 10) * 10).toLocaleString('en-GB')} °C`,
+                      ],
+                      key: 'W aborts',
+                    }
+                  : { phase: `Coming down to ${nearest}`, figures: [formatAltitude(altitude), formatSpeed(kms)], key: 'W aborts' }
                 : landState === 'landing'
                   ? altitude < 0.06
                     ? { phase: 'Flare', figures: [groundSpeed(kms)], key: '' }
@@ -777,6 +857,15 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
                       ? altitude < 0.015
                         ? { phase: 'Takeoff roll', figures: [groundSpeed(kms)], key: '' }
                         : { phase: 'Climbing out', figures: [formatAltitude(altitude), groundSpeed(kms)], key: '' }
+                      : landState === 'landed' && walking
+                        ? {
+                            phase: `On foot · ${nearest}`,
+                            figures: [
+                              `${walkFrom < 1000 ? `${Math.round(walkFrom)} m` : `${(walkFrom / 1000).toFixed(1)} km`} from the Shuttle`,
+                              walkHeight > 0.05 ? `${walkHeight >= 10 ? Math.round(walkHeight).toLocaleString('en-GB') : walkHeight.toFixed(1)} m up` : '',
+                            ],
+                            key: '',
+                          }
                       : landState === 'landed'
                         ? { phase: `Landed on ${nearest}`, figures: [site], key: 'hold W to take off' }
                         : {
@@ -827,6 +916,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       <div ref={haze} className="flight-haze" aria-hidden="true" />
       <div ref={mist} className="flight-mist" aria-hidden="true" />
       <div ref={heatGlare} className="flight-heat" aria-hidden="true" />
+      <div ref={entryGlow} className="flight-entry" aria-hidden="true" />
+      {landState === 'landed' && SURFACES[pilot.nearestIndex] && <LandedCard touch={touch} />}
       {guideStep >= 0 && (
         <div className="flight-guide-card" role="status">
           <span className="flight-guide-step">{guideStep + 1} / 3</span>
@@ -893,6 +984,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         <div className="fr-top">
           {readout.phase && <span className="fr-phase">{readout.phase}</span>}
           {timeScale !== 0 && <span className="fr-time">{timeLabel(timeScale)}</span>}
+          {entry >= 0 && heat > (ENTRY[pilot.nearestIndex]?.heat ?? 1) * 0.6 && <span className="fr-time is-alert">Radio blackout</span>}
         </div>
         {readout.figures.length > 0 && (
           <div className="fr-figures">
@@ -952,7 +1044,20 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           onPointerLeave={() => (pilot.touchThrust = false)}
         >
           <Icon name="thrust" />
-          Thrust
+          {walking ? 'Walk' : 'Thrust'}
+        </button>
+      )}
+      {touch && walking && (
+        <button
+          type="button"
+          className="flight-touch-land"
+          onClick={() => {
+            pilot.keys.add('jump')
+            window.setTimeout(() => pilot.keys.delete('jump'), 150)
+          }}
+        >
+          <Icon name="land" className="is-flipped" />
+          Jump
         </button>
       )}
       {/* touch: landing, when a world is near enough (L on a keyboard) */}

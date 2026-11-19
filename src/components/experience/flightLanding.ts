@@ -47,6 +47,22 @@ export type LandingFrame = {
   delta: number
 }
 
+/* coming down through air, at the speed ships really meet it (the
+   Shuttle at 7.8 km/s some 120 km over Earth; landers at Mars about
+   5.6 km/s from 125 km; Huygens about 6 km/s at Titan), slowing as the
+   air thickens. (Real entries take half an hour along a long, shallow
+   path; this one comes nearly straight down, in 20 to 30 seconds.)
+   Heating peaks about a third of the way down. */
+export const ENTRY: Record<number, { top: number; speed: number; heat: number; hullC: number }> = {
+  2: { top: 120, speed: 7.8, heat: 1, hullC: 1650 },
+  3: { top: 125, speed: 5.6, heat: 0.8, hullC: 1300 },
+  17: { top: 160, speed: 6, heat: 0.7, hullC: 1100 },
+}
+/** where the entry has got to: 0 at its top, 1 at 20 km */
+export const entryProgress = (top: number, km: number) => THREE.MathUtils.clamp((top - km) / (top - 20), 0, 1)
+/** the heating, 0..1 of this world's peak: building, holding, fading */
+export const entryHeat = (e: number) => THREE.MathUtils.smoothstep(e, 0, 0.22) * (1 - THREE.MathUtils.smoothstep(e, 0.55, 0.92))
+
 const _forward = new THREE.Vector3()
 const _wanted = new THREE.Vector3()
 const _groundUp = new THREE.Vector3()
@@ -113,7 +129,16 @@ export function flyLanding(frame: LandingFrame) {
     // ground under the ship is in reach
     const km = clearance * KM_PER_UNIT
     // (through the air at re-entry speeds, not faster)
-    const down = 0.3 + km * (0.12 + 0.38 * THREE.MathUtils.smoothstep(km, 100, 600))
+    const entry = ENTRY[nearestIndex]
+    let down = 0.3 + km * (0.12 + 0.38 * THREE.MathUtils.smoothstep(km, 100, 600))
+    if (entry) {
+      // above the air: closing fast, to arrive at its top at entry speed;
+      // in it, holding that speed through the thin upper air, then slowing
+      down =
+        km > entry.top
+          ? entry.speed + (km - entry.top) * (0.12 + 0.38 * THREE.MathUtils.smoothstep(km - entry.top, 100, 600))
+          : 2 + (entry.speed - 2) * THREE.MathUtils.smoothstep(km, 20, 20 + 0.55 * (entry.top - 20))
+    }
     const along = Math.min(2.5, km * 0.02 + 0.3)
     flyHeading(heading.current, radial, steerX, delta)
     _wanted.copy(heading.current).multiplyScalar(along).addScaledVector(radial, -down).divideScalar(KM_PER_UNIT)
@@ -160,6 +185,8 @@ export function flyLanding(frame: LandingFrame) {
         jet.position.addScaledVector(_groundUp, rest - now)
         velocity.current.addScaledVector(_groundUp, -velocity.current.dot(_groundUp))
         pilot.landState = 'rolling'
+        // the camera feels it
+        pilot.jolt = 1
       }
     } else if (pilot.landState === 'rolling') {
       // on the ground, braking to a stop, the nose coming down

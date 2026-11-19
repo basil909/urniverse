@@ -128,6 +128,12 @@ export function placeCamera(frame: CameraFrame) {
     _shake.set(Math.sin(t * 41.3) + Math.sin(t * 17.9), Math.sin(t * 37.1) + Math.sin(t * 23.3), Math.sin(t * 29.7))
     camera.position.addScaledVector(_shake, buffet * reach * 0.025)
   }
+  // touchdown: a jolt, the camera dipping and settling
+  if (pilot.jolt > 0.002) {
+    const t = performance.now() * 0.001
+    camera.position.addScaledVector(levelUp, -Math.sin(t * 26) * pilot.jolt * reach * 0.035)
+    pilot.jolt *= Math.exp(-delta * 4.5)
+  } else pilot.jolt = 0
   // pulled far back, the camera stays above the ground
   _camTarget.copy(camera.position).sub(centre)
   if (!onGround && !deep && _camTarget.length() < nearestRadius * 1.004) {

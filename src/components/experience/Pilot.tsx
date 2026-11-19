@@ -42,7 +42,10 @@ import {
 } from './spaceBodies'
 import { sunVisibility } from './sunVisibility'
 import { KM_PER_UNIT, LIGHT, LOWEST, SHIP_LENGTH, WARP } from './flightShip'
-import { flyLanding } from './flightLanding'
+import { ENTRY, entryHeat, entryProgress, flyLanding } from './flightLanding'
+import { newWalker, startWalk, stepWalk, surfaceEvents } from './flightWalk'
+import SurfaceLife from './SurfaceLife'
+import { OTHER_BODY } from '../ui/landingSite'
 import { launchCamera, newMission, stack, startLaunch, startReturn, stepLaunch, stepReturn } from './flightMission'
 import { planWarp, stepWarp, type Warp } from './flightWarp'
 import { placeCamera } from './flightCamera'
@@ -467,7 +470,7 @@ export function GroundCarry() {
     if (pilot.timeScale <= 0) return
     body.updateWorldMatrix(true, false)
     // how the body moved since the ship was placed
-    _carry.copy(body.matrixWorld).multiply(ground.inverse)
+    _carry.copy(body.matrixWorld).multiply(ground.shipFrame)
     jet.position.applyMatrix4(_carry)
     camera.position.applyMatrix4(_carry)
     _carry.decompose(_carryP, _carryQ, _carryS)
@@ -682,6 +685,8 @@ const AIR: Record<number, { height: number; density: number }> = {
   5: { height: 59.5, density: 1 },
   6: { height: 27.7, density: 1 },
   7: { height: 19.7, density: 1 },
+  // Titan: 1.5 bar at -179 C, four times as dense as Earth's air
+  17: { height: 40, density: 4.4 },
 }
 
 /* ============================================================
@@ -798,6 +803,10 @@ const _camForward = new THREE.Vector3()
 
 const BODY_NAMES = Array.from({ length: BODY_COUNT + 1 }, (_, i) => getBodyName(i - 1))
 const _toSun = new THREE.Vector3()
+const _skyUp = new THREE.Vector3()
+const _skyNorth = new THREE.Vector3()
+const _skyEast = new THREE.Vector3()
+const _skyPoint = new THREE.Vector3()
 const _levelUp = new THREE.Vector3()
 const _targetRates = new THREE.Vector3()
 const _wanted = new THREE.Vector3()
@@ -1573,6 +1582,8 @@ export default function Pilot() {
   // the heading along the ground while landing, rolling out and taking off
   const heading = useRef(new THREE.Vector3())
   const heat = useRef(0)
+  // on foot (flightWalk.ts)
+  const walker = useRef(newWalker())
   const orbitAngle = useRef(0)
   const flyby = useRef<THREE.Vector3 | null>(null) // relative to the Sun
   const streaks = useRef({ velocity: new THREE.Vector3(), amount: 0 })
@@ -1627,6 +1638,8 @@ export default function Pilot() {
         pilot.warpGlow = 0
         pilot.landState = 'flying'
         pilot.orbiting = false
+        pilot.walking = false
+        pilot.entry = -1
         orbit.current = null
         pilot.timeScale = 0
         if (startDpr.current) setDpr(startDpr.current)
@@ -1781,8 +1794,10 @@ export default function Pilot() {
     const warping = warp.current !== null
     // landing, rolling out, standing and taking off fly themselves
     const auto = pilot.landState !== 'flying'
-    const thrustHeld = keys.has('w') || pilot.touchThrust || pad.thrust > 0.2
-    const brakeKey = keys.has('s') || pad.brake > 0.2
+    // (on foot, the keys walk: the ship stays put)
+    const onFoot = pilot.walking
+    const thrustHeld = !onFoot && (keys.has('w') || pilot.touchThrust || pad.thrust > 0.2)
+    const brakeKey = !onFoot && (keys.has('s') || pad.brake > 0.2)
     // Shift: warp speed, anywhere, even skimming a planet
     const boost = (keys.has('shift') || pad.boost) && !warping && !auto && !brakeKey
     const forwardKey = !warping && !auto && (thrustHeld || boost)
@@ -1793,12 +1808,12 @@ export default function Pilot() {
       if (a < dead) return 0
       return Math.sign(v) * Math.min(1, ((a - dead) / (1 - dead)) ** 1.6)
     }
-    const steerX = warping ? 0 : THREE.MathUtils.clamp(
+    const steerX = warping || onFoot ? 0 : THREE.MathUtils.clamp(
       shape(pilot.steer.x, 0.06) + shape(pad.x, 0.12) + (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0),
       -1,
       1,
     )
-    const steerY = warping ? 0 : THREE.MathUtils.clamp(
+    const steerY = warping || onFoot ? 0 : THREE.MathUtils.clamp(
       shape(pilot.steer.y, 0.06) + shape(pad.y, 0.12) + (keys.has('arrowdown') ? 1 : 0) - (keys.has('arrowup') ? 1 : 0),
       -1,
       1,
@@ -1983,6 +1998,9 @@ export default function Pilot() {
       steerX,
       delta,
     })
+    // the frame the ship now stands in (the world may yet move this frame)
+    ground.shipFrame.copy(ground.inverse)
+    pilot.shipWorld.copy(jet.position)
     if (onGround) {
       const site = groundLatLon(jet.position)
       pilot.site.lat = site.lat
@@ -2077,6 +2095,14 @@ export default function Pilot() {
           THREE.MathUtils.smoothstep(Math.log10(Math.max(load, 1e-9)), -0.6, 1.4) *
           THREE.MathUtils.smoothstep(v, 2.5, 6.5)
       }
+      // coming down to land through air: the entry's own heating curve
+      const entry = ENTRY[nearestIndex]
+      pilot.entry = -1
+      if (entry && pilot.landState === 'descending' && !warp.current && pilot.altitudeKm >= 0 && pilot.altitudeKm <= entry.top) {
+        pilot.entry = entryProgress(entry.top, pilot.altitudeKm)
+        pilot.entryTop = entry.top
+        target = Math.max(target, entryHeat(pilot.entry) * entry.heat)
+      }
       heat.current += (target - heat.current) * (1 - Math.exp(-delta * (target > heat.current ? 3 : 1.5)))
     }
 
@@ -2111,6 +2137,40 @@ export default function Pilot() {
     // the launch from Kennedy: watched from the ground at first
     if (pilot.landState === 'launching' && mission.current.time < 35) launchCamera(camera, jet)
 
+    // ---- on foot (flightWalk.ts): out of the ship, at eye height
+    const standing = pilot.landState === 'landed' && onGround && !!ground.model
+    if (pilot.walkRequest) {
+      pilot.walkRequest = false
+      if (standing) {
+        startWalk(walker.current, jet)
+        pilot.walking = true
+      }
+    }
+    if (pilot.walking && !standing) pilot.walking = false
+    if (pilot.walking) {
+      stepWalk(walker.current, camera, keys, nearestIndex, delta)
+      _local.copy(jet.position).applyMatrix4(ground.inverse).normalize()
+      pilot.walkFromShip = _local.angleTo(walker.current.dir) * ground.worldRadius * KM_PER_UNIT * 1000
+    }
+    // a flag: in front of you on foot, else beside the ship
+    if (pilot.flagRequest) {
+      pilot.flagRequest = false
+      if (standing) {
+        const w = walker.current
+        const metres = ground.worldRadius * KM_PER_UNIT * 1000
+        if (pilot.walking) {
+          surfaceEvents.flag = { dir: w.dir.clone().addScaledVector(w.heading, 2.2 / metres).normalize(), heading: w.heading.clone() }
+        } else {
+          // (behind the left wing, nearer the camera: in view)
+          _local.set(-0.5, 0, 0.75).multiplyScalar(SHIP_LENGTH).applyQuaternion(jet.quaternion).add(jet.position).applyMatrix4(ground.inverse).normalize()
+          // its face towards the camera
+          _camPos.copy(camera.position).applyMatrix4(ground.inverse).normalize().sub(_local).negate()
+          surfaceEvents.flag = { dir: _local.clone(), heading: _camPos.clone() }
+        }
+        pilot.flagPlanted = true
+      }
+    }
+
     // ---- the ship's layer: the ship one unit long at the origin, seen by
     // a camera placed as the real one is, in ship lengths
     const view = visual.current
@@ -2126,6 +2186,12 @@ export default function Pilot() {
     const shipAway = shipCamera.position.length()
     shipCamera.near = Math.max(0.05, shipAway * 0.05)
     shipCamera.far = Math.max(shipAway * 3 + 100, 8000)
+    if (pilot.walking) {
+      // on foot: a flag or a pebble may be a metre off (and nothing in
+      // this layer is more than a few km away)
+      shipCamera.near = 0.004
+      shipCamera.far = 400
+    }
     // when the ship is too small to see, a soft beacon marks it
     if (beacon.current) {
       const shown = THREE.MathUtils.smoothstep(shipAway, 120, 900)
@@ -2174,11 +2240,39 @@ export default function Pilot() {
       }
     }
 
+    // ---- standing on a world: its sky (the Sun, and the world that hangs
+    // in it), and the local solar time
+    if (onGround && ground.model) {
+      ground.matrix.decompose(_bodyPosDummy, _bodyQuat, _bodyScaleDummy)
+      _skyUp.copy(jet.position).applyMatrix4(ground.inverse).normalize().applyQuaternion(_bodyQuat)
+      _skyNorth.set(0, 1, 0).applyQuaternion(_bodyQuat)
+      _skyNorth.addScaledVector(_skyUp, -_skyNorth.dot(_skyUp))
+      if (_skyNorth.lengthSq() < 1e-10) _skyNorth.set(1, 0, 0).addScaledVector(_skyUp, -_skyUp.x)
+      _skyNorth.normalize()
+      _skyEast.copy(_skyNorth).cross(_skyUp)
+      const sky = pilot.sky
+      sky.sunAlt = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(_toSun.dot(_skyUp), -1, 1)))
+      sky.sunAz = (THREE.MathUtils.radToDeg(Math.atan2(_toSun.dot(_skyEast), _toSun.dot(_skyNorth))) + 360) % 360
+      // the point with the Sun overhead
+      const [sunU] = sphereUv(_skyPoint.copy(_toSun).applyQuaternion(_bodyQuat.invert()))
+      _bodyQuat.invert()
+      const apart = ((((pilot.site.lon - (sunU * 360 - 180) + 180) % 360) + 360) % 360) - 180
+      sky.hours = (((12 + apart / 15) % 24) + 24) % 24
+      const other = OTHER_BODY[nearestIndex]
+      sky.otherIndex = other ?? -1
+      if (other !== undefined) {
+        getBodyPosition(other, simClock.jd, _skyPoint).sub(jet.position).normalize()
+        sky.otherAlt = THREE.MathUtils.radToDeg(Math.asin(THREE.MathUtils.clamp(_skyPoint.dot(_skyUp), -1, 1)))
+        sky.otherAz = (THREE.MathUtils.radToDeg(Math.atan2(_skyPoint.dot(_skyEast), _skyPoint.dot(_skyNorth))) + 360) % 360
+      }
+    }
+
     // a wider lens at speed; the near limit follows the ground (the ship
     // is in its own layer, so nothing nearer needs drawing here)
-    const fov = 52 + pilot.speed * (boost ? 16 : 8)
+    const fov = pilot.walking ? 64 : 52 + pilot.speed * (boost ? 16 : 8)
     camera.fov += (fov - camera.fov) * (1 - Math.exp(-delta * 3))
-    camera.near = THREE.MathUtils.clamp(clearance * 0.25, onGround ? 2e-7 : 1e-5, 0.01)
+    // (on foot the ground is a metre or two off: a nearer near limit)
+    camera.near = pilot.walking ? 1.8e-8 : THREE.MathUtils.clamp(clearance * 0.25, onGround ? 2e-7 : 1e-5, 0.01)
     camera.updateProjectionMatrix()
     shipCamera.fov = camera.fov
     shipCamera.aspect = camera.aspect
@@ -2320,6 +2414,7 @@ export default function Pilot() {
             <Plasma heat={heat} />
           </group>
           <AirStreaks state={streaks.current} />
+          <SurfaceLife jetRef={ship} />
           <RingChunks jetRef={ship} />
           <AsteroidField jetRef={ship} />
           <Spacecraft jetRef={ship} />

@@ -3844,3 +3844,157 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   .dp-tabs.is-compact .dp-tab { padding: 0 9px; font-size: 11.5px; }
   .dp-actions .icon-btn:not(:last-child) { display: none; }
 }
+
+/* ============================================================
+   DESIGN PASS 7: ENTRY AND LANDING
+============================================================ */
+/* entry: the hot air glowing in from the edges */
+.flight-entry {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 75% 70% at 50% 46%, transparent 52%, rgba(255, 128, 52, 0.26) 78%, rgba(255, 96, 150, 0.42) 100%),
+    linear-gradient(0deg, rgba(255, 140, 60, 0.22), transparent 38%);
+  mix-blend-mode: screen;
+}
+.fr-time.is-alert {
+  background: rgba(255, 120, 60, 0.16);
+  color: #ffb48a;
+}
+
+/* standing on a world: where, what it is like, what to do */
+.landed-card {
+  position: absolute;
+  left: var(--pad);
+  top: 84px;
+  width: min(340px, calc(100vw - 2 * var(--pad)));
+  border: 1px solid var(--surface-edge);
+  border-radius: var(--card-radius);
+  background: rgba(7, 9, 15, 0.64);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.4), var(--surface-light);
+  color: var(--text-1);
+  pointer-events: auto;
+  animation: landed-in 0.7s var(--ease) both;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  scrollbar-width: thin;
+}
+@keyframes landed-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.landed-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 6px 10px;
+  width: 100%;
+  padding: 14px 16px 12px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.landed-head .icon { grid-row: 1 / 3; grid-column: 2; font-size: 15px; color: var(--text-3); transition: transform 0.25s var(--ease); }
+.landed-head:hover .icon { color: var(--text-1); }
+.landed-head:focus-visible { outline: 1.5px solid var(--planet-accent); outline-offset: -3px; border-radius: var(--card-radius); }
+.landed-eyebrow {
+  margin: 0;
+  font: var(--label);
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--planet-accent);
+}
+.landed-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  line-height: 1.15;
+  color: var(--text-1);
+}
+.landed-body { padding: 0 16px 14px; }
+.landed-where {
+  display: grid;
+  gap: 3px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.landed-where span { color: var(--text-3); }
+.landed-facts { margin: 0; display: grid; }
+.landed-facts > div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--hairline);
+}
+.landed-facts dt {
+  padding-top: 2px;
+  font: var(--label);
+  letter-spacing: var(--label-track);
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.landed-facts dd { margin: 0; font-size: 13px; line-height: 1.45; color: var(--text-1); }
+.landed-facts dd small { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
+.landed-note {
+  margin: 4px 0 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.landed-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.landed-actions .btn[aria-pressed='true'] { border-color: color-mix(in srgb, var(--planet-accent) 55%, transparent); color: var(--text-1); }
+.landed-actions kbd {
+  margin-left: 4px;
+  font: 500 9.5px / 1 var(--sans);
+  color: var(--text-3);
+}
+.landed-log {
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.landed-card.is-walking { padding: 14px 16px; }
+.landed-walk-keys {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 12px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.landed-walk-keys kbd {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  font: 600 10.5px / 1 var(--sans);
+  color: var(--text-1);
+}
+.icon.is-flipped { transform: rotate(180deg); }
+html.is-photo .landed-card { opacity: 0; pointer-events: none; }
+@media (max-width: 640px) {
+  .landed-card { top: 70px; max-height: calc(100vh - 300px); }
+  .landed-title { font-size: 19px; }
+  .landed-head { padding: 12px 14px 10px; }
+  .landed-body { padding: 0 14px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .landed-card { animation: none; }
+}
