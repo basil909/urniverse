@@ -78,7 +78,9 @@ const COLOR = /* glsl */ `
       // older tiles, browner and paler, in patches
       vec3 tint = mix(vec3(1.0), vec3(1.35, 1.2, 1.0), step(0.93, shipHash(id + 17.0)));
       float grout = shipLines(cell, 0.06);
-      vec3 black = vec3(0.012, 0.0125, 0.014) * shade * tint;
+      // streaks along the flow, from the heat of re-entry
+      float streak = 0.88 + 0.28 * shipHash(vec2(floor(p.x * 140.0), 3.0)) * smoothstep(-0.2, 0.3, p.z);
+      vec3 black = vec3(0.012, 0.0125, 0.014) * shade * tint * streak;
       diffuseColor.rgb = mix(black, vec3(0.03, 0.03, 0.028), grout);
       shipRough = 0.92;
       shipMetal = 0.0;
@@ -107,6 +109,26 @@ const COLOR = /* glsl */ `
         shipBump -= lines * 0.9;
       }
     }
+    // control surfaces: the elevons' hinge and split, the body flap, the rudder
+    float wing = step(0.115, abs(p.x)) * step(p.y, -0.07);
+    float elevon = wing * step(abs(p.x), 0.345) * max(shipLine(p.z - 0.425, 0.0009), step(0.425, p.z) * shipLine(abs(p.x) - 0.235, 0.0009));
+    float flap = step(abs(p.x), 0.1) * step(p.y, -0.1) * shipLine(p.z - 0.468, 0.0009);
+    float rudder = step(abs(p.x), 0.025) * step(0.012, p.y) * step(0.3, p.z) * shipLine(p.z - 0.415 - 0.32 * p.y, 0.0009);
+    float hinges = max(max(elevon, flap), rudder);
+    diffuseColor.rgb *= 1.0 - 0.75 * hinges;
+    shipBump -= hinges * 1.2;
+    // the thrusters: rows of small dark ports, on the nose and on the
+    // engine pods by the tail
+    bool forwardRcs = p.z > -0.468 && p.z < -0.432 && p.y > -0.105 && p.y < -0.066 && abs(n.x) > 0.45;
+    bool aftRcs = p.z > 0.438 && p.z < 0.482 && p.y > -0.032 && p.y < 0.004 && abs(p.x) > 0.04 && abs(n.x) > 0.45;
+    if (forwardRcs || aftRcs) {
+      vec2 ports = vec2(p.z / 0.009, p.y / 0.011);
+      vec2 pc = abs(fract(ports) - 0.5);
+      float port = (1.0 - smoothstep(0.2, 0.28, max(pc.x, pc.y))) * (1.0 - smoothstep(0.18, 0.35, fwidth(ports.x)));
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.006), port);
+      shipBump -= port * 1.5;
+    }
+
     // the reinforced carbon-carbon: the nose cap, the wings' leading edges
     float noseCap = smoothstep(-0.468, -0.478, p.z);
     float leading = step(0.105, abs(p.x)) * smoothstep(-0.45, -0.75, n.z) * step(p.y, -0.07);

@@ -680,6 +680,21 @@ const _sunTint = new THREE.Color()
 const _sunBase = new THREE.Color('#fff0d0')
 const _inverseCamera = new THREE.Quaternion()
 
+/* the Shuttle's silhouette as the Sun sees it, for its shadow on the
+   ground: its body alone (layer 5), drawn white on black from the Sun's
+   side, in a box a little larger than the ship */
+const SHADOW_LAYER = 5
+const MASK_HALF = 0.62
+const shadowMask = new THREE.WebGLRenderTarget(512, 512, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true })
+const maskCamera = new THREE.OrthographicCamera(-MASK_HALF, MASK_HALF, MASK_HALF, -MASK_HALF, 0.1, 20)
+maskCamera.layers.set(SHADOW_LAYER)
+const maskMaterial = new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide })
+const _maskClear = new THREE.Color()
+const _maskM = new THREE.Matrix4()
+const _maskR = new THREE.Matrix4()
+const _maskS = new THREE.Matrix4()
+const _maskT = new THREE.Matrix4()
+
 /* scale height of each planet's air (km), and how dense it is at the
    surface relative to Earth's (Mars's thin air still glows on entry) */
 const AIR: Record<number, { height: number; density: number }> = {
@@ -1238,6 +1253,11 @@ function useShuttle() {
         // tiles, blankets, seams, carbon-carbon (shuttleSurface.ts)
         detailShuttle(skin)
         const body = new THREE.Mesh(merged, skin)
+        // its own shadows (the fin on the pods, the wings on the body),
+        // and the silhouette its shadow on the ground is drawn from
+        body.castShadow = true
+        body.receiveShadow = true
+        body.layers.enable(SHADOW_LAYER)
         // the three main engines: the largest engine groups
         const engines = [...engineBoxes.values()]
           .map((box) => ({ box, size: box.getSize(new THREE.Vector3()) }))
@@ -1558,6 +1578,28 @@ export default function Pilot() {
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
   const scene = useThree((state) => state.scene)
   const size = useThree((state) => state.size)
+  const gl = useThree((state) => state.gl)
+  // the Sun's light on the ship casts shadows (soft-edged), in the ship's
+  // own layer only: a box round the one-unit ship
+  useEffect(() => {
+    gl.shadowMap.enabled = true
+    gl.shadowMap.type = THREE.PCFSoftShadowMap
+    const light = sunLight.current
+    if (!light) return
+    light.castShadow = true
+    light.shadow.mapSize.set(2048, 2048)
+    const cam = light.shadow.camera as THREE.OrthographicCamera
+    cam.left = -MASK_HALF
+    cam.right = MASK_HALF
+    cam.top = MASK_HALF
+    cam.bottom = -MASK_HALF
+    cam.near = 8.5
+    cam.far = 11.5
+    cam.updateProjectionMatrix()
+    light.shadow.bias = -0.0003
+    light.shadow.normalBias = 0.004
+    light.shadow.radius = 3
+  }, [gl])
   const savedCamera = useRef({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() })
   const savedFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null)
   const ship = useRef<THREE.Group>(null)
@@ -2296,6 +2338,34 @@ export default function Pilot() {
       shipShadow.uShipFwd.value.set(0, 0, -1).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
       shipShadow.uShipRight.value.set(1, 0, 0).applyQuaternion(jet.quaternion).applyQuaternion(_inverseCamera)
       shipShadow.uShipLen.value = SHIP_LENGTH
+      // the true outline (once the Shuttle is built)
+      const light = sunLight.current
+      if (light && pilotObjects.shuttleStatus === 'ready') {
+        maskCamera.position.copy(light.position)
+        maskCamera.up.set(0, 1, 0)
+        if (Math.abs(light.position.clone().normalize().y) > 0.98) maskCamera.up.set(1, 0, 0)
+        maskCamera.lookAt(0, 0, 0)
+        maskCamera.updateMatrixWorld()
+        const target = gl.getRenderTarget()
+        gl.getClearColor(_maskClear)
+        const alpha = gl.getClearAlpha()
+        shipScene.overrideMaterial = maskMaterial
+        gl.setRenderTarget(shadowMask)
+        gl.setClearColor(0x000000, 1)
+        gl.clear()
+        gl.render(shipScene, maskCamera)
+        shipScene.overrideMaterial = null
+        gl.setRenderTarget(target)
+        gl.setClearColor(_maskClear, alpha)
+        // view space -> the ship's own (one unit long, world-aligned) -> the picture
+        _maskT.makeTranslation(-shipShadow.uShipView.value.x, -shipShadow.uShipView.value.y, -shipShadow.uShipView.value.z)
+        _maskR.makeRotationFromQuaternion(camera.quaternion)
+        _maskS.makeScale(1 / SHIP_LENGTH, 1 / SHIP_LENGTH, 1 / SHIP_LENGTH)
+        _maskM.multiplyMatrices(maskCamera.projectionMatrix, maskCamera.matrixWorldInverse).multiply(_maskS).multiply(_maskR).multiply(_maskT)
+        shipShadow.uShipMaskMatrix.value.copy(_maskM)
+        shipShadow.uShipMask.value = shadowMask.texture
+        shipShadow.uShipMaskOn.value = 1
+      } else shipShadow.uShipMaskOn.value = 0
     }
 
     // ---- how far from home

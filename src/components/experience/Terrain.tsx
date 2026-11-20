@@ -91,11 +91,27 @@ uniform float uEarth; uniform float uAlbedo; uniform float uCracks;
 uniform sampler2D uNight; uniform float uHasNight;
 uniform sampler2D uImgFine; uniform vec4 uImgFineRect; uniform sampler2D uImgCoarse; uniform vec4 uImgCoarseRect;
 uniform vec3 uShipView; uniform vec3 uShipFwd; uniform vec3 uShipRight; uniform float uShipLen; uniform float uShipShadow;
+uniform sampler2D uShipMask; uniform mat4 uShipMaskMatrix; uniform float uShipMaskOn;
 /* the Shuttle's shadow: is the way to the Sun blocked by its body or wings
    (a few overlapping discs along the hull)? Soft-edged, as the Sun is
    half a degree wide */
 float shipShade(vec3 p, vec3 sun) {
   if (uShipShadow < 0.5) return 0.0;
+  /* the true outline: the ship's silhouette as the Sun sees it, softened
+     by the Sun's own width (half a degree), wider the further below */
+  if (uShipMaskOn > 0.5) {
+    float along = dot(uShipView - p, sun);
+    if (along <= 0.0) return 0.0;
+    vec2 uv = (uShipMaskMatrix * vec4(p, 1.0)).xy * 0.5 + 0.5;
+    if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) return 0.0;
+    float blur = along * 0.0047 / (1.24 * uShipLen);
+    float s = texture2D(uShipMask, uv).r * 0.2;
+    for (int k = 0; k < 8; k++) {
+      float a = float(k) * 0.7854;
+      s += texture2D(uShipMask, uv + vec2(cos(a), sin(a)) * blur).r * 0.1;
+    }
+    return s;
+  }
   float shade = 0.0;
   for (int i = 0; i < 5; i++) {
     vec3 c = uShipView;

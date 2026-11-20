@@ -391,6 +391,11 @@ export const shipShadow = {
   uShipRight: { value: new THREE.Vector3(1, 0, 0) },
   uShipLen: { value: 1 },
   uShipShadow: { value: 0 },
+  /** the Shuttle's silhouette as the Sun sees it, and the matrix from
+      view space to that picture (Pilot renders it; 0 off: the discs) */
+  uShipMask: { value: null as THREE.Texture | null },
+  uShipMaskMatrix: { value: new THREE.Matrix4() },
+  uShipMaskOn: { value: 0 },
 }
 
 /* Earth's cloud deck: its drift over the ground (fraction of a turn) and

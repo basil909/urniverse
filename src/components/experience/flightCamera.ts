@@ -168,7 +168,9 @@ export function placeCamera(frame: CameraFrame) {
       .addScaledVector(levelUp, around * 0.3)
     camera.position.copy(jet.position).add(_camPos)
   } else if (mode === 'flyby') {
-    const span = reach * 16
+    // parked some three seconds of flight ahead: slow or standing still,
+    // close enough to see the ship (it never came, a speck 1 km off)
+    const span = THREE.MathUtils.clamp(velocity.current.length() * 1.4, reach * 1.6, reach * 16)
     const rel = flyby.current
     const passed = rel
       ? _camPos.copy(jet.position).sub(SYSTEM_OFFSET).sub(rel).dot(forward) > span * 1.1 ||
