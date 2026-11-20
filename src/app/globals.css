@@ -4597,3 +4597,56 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .film-start:not(.station-start) { margin-top: 26px; margin-bottom: 14px; }
 .station-start { margin-top: 0; margin-bottom: 14px; }
 .film-start:last-of-type { margin-bottom: 22px; }
+
+/* ---- zoom: in, out and back, at the foot of the screen (either camera mode) ---- */
+.zoom-bar {
+  position: fixed;
+  right: var(--pad);
+  bottom: 22px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--surface-edge);
+  border-radius: 999px;
+  background: rgba(7, 9, 15, 0.55);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), var(--surface-light);
+  transition: opacity 0.4s;
+}
+.zoom-button,
+.zoom-reset {
+  display: grid;
+  place-items: center;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.zoom-button { width: 30px; font-size: 16px; }
+.zoom-reset {
+  min-width: 46px;
+  padding: 0 8px;
+  font: 500 11.5px / 1 var(--sans);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text-1);
+}
+.zoom-button:hover:not(:disabled),
+.zoom-reset:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.zoom-button:disabled { opacity: 0.3; cursor: default; }
+.zoom-button:focus-visible,
+.zoom-reset:focus-visible { outline: 1px solid var(--planet-accent, #8fb4ff); outline-offset: 1px; }
+/* its tips rise above it, and keep inside the screen */
+.zoom-bar [data-tip]::after { top: auto; bottom: calc(100% + 12px); right: 0; translate: 0 4px; }
+.zoom-bar [data-tip]:hover::after,
+.zoom-bar [data-tip]:focus-visible::after { translate: 0 0; }
+/* out of the way of a film, a reveal or the opening */
+.is-filming .zoom-bar,
+.is-revealing .zoom-bar { opacity: 0; pointer-events: none; }

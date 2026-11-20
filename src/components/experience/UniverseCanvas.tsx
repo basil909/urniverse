@@ -1410,8 +1410,9 @@ function CinematicCamera({
       }
     }
 
-    /* interactive: the visitor's orbit and zoom about what the chapter
-       is looking at (eased; back to the chapter's view on leaving it) */
+    /* the visitor's zoom (either mode) and, interactive, their orbit
+       about what the chapter is looking at (eased; back to the
+       chapter's view on leaving it) */
     if (chapter !== orbitChapter.current) {
       orbitChapter.current = chapter
       resetOrbit()
@@ -1421,7 +1422,7 @@ function CinematicCamera({
     const o = orbit.current
     o.yaw += ((interactive ? viewMode.yaw : 0) - o.yaw) * ok
     o.pitch += ((interactive ? viewMode.pitch : 0) - o.pitch) * ok
-    o.zoom += ((interactive ? viewMode.zoom : 1) - o.zoom) * ok
+    o.zoom += ((chapter > 0 ? viewMode.zoom : 1) - o.zoom) * ok
     if (Math.abs(o.yaw) > 1e-4 || Math.abs(o.pitch) > 1e-4 || Math.abs(o.zoom - 1) > 1e-4) {
       _driftOffset.copy(_scratchPos).sub(_scratchTarget)
       _driftOffset.applyAxisAngle(_worldUp, o.yaw)

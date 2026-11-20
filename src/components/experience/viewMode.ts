@@ -4,8 +4,10 @@
    Mercury, Earth, Saturn and the Pale Blue Dot play a short directed
    sequence, close-ups drift slowly, and the backlit shots swing round.
    Interactive: the camera is yours. Drag to orbit what you are looking
-   at; pinch, Ctrl + scroll or the + and - keys to zoom. Scrolling still
-   moves between chapters. The camera reads this; the page writes it.
+   at; pinch to zoom. In either mode the zoom buttons, Ctrl + scroll and
+   the + and - keys bring the camera closer or take it further out (0
+   resets). Scrolling still moves between chapters. The camera reads
+   this; the page writes it.
 ============================================================ */
 
 export type ViewMode = 'cinematic' | 'interactive'
@@ -30,18 +32,55 @@ export const SEQUENCE_EVENT = 'urniverse-sequence'
 
 export const MODE_KEY = 'urniverse-view-mode'
 
-const ZOOM_MIN = 0.35
-const ZOOM_MAX = 3.2
+/** the camera's distance, as a fraction of the chapter's own: in to a third, out to three times */
+export const ZOOM_MIN = 0.35
+export const ZOOM_MAX = 3.2
 const PITCH_MAX = 1.25
+/** one press of a zoom button */
+export const ZOOM_STEP = 1.25
+
+/* the page's zoom buttons follow the zoom, however it changed */
+export const ZOOM_EVENT = 'urniverse-zoom'
+const told = () => {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(ZOOM_EVENT))
+}
 
 export function zoomBy(factor: number) {
   viewMode.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, viewMode.zoom * factor))
+  told()
 }
 
 export function resetOrbit() {
+  const changed = viewMode.yaw !== 0 || viewMode.pitch !== 0 || viewMode.zoom !== 1
   viewMode.yaw = 0
   viewMode.pitch = 0
   viewMode.zoom = 1
+  if (changed) told()
+}
+
+/* zoom by hand, in either mode: Ctrl + scroll (a trackpad's pinch) and
+   the + and - keys (0 resets); returns a cleanup */
+export function attachZoomInput() {
+  const onWheel = (event: WheelEvent) => {
+    if (!event.ctrlKey) return
+    // (first, and no further: the journey's own wheel steps chapters)
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    zoomBy(Math.exp(event.deltaY * 0.004))
+  }
+  const onKey = (event: KeyboardEvent) => {
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    if (event.key === '+' || event.key === '=') zoomBy(1 / 1.15)
+    else if (event.key === '-' || event.key === '_') zoomBy(1.15)
+    else if (event.key === '0') resetOrbit()
+  }
+  window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+  window.addEventListener('keydown', onKey)
+  return () => {
+    window.removeEventListener('wheel', onWheel, { capture: true })
+    window.removeEventListener('keydown', onKey)
+  }
 }
 
 /* the visitor's hands: listens while interactive mode is on; returns a cleanup */
@@ -81,38 +120,25 @@ export function attachOrbitInput() {
     if (event.pointerType !== 'touch') viewMode.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, viewMode.pitch + dy * 0.005))
   }
   const onUp = (event: PointerEvent) => {
+    if (!pointers.has(event.pointerId)) return
     pointers.delete(event.pointerId)
     if (pointers.size < 2) pinch = 0
-    if (pointers.size === 0) document.documentElement.classList.remove('is-orbiting')
-  }
-  // a trackpad's pinch arrives as Ctrl + wheel (Lenis leaves those alone)
-  const onWheel = (event: WheelEvent) => {
-    if (!event.ctrlKey) return
-    // (first, and no further: the journey's own wheel steps chapters)
-    event.preventDefault()
-    event.stopImmediatePropagation()
-    zoomBy(Math.exp(event.deltaY * 0.004))
-  }
-  const onKey = (event: KeyboardEvent) => {
-    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return
-    if (event.key === '+' || event.key === '=') zoomBy(1 / 1.15)
-    else if (event.key === '-' || event.key === '_') zoomBy(1.15)
-    else if (event.key === '0') resetOrbit()
+    if (pointers.size === 0) {
+      document.documentElement.classList.remove('is-orbiting')
+      // (the reset button shows once the view has been turned)
+      told()
+    }
   }
 
   window.addEventListener('pointerdown', onDown)
   window.addEventListener('pointermove', onMove)
   window.addEventListener('pointerup', onUp)
   window.addEventListener('pointercancel', onUp)
-  window.addEventListener('wheel', onWheel, { passive: false, capture: true })
-  window.addEventListener('keydown', onKey)
   return () => {
     window.removeEventListener('pointerdown', onDown)
     window.removeEventListener('pointermove', onMove)
     window.removeEventListener('pointerup', onUp)
     window.removeEventListener('pointercancel', onUp)
-    window.removeEventListener('wheel', onWheel, { capture: true })
-    window.removeEventListener('keydown', onKey)
     document.documentElement.classList.remove('is-orbiting')
   }
 }

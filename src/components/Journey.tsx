@@ -19,6 +19,7 @@ import SoundToggle from './ui/SoundToggle'
 import FlightHud from './ui/FlightHud'
 import ChapterMenu from './ui/ChapterMenu'
 import TimeBar from './ui/TimeBar'
+import ZoomControl from './ui/ZoomControl'
 import CommandPalette, { type Command } from './ui/CommandPalette'
 import LiveCounter from './ui/LiveCounter'
 import { PICK_EVENT } from './experience/PlanetPicker'
@@ -35,7 +36,7 @@ import { PLANETS, getPlanetHeliocentricAU, julianDate } from './experience/orbit
 import { REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal, revealFigures } from './experience/scaleReveal'
 import { SHOTS, SHOT_SECONDS, shot } from './experience/shots'
 import { FILM_SCORE_EVENT, FilmScore } from './ui/filmScore'
-import { MODE_KEY, OPENING_BEATS, OPENING_SECONDS, SEQUENCE_EVENT, attachOrbitInput, opening, sequence, viewMode, type ViewMode } from './experience/viewMode'
+import { MODE_KEY, OPENING_BEATS, OPENING_SECONDS, SEQUENCE_EVENT, attachOrbitInput, attachZoomInput, opening, sequence, viewMode, type ViewMode } from './experience/viewMode'
 import { formatKm } from './ui/WorldLive'
 
 
@@ -1230,6 +1231,11 @@ export default function Journey() {
     if (mode !== 'interactive') return
     return attachOrbitInput()
   }, [mode])
+  // zoom by hand in either mode (not in flight: its keys are its own)
+  useEffect(() => {
+    if (flying) return
+    return attachZoomInput()
+  }, [flying])
   const switchMode = () => {
     const next: ViewMode = mode === 'cinematic' ? 'interactive' : 'cinematic'
     setMode(next)
@@ -2061,6 +2067,7 @@ export default function Journey() {
 
       {/* the scene's time, and its speed (a wide screen) */}
       {!flying && <TimeBar />}
+      {!flying && section > 0 && <ZoomControl />}
 
       {/* BOTTOM HUD */}
       <footer className="hud-bottom" aria-hidden="true">

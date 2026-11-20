@@ -6,7 +6,7 @@
    button says otherwise; coloured by the text.
 ============================================================ */
 
-export type IconName = 'camera' | 'orbit' | 'play' | 'pause' | 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
+export type IconName = 'camera' | 'orbit' | 'play' | 'pause' | 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'minus' | 'search'
 
 const PATHS: Record<IconName, React.ReactNode> = {
   play: <path d="M8.2 5.6v12.8L18.4 12z" />,
@@ -129,6 +129,7 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M5.4 12h13.2" />
     </>
   ),
+  minus: <path d="M5.4 12h13.2" />,
   search: (
     <>
       <circle cx="10.8" cy="10.8" r="5.8" />
