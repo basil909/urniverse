@@ -42,6 +42,7 @@ import { sunVisibility } from './sunVisibility'
 import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
 import { LOW_RES_GLSL, lowRes, lowResUniforms } from './lowRes'
+import { earthMoon } from './earthMoon'
 import { aimCloudPatch, CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
 import {
   cloudEclipse,
@@ -3800,6 +3801,11 @@ function MoonSystem({
         body.getWorldPosition(shadowUniforms.uMoonPos.value[count])
         body.getWorldScale(_moonScale)
         shadowUniforms.uMoonRadius.value[count] = Math.max(_moonScale.x, _moonScale.y, _moonScale.z)
+        // (Earth's Moon, for the labels at Earth: earthMoon.ts)
+        if (focus?.index === 2 && count === 0) {
+          earthMoon.centre.copy(shadowUniforms.uMoonPos.value[0])
+          earthMoon.radius = shadowUniforms.uMoonRadius.value[0]
+        }
         count += 1
       })
       shadowUniforms.uMoonCount.value = count

@@ -12,6 +12,7 @@ import { FIRST_CRAFT_ID, spaceBodyOrbitPosition } from './spaceBodies'
 import { shot } from './shots'
 import { pilot } from './pilotState'
 import { buildStation } from './issModel'
+import { hiddenByMoon } from './earthMoon'
 
 /* ============================================================
    THE SPACE STATION, IN THE JOURNEY
@@ -102,7 +103,8 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
     const R = getPlanetVisualRadius(2)
     const toCam = camera.position.clone().sub(_earth)
     const out = g.position.clone().sub(_earth).normalize()
-    const behind = out.dot(toCam.clone().normalize()) < R / Math.max(toCam.length(), R)
+    // (behind the world, or the Moon passing in front)
+    const behind = out.dot(toCam.clone().normalize()) < R / Math.max(toCam.length(), R) || hiddenByMoon(camera.position, g.position)
     const want = chapter === EARTH_CHAPTER && local > 0.18 && local < 0.93 && !behind && shot.index === 0 && !pilot.active ? 1 : 0
     shown.current += (want - shown.current) * (1 - Math.exp(-delta * 4))
     g.visible = shown.current > 0.01

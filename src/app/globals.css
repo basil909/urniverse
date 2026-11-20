@@ -3580,6 +3580,9 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   box-shadow: 0 0 0 1.5px rgba(5, 7, 13, 0.9), 0 0 10px color-mix(in srgb, var(--planet-accent) 70%, transparent);
 }
 .hotspot.is-mission .hotspot-dot::after { border-radius: 3px; transform: rotate(45deg); }
+@media (pointer: coarse) {
+  .hotspot.is-mission .hotspot-dot::before { inset: 19px; }
+}
 .hotspot-kind {
   display: block;
   margin-bottom: 4px;
@@ -4186,17 +4189,20 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .hud-top,
 .rail,
 .time-bar,
+.zoom-bar,
 .hud-bottom {
   transition: opacity 0.9s var(--ease);
 }
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) .rail,
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) .time-bar,
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .zoom-bar,
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) .hud-bottom { opacity: 0; }
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) .hud-top { opacity: 0.18; }
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) .hud-top:focus-within { opacity: 1; }
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) { cursor: none; }
 .is-idle .universe-page:not(.is-flying):not(.detail-is-open) .rail,
-.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .time-bar { pointer-events: none; }
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .time-bar,
+.is-idle .universe-page:not(.is-flying):not(.detail-is-open) .zoom-bar { pointer-events: none; }
 
 /* the chapter line, spaced like a title card */
 .chapter {
@@ -4650,3 +4656,26 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 /* out of the way of a film, a reveal or the opening */
 .is-filming .zoom-bar,
 .is-revealing .zoom-bar { opacity: 0; pointer-events: none; }
+
+/* ---- polish: the chapter's ways in sit clear of the figures above them ---- */
+.inline-stats + .true-size,
+.inline-stats + .film-start { margin-top: 26px; }
+.inline-stats + .true-size + .film-start { margin-top: 0; }
+
+/* ---- polish: a phone's top bar. The five tools a little closer (and,
+   on the narrowest touch screens, a little smaller), and the chapter's
+   name stopping short of them: a long one ends in an ellipsis. (Last in
+   the sheet: it overrides the touch screen's sizes above.) ---- */
+@media (max-width: 640px) {
+  .hud-tools { gap: 4px; }
+  .chapter-menu-button {
+    max-width: calc(100vw - 2 * var(--pad) - 20px - 5 * var(--control-height) - 16px - 8px);
+    padding: 0 10px 0 13px;
+    gap: 7px;
+  }
+  .chapter-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chapter-menu-chevron, .chapter-menu-number { flex: none; }
+}
+@media (max-width: 420px) and (pointer: coarse) {
+  :root { --control-height: 40px; }
+}
