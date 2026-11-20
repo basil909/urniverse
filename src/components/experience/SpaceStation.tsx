@@ -150,7 +150,9 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
         m.rotateY(Math.sin(shot.clock * 0.12) * 0.12)
         m.scale.setScalar(109)
         const persp = camera as THREE.PerspectiveCamera
-        const back = 232
+        // (easing in, slowly, over the shot)
+        const ease = Math.min(1, shot.clock / 24)
+        const back = 214 - 44 * ease * ease * (3 - 2 * ease)
         shipCamera.position.copy(STATION_AT).addScaledVector(forward, -back).addScaledVector(upV, back * 0.04)
         shipCamera.quaternion.copy(camera.quaternion)
         shipCamera.fov = persp.fov
@@ -213,7 +215,7 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
             shadow-bias={-0.0004}
             shadow-normalBias={0.05}
           />
-          <hemisphereLight ref={earthLight} color="#0b0f18" groundColor="#7ea6d8" intensity={0.9} />
+          <hemisphereLight ref={earthLight} color="#0b0f18" groundColor="#7ea6d8" intensity={0.45} />
         </>,
         shipScene,
       )}
