@@ -4548,3 +4548,18 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   background: radial-gradient(circle, transparent 52%, rgba(160, 200, 255, 0.09) 62%, rgba(255, 210, 160, 0.06) 72%, transparent 80%);
 }
 @media (prefers-reduced-motion: reduce) { .opening-dark { transition: none; } }
+
+/* flight: the Shuttle's model still on its way */
+.flight-preparing {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 9px 16px;
+  border: 1px solid var(--surface-edge);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--text-2);
+  font-size: 13px;
+  pointer-events: none;
+}

@@ -9,6 +9,7 @@ import { ENTRY } from '../experience/flightLanding'
 import Icon from './Icon'
 import LandedCard from './LandedCard'
 import { SURFACES } from './landingSite'
+import { pilotObjects } from '../experience/Pilot'
 
 /* the first flight's guide: three steps, shown once (remembered) */
 const GUIDE_KEY = 'urniverse-flight-guide'
@@ -298,6 +299,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const guideLine = useRef<SVGLineElement>(null)
   const markerRefs = useRef<(HTMLButtonElement | null)[]>([])
   const [warping, setWarping] = useState('')
+  const [preparing, setPreparing] = useState(false)
   const [landState, setLandState] = useState('flying')
   const [canLand, setCanLand] = useState(false)
   const [site, setSite] = useState('')
@@ -391,6 +393,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setAltitude(pilot.altitudeKm)
       setKms(pilot.kms)
       setWarping(pilot.warping)
+      setPreparing(pilotObjects.shuttleStatus === 'loading')
       // arriving: what it is (and a soft chime, sound on)
       if (lastWarp && !pilot.warping) {
         window.dispatchEvent(new Event('urniverse-discovery'))
@@ -785,6 +788,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     }
     // the scroll wheel pulls the camera back (or in), smoothly
     const onWheel = (event: WheelEvent) => {
+      // over a panel (controls, Go to, the landed card) the wheel scrolls it
+      if (event.target instanceof Element && event.target.closest('.flight-controls, .flight-goto, .landed-card, [role="dialog"]')) return
       event.preventDefault()
       setView(pilot.viewTarget * Math.exp(event.deltaY * 0.004))
     }
@@ -1107,6 +1112,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         </button>
         )}
       </div>
+      {preparing && (
+        <div className="flight-preparing" role="status">
+          Preparing the Shuttle&hellip;
+        </div>
+      )}
+
       {controls && (
         <div className="flight-controls" role="dialog" aria-label="Controls">
           {CONTROLS.map(([title, rows]) => (

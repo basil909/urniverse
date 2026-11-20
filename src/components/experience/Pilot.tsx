@@ -452,6 +452,8 @@ export const pilotObjects = {
   /** the built Shuttle (length 1, nose to -z), once loaded: the journey's
       exploration shot borrows its shape */
   shuttleBody: null as THREE.Mesh | null,
+  /** the Shuttle's model: still loading, ready, or failed (then the jet stands in) */
+  shuttleStatus: 'loading' as 'loading' | 'ready' | 'failed',
   visual: null as THREE.Group | null,
   camera: null as THREE.PerspectiveCamera | null,
   shipLength: 0,
@@ -1126,6 +1128,7 @@ function whenShuttleWanted(start: () => void) {
 
 function useShuttle() {
   const [model, setModel] = useState<ShuttleModel | null>(null)
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     let cancelled = false
     let built: ShuttleModel | null = null
@@ -1306,12 +1309,15 @@ function useShuttle() {
         stackParts.forEach((piece) => piece.dispose())
         built = { body, engines, tank, boosters }
         pilotObjects.shuttleBody = body
+        pilotObjects.shuttleStatus = 'ready'
         setModel(built)
       },
       undefined,
       (error) => {
-        // keep the built-in jet
+        // only then the built-in jet stands in
         console.warn('Shuttle model could not be loaded:', error)
+        pilotObjects.shuttleStatus = 'failed'
+        setFailed(true)
       },
     ))
     return () => {
@@ -1321,7 +1327,7 @@ function useShuttle() {
       ;(built?.body.material as THREE.Material | undefined)?.dispose()
     }
   }, [])
-  return model
+  return { model, failed }
 }
 
 /* A part's positions and normals, moved into place (as applyMatrix4 would),
@@ -1547,7 +1553,7 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
 }
 
 export default function Pilot() {
-  const shuttle = useShuttle()
+  const { model: shuttle, failed: shuttleFailed } = useShuttle()
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
   const scene = useThree((state) => state.scene)
   const size = useThree((state) => state.size)
@@ -2419,7 +2425,10 @@ export default function Pilot() {
       {createPortal(
         <>
           <group ref={visual}>
-            <group>{shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : <Jet thrust={thrust} />}</group>
+            <group>
+              {/* nothing until the Shuttle is ready: the stand-in jet only if it cannot load */}
+              {shuttle ? <Shuttle model={shuttle} thrust={thrust} /> : shuttleFailed ? <Jet thrust={thrust} /> : null}
+            </group>
             <Plasma heat={heat} />
           </group>
           <AirStreaks state={streaks.current} />
