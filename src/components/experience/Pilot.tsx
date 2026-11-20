@@ -195,7 +195,7 @@ async function mergeByMaterial(root: THREE.Object3D) {
 }
 
 const craftModels = new Map<string, Promise<THREE.Object3D>>()
-function loadModel(url: string) {
+export function loadModel(url: string) {
   let pending = craftModels.get(url)
   if (!pending) {
     pending = new Promise((resolve, reject) => {

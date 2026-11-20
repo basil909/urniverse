@@ -1375,14 +1375,14 @@ export default function Journey() {
       window.setTimeout(() => setCutting(false), 460),
     ]
   }, [])
-  const startFilm = () => {
+  const startFilm = (first = 1) => {
     shot.chapter = section
     lenisRef.current?.stop()
     // (in the click itself: browsers allow sound only after one)
-    if (music) startScore(1)
-    setPlaying(true)
+    if (music) startScore(first)
+    setPlaying(first === 1)
     setFilm(-1) // on, before the first shot's words
-    cutTo(1)
+    cutTo(first)
   }
   const endFilm = useCallback(() => {
     if (shot.index === 0) return
@@ -1571,7 +1571,9 @@ export default function Journey() {
       case 3:
         return `The Sun behind ${name}: its light through the edge of the ${filmIndex === 0 ? 'world' : 'air'}.`
       case 4:
-        return `The Shuttle, 37 m long, about 100 m from the lens. ${name}'s centre is ${kmWords(shot.distanceKm)} away.`
+        return activeChapter?.id === 'earth'
+          ? 'The International Space Station: 109 m across, 418 km up, once round the Earth every 92 minutes.'
+          : `The Shuttle, 37 m long, about 100 m from the lens. ${name}'s centre is ${kmWords(shot.distanceKm)} away.`
       case 5:
         return `${name}'s horizon, from ${kmWords(shot.altitudeKm)} up.`
       case 6:
@@ -2270,7 +2272,7 @@ export default function Journey() {
                   <motion.button
                     type="button"
                     className="true-size film-start"
-                    onClick={startFilm}
+                    onClick={() => startFilm()}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.8, delay: 0.66, ease: EASE_OUT_EXPO }}
@@ -2278,6 +2280,20 @@ export default function Journey() {
                     <Icon name="play" />
                     Watch it as a film
                     <span className="true-size-hint">six shots</span>
+                  </motion.button>
+                )}
+                {activeChapter.id === 'earth' && (
+                  <motion.button
+                    type="button"
+                    className="true-size film-start station-start"
+                    onClick={() => startFilm(4)}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.7, ease: EASE_OUT_EXPO }}
+                  >
+                    <Icon name="orbit" />
+                    See the Space Station
+                    <span className="true-size-hint">418 km up</span>
                   </motion.button>
                 )}
 

@@ -31,6 +31,7 @@ import NightSky from './NightSky'
 import { lens } from './lens'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
+import SpaceStation, { stationShotPose } from './SpaceStation'
 import Pilot, { GroundCarry, pilotObjects } from './Pilot'
 import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
@@ -524,6 +525,11 @@ function shotPose(
       break
     }
     case 4: {
+      // at Earth: beside the Space Station, 418 km up (SpaceStation.tsx)
+      if (index === 2 && shot.chapter === 4) {
+        stationShotPose(time, SYSTEM_OFFSET, outPos, outTarget, shotUp)
+        break
+      }
       // a wider three-quarter view: the ship is in the foreground (ExplorerShip)
       _sN.copy(_sS).multiplyScalar(0.34).addScaledVector(_sSide, 0.92).addScaledVector(_worldUp, 0.2).normalize()
       _sN.applyAxisAngle(_worldUp, -turn * 0.6)
@@ -1482,7 +1488,7 @@ function CinematicCamera({
       if (planet || (chapter === 10 && shot.index < 6)) {
         const radius = shotPose(shot.index, planet ? chapter - 2 : 2, safeProgress, shot.clock, _scratchPos, _scratchTarget)
         // low over the surface the near plane follows the small worlds
-        shotNear = shot.index === 4 ? 0.004 : Math.min(0.08, radius * 0.01)
+        shotNear = shot.index === 4 ? (chapter === 4 ? 0.0005 : 0.004) : Math.min(0.08, radius * 0.01)
       } else if (chapter === 10) {
         paleBlueDotPose(_scratchPos, _scratchTarget)
         shotUp.set(0, 1, 0)
@@ -2691,7 +2697,7 @@ function ExplorerShip() {
   useFrame(() => {
     const g = holder.current
     if (!g) return
-    const on = shot.index === 4 && !pilot.active
+    const on = shot.index === 4 && !pilot.active && shot.chapter !== 4
     if (on && !mesh && pilotObjects.shuttleBody) {
       const body = pilotObjects.shuttleBody
       setMesh(new THREE.Mesh(body.geometry, body.material))
@@ -2758,6 +2764,7 @@ function Scene({
       <Lens progressRef={progressRef} glare={glare} flare={flare} />
       <RevealEarth />
       <ExplorerShip />
+      <SpaceStation progressRef={progressRef} />
       <RingIce />
       <TextShield />
 
