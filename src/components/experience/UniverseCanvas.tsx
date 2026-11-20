@@ -47,7 +47,9 @@ import {
 } from './orbit'
 import { EARTH_KM, REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal } from './scaleReveal'
 import { shot } from './shots'
-import { SEQUENCE_EVENT, resetOrbit, sequence, viewMode } from './viewMode'
+import { OPENING_SECONDS, SEQUENCE_EVENT, opening, resetOrbit, sequence, viewMode } from './viewMode'
+import { latLonToSphere } from './SolarSystem'
+import { pickBodies } from './PlanetPicker'
 import { ringState } from './groundState'
 
 /* ============================================================
@@ -387,6 +389,9 @@ const _rArrival = new THREE.Vector3()
 const _rTarget = new THREE.Vector3()
 
 const _orbitAxis = new THREE.Vector3()
+const _openingScratch = new THREE.Vector3()
+const _openingScratch2 = new THREE.Vector3()
+const _openingScratch3 = new THREE.Vector3()
 const _guardCentre = new THREE.Vector3()
 const _guardOffset = new THREE.Vector3()
 const _orbitCentre = new THREE.Vector3()
@@ -768,7 +773,126 @@ function chapterShotPose(which: number, chapter: number, time: number, outPos: T
    the world. The chapter's words wait until it lands.
 ============================================================ */
 
-const SEQUENCE_SECONDS: Record<number, number> = { 1: 8, 2: 7, 4: 10, 7: 11, 10: 10 }
+const SEQUENCE_SECONDS: Record<number, number> = { 1: 8, 2: 7, 4: 10, 6: 12, 7: 14, 10: 10 }
+
+/* the Great Red Spot's place on Jupiter now (world), and whether it is on
+   the sunlit side; else the same latitude where the Sun is high */
+const _grs = new THREE.Vector3()
+const _grsPole = new THREE.Vector3()
+function redSpot(centre: THREE.Vector3, out: THREE.Vector3) {
+  const body = pickBodies[4]
+  if (!body) return out.set(0, -0.36, 0.93).normalize()
+  body.updateWorldMatrix(true, false)
+  _grs.copy(latLonToSphere(-21.1, -46.4, 1))
+  body.localToWorld(_grs)
+  out.copy(_grs).sub(centre).normalize()
+  _grsPole.set(0, 1, 0).applyQuaternion(body.getWorldQuaternion(new THREE.Quaternion()))
+  const toSun = _kA.copy(SYSTEM_OFFSET).sub(centre).normalize()
+  if (out.dot(toSun) < 0.2) {
+    // (the storm is round the back: the same latitude, under the Sun)
+    toSun.addScaledVector(_grsPole, -toSun.dot(_grsPole)).normalize()
+    out.copy(toSun).multiplyScalar(Math.cos((21.1 * Math.PI) / 180)).addScaledVector(_grsPole, -Math.sin((21.1 * Math.PI) / 180)).normalize()
+  }
+  return out
+}
+
+/* a hand-held tremor for the fast passes, as a camera ship would feel
+   them: tiny, and only while the pass is on */
+function shakeFor(chapter: number, t: number, openingClock: number) {
+  if (opening.active && chapter === 0) return THREE.MathUtils.smoothstep(openingClock, 25, 27) * (1 - THREE.MathUtils.smoothstep(openingClock, 36, 38.5))
+  const window = (a: number, b: number) => THREE.MathUtils.smoothstep(t, a, a + 0.06) * (1 - THREE.MathUtils.smoothstep(t, b - 0.06, b))
+  if (chapter === 2) return window(0.2, 0.55)
+  if (chapter === 6) return window(0.3, 0.62)
+  if (chapter === 7) return window(0.28, 0.58)
+  return 0
+}
+const _shake = new THREE.Vector3()
+
+/* ---- THE OPENING (viewMode.ts): one path through the Solar System ---- */
+const _oPoints = Array.from({ length: 11 }, () => new THREE.Vector3())
+const _oTargets = Array.from({ length: 11 }, () => new THREE.Vector3())
+const _oTimes = [0, 5, 11, 17, 22, 25, 29, 33, 37, 45, OPENING_SECONDS]
+const _oP = new THREE.Vector3()
+const _oUp = new THREE.Vector3()
+const _oFly = new THREE.Vector3()
+
+function flybyPoint(index: number, out: THREE.Vector3, distance: number) {
+  getPlanetPosition(index, simClock.jd, _oP)
+  const R = getPlanetVisualRadius(index)
+  _kS.copy(SYSTEM_OFFSET).sub(_oP).normalize()
+  _kSide.crossVectors(_worldUp, _kS).normalize()
+  return out.copy(_oP).addScaledVector(dir(_oFly, _kSide, 0.75, _kS, 0.55, _worldUp, 0.3), R * distance)
+}
+
+/** the opening's pose at a time; writes the camera's up; returns near and lens */
+function openingPose(time: number, outPos: THREE.Vector3, outTarget: THREE.Vector3, outUp: THREE.Vector3) {
+  const S = SYSTEM_OFFSET
+  // the dark: out beyond the planets, facing away from the Sun
+  _oPoints[0].copy(S).add(_oP.set(-14, 9, 40))
+  _oTargets[0].copy(_oPoints[0]).add(_oP.set(-12, 6, 40))
+  _oPoints[1].copy(S).add(_oP.set(-12, 8, 36))
+  _oTargets[1].copy(_oPoints[1]).add(_oP.set(-20, 2, 34))
+  // first light: round to the Sun
+  _oPoints[2].copy(S).add(_oP.set(-4.5, 2.2, 12))
+  _oTargets[2].copy(S)
+  // home: in on Earth's day side, down to the horizon, along it
+  getPlanetPosition(2, simClock.jd, _kC)
+  const rE = getPlanetVisualRadius(2)
+  _kB.copy(S).sub(_kC).normalize()
+  _kSide.crossVectors(_worldUp, _kB).normalize()
+  _oPoints[3].copy(_kC).addScaledVector(dir(_oFly, _kB, 0.8, _kSide, 0.55, _worldUp, 0.2), rE * 7)
+  _oTargets[3].copy(_kC)
+  shotPose(5, 2, 0, 0, _oPoints[4], _oTargets[4])
+  _oUp.copy(shotUp)
+  _kW.copy(_oTargets[4]).sub(_oPoints[4]).normalize()
+  _oPoints[5].copy(_oPoints[4]).addScaledVector(_kW, rE * 0.12)
+  _oTargets[5].copy(_oTargets[4]).addScaledVector(_kW, rE * 0.12)
+  // beyond: past Mars, Jupiter and Saturn
+  flybyPoint(3, _oPoints[6], 5)
+  getPlanetPosition(3, simClock.jd, _oTargets[6])
+  flybyPoint(4, _oPoints[7], 3.4)
+  getPlanetPosition(4, simClock.jd, _oTargets[7])
+  flybyPoint(5, _oPoints[8], 3.6)
+  getPlanetPosition(5, simClock.jd, _oTargets[8])
+  // the scale of space: far above it all, then down to the opening view
+  getPlanetPosition(7, simClock.jd, _oP)
+  const reach = _oP.distanceTo(S)
+  _oPoints[9].copy(S).addScaledVector(dir(_oFly, _worldUp, 0.85, INTRO.position, 0.02, _kSide, 0.25), reach * 1.6)
+  _oTargets[9].copy(S)
+  _oPoints[10].copy(INTRO.position)
+  _oTargets[10].copy(INTRO.target)
+
+  // where on the path: segments timed by the beats
+  const n = _oTimes.length
+  const clamped = THREE.MathUtils.clamp(time, 0, OPENING_SECONDS)
+  let i = 0
+  while (i < n - 2 && clamped > _oTimes[i + 1]) i += 1
+  let local = (clamped - _oTimes[i]) / (_oTimes[i + 1] - _oTimes[i])
+  // (gentle at the very start and end)
+  if (i === 0) local = local * local * (3 - 2 * local) * 0.5 + local * 0.5
+  if (i === n - 2) local = smoother(local)
+  const u = (i + local) / (n - 1)
+  catmull(_oPoints, n, u, outPos)
+  // the eye turns early to what comes next (never at empty space between)
+  outTarget.lerpVectors(_oTargets[i], _oTargets[i + 1], THREE.MathUtils.smoothstep(local, 0.05, 0.5))
+
+  // never through a world, nor the Sun
+  for (let k = 0; k < 8; k += 1) {
+    getPlanetPosition(k, simClock.jd, _oP)
+    const R = getPlanetVisualRadius(k) * (k === 2 ? 1.03 : k === 5 ? 2.5 : 1.3)
+    _kA.copy(outPos).sub(_oP)
+    if (_kA.length() < R) outPos.copy(_oP).addScaledVector(_kA.normalize(), R)
+  }
+  // (only out of the Sun: in the journey's layout Earth sits close to it)
+  _kA.copy(outPos).sub(S)
+  if (_kA.length() < 1.3) outPos.copy(S).addScaledVector(_kA.normalize(), 1.3)
+
+  const low = THREE.MathUtils.smoothstep(clamped, 19.5, 21.5) * (1 - THREE.MathUtils.smoothstep(clamped, 25, 27.5))
+  outUp.set(0, 1, 0).lerp(_oUp, low).normalize()
+  const near = clamped > 16 && clamped < 29 ? Math.min(0.08, rE * 0.01) : 0.08
+  const fov = THREE.MathUtils.lerp(41, 54, THREE.MathUtils.smoothstep(clamped, 37, 44) * (1 - THREE.MathUtils.smoothstep(clamped, 46, OPENING_SECONDS)))
+  return { near, fov }
+}
 
 const _kPoints = [0, 1, 2, 3, 4].map(() => new THREE.Vector3())
 const _kTargets = [0, 1, 2, 3, 4].map(() => new THREE.Vector3())
@@ -883,6 +1007,24 @@ function sequencePose(
       _kTargets[3].copy(restTarget)
       count = 4
       floor = 1.08
+    } else if (chapter === 6) {
+      // Jupiter: a plunge towards the clouds and the Great Red Spot,
+      // spreading across the frame, and away before the air takes it
+      redSpot(_kC, _kN)
+      _kU.copy(_kN).cross(_worldUp).normalize()
+      dir(_kA, restPos, 1, _kC, -1, _worldUp, 0)
+      _kPoints[0].copy(_kC).addScaledVector(dir(_kB, _kA, 1, _kN, 0.6, _worldUp, 0), R * 6)
+      _kTargets[0].copy(_kC)
+      _kPoints[1].copy(_kC).addScaledVector(_kN, R * 2.3)
+      _kTargets[1].copy(_kC).addScaledVector(_kN, R)
+      _kPoints[2].copy(_kC).addScaledVector(_kN, R * 1.22).addScaledVector(_kU, R * 0.08)
+      _kTargets[2].copy(_kC).addScaledVector(_kN, R * 0.98).addScaledVector(_kU, -R * 0.22)
+      _kPoints[3].copy(_kC).addScaledVector(dir(_kB, _kN, 1, _kA, 1, _worldUp, 0.1), R * 2.8)
+      _kTargets[3].copy(_kC)
+      _kPoints[4].copy(restPos)
+      _kTargets[4].copy(restTarget)
+      count = 5
+      floor = 1.12
     } else if (chapter === 4) {
       // Earth: in from space, down to the cloud tops along the horizon,
       // a beat there, and back out
@@ -910,8 +1052,8 @@ function sequencePose(
       _kW.crossVectors(n, _kU).normalize()
       const at = (angle: number, radius: number, height: number, out: THREE.Vector3) =>
         out.copy(_kC).addScaledVector(_kU, Math.cos(angle) * R * radius).addScaledVector(_kW, Math.sin(angle) * R * radius).addScaledVector(n, above * R * height)
-      at(0, 4.4, 1.5, _kPoints[0])
-      _kTargets[0].copy(_kC)
+      at(0, 5.2, 2.6, _kPoints[0])
+      _kTargets[0].copy(_kC).addScaledVector(n, above * R * 0.9)
       at(0.25, 1.99, 0.24, _kPoints[1])
       at(0.62, 1.99, -0.5, _kTargets[1])
       at(0.38, 1.99, -0.24, _kPoints[2])
@@ -992,6 +1134,7 @@ function CinematicCamera({
   const seqRestPos = useRef(new THREE.Vector3())
   const seqRestTarget = useRef(new THREE.Vector3())
   // interactive: the orbit as eased
+  const openingUp = useRef(new THREE.Vector3(0, 1, 0))
   const orbitChapter = useRef(-1)
   const orbit = useRef({ yaw: 0, pitch: 0, zoom: 1 })
   // the true-size reveal: how much of it the camera follows (1 in it,
@@ -1088,7 +1231,10 @@ function CinematicCamera({
         ? THREE.MathUtils.lerp(fovFor(chapter - 1), sequenceFov(chapter, 0), ease(local / BLEND))
         : sequenceFov(chapter, Math.min(seqClock.current / SEQUENCE_SECONDS[chapter], 1))
       : null
-    const baseFov = filmFov !== null
+    const openingFov = opening.active && chapter === 0 ? openingPose(opening.clock, _openingScratch, _openingScratch2, _openingScratch3).fov : null
+    const baseFov = openingFov !== null
+      ? openingFov
+      : filmFov !== null
       ? filmFov
       : seqFov !== null
       ? seqFov
@@ -1179,8 +1325,31 @@ function CinematicCamera({
       if (t >= 1) endSequence()
     }
 
+    // the opening (from the intro): the camera follows its path
+    const openingOn = opening.active && chapter === 0 && !pilot.active
+    let openingNear = 0.08
+    if (openingOn) {
+      entranceDone.current = true
+      opening.clock = opening.skip ? OPENING_SECONDS : Math.min(opening.clock + delta, OPENING_SECONDS)
+      openingNear = openingPose(opening.clock, _scratchPos, _scratchTarget, openingUp.current).near
+      // (skipped: a cut, behind the black)
+      if (opening.skip) smoothPosition.current.copy(_scratchPos)
+    }
+    // the fast passes: a tremor, as a camera ship would feel them
+    const shake = reducedMotion ? 0 : shakeFor(chapter, seqActive ? seqClock.current / SEQUENCE_SECONDS[chapter] : 0, opening.clock) * (seqActive || openingOn ? 1 : 0)
+    if (shake > 0) {
+      const now = performance.now() / 1000
+      const size = _scratchPos.distanceTo(_scratchTarget) * 0.0035 * shake
+      _shake.set(
+        Math.sin(now * 13.1) + Math.sin(now * 29.3 + 1.1) * 0.5,
+        Math.sin(now * 11.7 + 2.3) + Math.sin(now * 31.9) * 0.5,
+        Math.sin(now * 9.4 + 0.7) * 0.6,
+      )
+      _scratchPos.addScaledVector(_shake, size)
+    }
+
     const restful = (planet && !HERO_BACKLIT.has(chapter - 2)) || chapter <= 1
-    if (restful && (local >= BLEND || chapter === 0) && !reducedMotion && viewMode.mode === 'cinematic' && !directing) {
+    if (restful && (local >= BLEND || chapter === 0) && !reducedMotion && viewMode.mode === 'cinematic' && !directing && !openingOn) {
       const settle = ease((heroTime.current - 0.8) / 3)
       const leave = 1 - THREE.MathUtils.smoothstep(local, 0.86, 0.99)
       // the wide views barely turn (the words and the scene are composed)
@@ -1307,7 +1476,7 @@ function CinematicCamera({
     /* the six shots: the camera takes the shot's own setup; at a cut it
        jumps there (the page has faded to black) */
     const shotHere = shot.index > 0 && shot.chapter === chapter && filmable(chapter) && local >= BLEND
-    let shotNear = seqActive ? seqNear : 0.08
+    let shotNear = seqActive ? seqNear : openingOn ? openingNear : 0.08
     if (shotHere) {
       shot.clock += reducedMotion ? 0 : delta
       if (planet || (chapter === 10 && shot.index < 6)) {
@@ -1444,7 +1613,7 @@ function CinematicCamera({
     }
 
     // a shot low over a world stands the camera on its local vertical
-    camera.up.copy(shotHere ? shotUp : seqActive ? seqUp.current : _worldUp)
+    camera.up.copy(shotHere ? shotUp : seqActive ? seqUp.current : openingOn ? openingUp.current : _worldUp)
     camera.lookAt(_scratchTarget)
 
     // bank: roll gently into sideways motion, level out when it stops
@@ -2200,13 +2369,19 @@ const _sunNdc = new THREE.Vector3()
 const _forward = new THREE.Vector3()
 const _sunDir = new THREE.Vector3()
 
+const _flareRay = new THREE.Vector3()
+const _flarePlanet = new THREE.Vector3()
+
 function Lens({
   progressRef,
   glare,
+  flare,
 }: {
   progressRef: MutableRefObject<number>
   glare: RefObject<HTMLDivElement | null>
+  flare?: RefObject<HTMLDivElement | null>
 }) {
+  const flareLevel = useRef(0)
   const camera = useThree((state) => state.camera)
   const level = useRef(0)
 
@@ -2245,6 +2420,34 @@ function Lens({
     const x = THREE.MathUtils.clamp(_sunNdc.x, -2.5, 2.5)
     const y = THREE.MathUtils.clamp(_sunNdc.y, -2.5, 2.5)
     element.style.opacity = (level.current * 0.55).toFixed(3)
+
+    /* a lens flare (a streak across the frame, a ghost opposite), only
+       with the Sun's disc in the frame, not behind the world in view */
+    const flareElement = flare?.current
+    if (flareElement) {
+      let flareTarget = 0
+      const inFrame = Math.abs(_sunNdc.x) < 0.95 && Math.abs(_sunNdc.y) < 0.95
+      if (facing > 0 && inFrame && progress < 10.95 && !pilot.active) {
+        flareTarget = THREE.MathUtils.clamp(14 / distance, 0.35, 1)
+        // hidden by the world in view?
+        const subject = chapter >= 2 && chapter <= 9 ? chapter - 2 : chapter === 10 ? 2 : -1
+        if (subject >= 0) {
+          getPlanetPosition(subject, simClock.jd, _flarePlanet).sub(camera.position)
+          _flareRay.copy(SYSTEM_OFFSET).sub(camera.position)
+          const toSun = _flareRay.length()
+          _flareRay.divideScalar(toSun)
+          const along = _flarePlanet.dot(_flareRay)
+          const miss = Math.sqrt(Math.max(_flarePlanet.lengthSq() - along * along, 0))
+          const radius = getPlanetVisualRadius(subject)
+          if (along > 0 && along < toSun) flareTarget *= THREE.MathUtils.smoothstep(miss, radius * 0.95, radius * 1.1)
+        }
+        if (viewMode.mode !== 'cinematic') flareTarget *= 0.5
+      }
+      flareLevel.current += (flareTarget - flareLevel.current) * (1 - Math.exp(-delta * 4))
+      flareElement.style.opacity = flareLevel.current.toFixed(3)
+      flareElement.style.setProperty('--fx', `${((_sunNdc.x * 0.5 + 0.5) * 100).toFixed(2)}%`)
+      flareElement.style.setProperty('--fy', `${((0.5 - _sunNdc.y * 0.5) * 100).toFixed(2)}%`)
+    }
     element.style.setProperty('--gx', `${((x * 0.5 + 0.5) * 100).toFixed(2)}%`)
     element.style.setProperty('--gy', `${((0.5 - y * 0.5) * 100).toFixed(2)}%`)
   })
@@ -2351,6 +2554,121 @@ function RevealEarth() {
   )
 }
 
+/* Ice in Saturn's rings: crossing the ring plane, the camera passes
+   through a drift of ring particles, near ones large and soft, rushing
+   by. A box of points that travels with the camera, wrapped in world
+   space (each particle stays put as the camera moves), pressed flat to
+   the ring plane, and only where the rings are (thinner in the Cassini
+   Division). Drawn only when the camera is near the plane among them. */
+const RING_ICE_COUNT = 3200
+const RING_ICE_VERTEX = /* glsl */ `
+uniform vec3 uCamera; uniform float uBox; uniform vec3 uCenter; uniform vec3 uNormal; uniform float uRadius; uniform float uScale;
+attribute float aSize;
+varying float vAlpha;
+void main() {
+  vec3 rel = mod(position - uCamera + uBox * 0.5, uBox) - uBox * 0.5;
+  vec3 world = uCamera + rel;
+  // pressed flat to the ring plane (a function of the place alone, so steady)
+  float h = dot(world - uCenter, uNormal);
+  world -= uNormal * h * 0.985;
+  vec3 inPlane = world - uCenter - uNormal * dot(world - uCenter, uNormal);
+  float r = length(inPlane) / uRadius;
+  float inRings = smoothstep(1.24, 1.3, r) * (1.0 - smoothstep(2.28, 2.35, r));
+  float division = 1.0 - 0.7 * smoothstep(1.93, 1.96, r) * (1.0 - smoothstep(2.01, 2.04, r));
+  vec4 mv = viewMatrix * vec4(world, 1.0);
+  float d = max(-mv.z, 1e-5);
+  gl_PointSize = clamp(aSize * uScale / d, 1.5, 64.0);
+  // not right on the lens, and gone towards the box's edge
+  float near = smoothstep(uBox * 0.004, uBox * 0.03, d);
+  float far = 1.0 - smoothstep(uBox * 0.3, uBox * 0.5, length(rel));
+  vAlpha = inRings * division * near * far;
+  gl_Position = projectionMatrix * mv;
+}`
+const RING_ICE_FRAGMENT = /* glsl */ `
+uniform float uOn;
+varying float vAlpha;
+void main() {
+  float d = length(gl_PointCoord - 0.5) * 2.0;
+  // sunlit ice: a bright core that glints, a soft edge
+  float core = exp(-d * d * 9.0);
+  float a = (core * 1.4 + (1.0 - smoothstep(0.3, 1.0, d)) * 0.35) * vAlpha * uOn;
+  if (a < 0.003) discard;
+  gl_FragColor = vec4(vec3(1.0, 0.97, 0.9) * a * 1.6, 1.0);
+}`
+const _iceCam = new THREE.Vector3()
+
+function RingIce() {
+  const camera = useThree((state) => state.camera)
+  const size = useThree((state) => state.size)
+  const points = useRef<THREE.Points>(null)
+  const parts = useMemo(() => {
+    const positions = new Float32Array(RING_ICE_COUNT * 3)
+    const sizes = new Float32Array(RING_ICE_COUNT)
+    let seed = 2024
+    const random = () => {
+      seed = (seed * 16807) % 2147483647
+      return seed / 2147483647
+    }
+    for (let i = 0; i < RING_ICE_COUNT; i += 1) {
+      positions[i * 3] = random() * 1000
+      positions[i * 3 + 1] = random() * 1000
+      positions[i * 3 + 2] = random() * 1000
+      sizes[i] = 0.0007 + Math.pow(random(), 3) * 0.006
+    }
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1))
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uCamera: { value: new THREE.Vector3() },
+        uBox: { value: 1 },
+        uCenter: { value: new THREE.Vector3() },
+        uNormal: { value: new THREE.Vector3(0, 1, 0) },
+        uRadius: { value: 1 },
+        uScale: { value: 400 },
+        uOn: { value: 0 },
+      },
+      vertexShader: RING_ICE_VERTEX,
+      fragmentShader: RING_ICE_FRAGMENT,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
+    return { geometry, material }
+  }, [])
+  useEffect(() => () => {
+    parts.geometry.dispose()
+    parts.material.dispose()
+  }, [parts])
+
+  useFrame((_, delta) => {
+    const p = points.current
+    if (!p) return
+    const u = parts.material.uniforms
+    let target = 0
+    if (ringState.ready && !pilot.active) {
+      const R = ringState.radius
+      const box = R * 0.5
+      _iceCam.copy(camera.position).sub(ringState.center)
+      const h = _iceCam.dot(ringState.normal)
+      const r = Math.sqrt(Math.max(_iceCam.lengthSq() - h * h, 0)) / R
+      if (Math.abs(h) < box * 0.5 && r > 1.1 && r < 2.5) target = 1
+      u.uBox.value = box
+      u.uCenter.value.copy(ringState.center)
+      u.uNormal.value.copy(ringState.normal)
+      u.uRadius.value = R
+    }
+    u.uOn.value += (target - u.uOn.value) * (1 - Math.exp(-delta * 6))
+    p.visible = u.uOn.value > 0.01
+    if (!p.visible) return
+    u.uCamera.value.copy(camera.position)
+    u.uScale.value = size.height * 0.5 * Math.min(window.devicePixelRatio, 2)
+  })
+
+  return <points ref={points} geometry={parts.geometry} material={parts.material} frustumCulled={false} visible={false} renderOrder={5} />
+}
+
 /* The exploration shot's spacecraft: the Shuttle (the flight's own,
    once built), close to the lens, banking gently across the frame with
    the planet beyond, as films give a world its scale */
@@ -2415,9 +2733,11 @@ function BacklitDriver({ progressRef }: { progressRef: MutableRefObject<number> 
 function Scene({
   progressRef,
   glare,
+  flare,
 }: {
   progressRef: MutableRefObject<number>
   glare: RefObject<HTMLDivElement | null>
+  flare: RefObject<HTMLDivElement | null>
 }) {
   const grade = useMemo(() => new GradeEffect(), [])
   useEffect(() => () => grade.dispose(), [grade])
@@ -2429,9 +2749,10 @@ function Scene({
       {/* first, so the date is advanced before planets and camera read it */}
       <Clock progressRef={progressRef} />
 
-      <Lens progressRef={progressRef} glare={glare} />
+      <Lens progressRef={progressRef} glare={glare} flare={flare} />
       <RevealEarth />
       <ExplorerShip />
+      <RingIce />
       <TextShield />
 
       <Pilot />
@@ -2625,6 +2946,7 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
     Math.min(1.5, typeof window === 'undefined' ? 1 : window.devicePixelRatio),
   )
   const glare = useRef<HTMLDivElement>(null)
+  const flare = useRef<HTMLDivElement>(null)
   const [supported, setSupported] = useState(true)
   // a fresh canvas after the graphics context was lost
   const [generation, setGeneration] = useState(0)
@@ -2711,10 +3033,11 @@ function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number>
 
       <PerformanceMonitor onDecline={() => setDpr((current) => Math.min(current, 1))} />
 
-      <Scene progressRef={progressRef} glare={glare} />
+      <Scene progressRef={progressRef} glare={glare} flare={flare} />
 
     </Canvas>
     <div ref={glare} className="sun-glare" aria-hidden="true" />
+    <div ref={flare} className="sun-flare" aria-hidden="true" style={{ opacity: 0 }} />
     {lost && (
       <div className="gl-restoring" role="status">
         Restoring the view&hellip;

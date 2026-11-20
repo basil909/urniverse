@@ -116,3 +116,27 @@ export function attachOrbitInput() {
     document.documentElement.classList.remove('is-orbiting')
   }
 }
+
+/* ============================================================
+   THE OPENING: a directed film of some fifty seconds, from the intro
+   ("Watch the opening"): darkness, the Sun, home, out past the giants,
+   the whole Solar System, then the visitor takes over. The camera plays
+   it on its own clock; the page shows the words and the score.
+============================================================ */
+export const OPENING_BEATS = [
+  { at: 0, title: 'The darkness', line: 'Before anything, the dark. Then, one by one, the stars.' },
+  { at: 6, title: 'The first light', line: 'A star like millions of others: ours.' },
+  { at: 14, title: 'Our home', line: 'Down through the air of the only world we know.' },
+  { at: 24, title: 'Beyond Earth', line: 'Out past Mars, Jupiter and Saturn.' },
+  { at: 38, title: 'The scale of space', line: 'Eight worlds, and mostly emptiness.' },
+  { at: 47, title: 'You are here', line: '' },
+] as const
+export const OPENING_SECONDS = 52
+
+export const opening = {
+  active: false,
+  /** seconds in (advanced by the camera) */
+  clock: 0,
+  /** set by the page: end at once */
+  skip: false,
+}

@@ -4476,3 +4476,75 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .is-orbiting, .is-orbiting * { cursor: grabbing !important; }
 .sequence-skip { z-index: 70; }
 @media (prefers-reduced-motion: reduce) { .mode-note { animation: none; } }
+
+/* ============================================================
+   THE OPENING, AND THE LENS FLARE
+   ============================================================ */
+.opening-start { margin-top: 22px; }
+.opening-start .icon { font-size: 15px; margin: 0 2px; }
+.opening-dark {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+  background: #000;
+  pointer-events: none;
+}
+.opening {
+  position: fixed;
+  left: var(--pad);
+  right: var(--pad);
+  bottom: calc(9vh + 26px);
+  z-index: 70;
+  display: flex;
+  justify-content: flex-start;
+  pointer-events: none;
+}
+.opening:has(.opening-title) { justify-content: center; bottom: 50%; transform: translateY(50%); }
+.opening-title {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-family: var(--serif);
+  font-size: clamp(44px, 6vw, 84px);
+  line-height: 1;
+  color: var(--text-1);
+  text-shadow: 0 2px 40px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+}
+.opening-title .brand-mark { width: 12px; height: 12px; }
+.opening-skip { z-index: 71; }
+.is-opening .hud-top { opacity: 0.2; }
+
+/* the Sun in the frame: a streak across it, a faint ghost opposite */
+.sun-flare {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  overflow: hidden;
+}
+.sun-flare::before {
+  content: '';
+  position: absolute;
+  left: var(--fx, 50%);
+  top: var(--fy, 50%);
+  width: 90vw;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(90deg, transparent, rgba(140, 175, 255, 0.28) 30%, rgba(225, 235, 255, 0.55) 50%, rgba(140, 175, 255, 0.28) 70%, transparent);
+  filter: blur(0.6px);
+  box-shadow: 0 0 14px rgba(140, 175, 255, 0.25);
+}
+.sun-flare::after {
+  content: '';
+  position: absolute;
+  left: calc(100% - var(--fx, 50%));
+  top: calc(100% - var(--fy, 50%));
+  width: 11vmin;
+  height: 11vmin;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 52%, rgba(160, 200, 255, 0.09) 62%, rgba(255, 210, 160, 0.06) 72%, transparent 80%);
+}
+@media (prefers-reduced-motion: reduce) { .opening-dark { transition: none; } }

@@ -63,7 +63,7 @@ import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTi
 import { lens, whenOpened } from './lens'
 import { reveal } from './scaleReveal'
 import { shot } from './shots'
-import { viewMode } from './viewMode'
+import { opening, viewMode } from './viewMode'
 import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import Belts from './Belts'
 import Comet from './Comet'
@@ -947,7 +947,7 @@ const HOTSPOTS: Record<number, Hotspot[]> = {
 }
 
 /* Same mapping three.js SphereGeometry uses for its UVs */
-function latLonToSphere(lat: number, lon: number, radius: number) {
+export function latLonToSphere(lat: number, lon: number, radius: number) {
   const u = (lon + 180) / 360
   const v = (90 - lat) / 180
   const phi = u * Math.PI * 2
@@ -2881,8 +2881,13 @@ function Planet({
     const sunFocus = chapter === 1 && index >= 4
     // flying, every planet is its true size; in the Sun's true-size
     // reveal the planets (drawn far larger than the Sun's scale) step out
+    // (the opening's visit home: the giants, drawn close by the journey's
+    // shortened distances, step back so Earth is alone)
+    const openingHome = opening.active && opening.clock > 12.5 && opening.clock < 24.5
     const targetScale = pilot.active
       ? 1
+      : openingHome
+      ? index === 2 ? 1 : 0.04
       : reveal.show > 0 && reveal.chapter === 1
       ? 0.0001
       : sunFocus

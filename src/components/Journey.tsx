@@ -35,7 +35,7 @@ import { PLANETS, getPlanetHeliocentricAU, julianDate } from './experience/orbit
 import { REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal, revealFigures } from './experience/scaleReveal'
 import { SHOTS, SHOT_SECONDS, shot } from './experience/shots'
 import { FILM_SCORE_EVENT, FilmScore } from './ui/filmScore'
-import { MODE_KEY, SEQUENCE_EVENT, attachOrbitInput, sequence, viewMode, type ViewMode } from './experience/viewMode'
+import { MODE_KEY, OPENING_BEATS, OPENING_SECONDS, SEQUENCE_EVENT, attachOrbitInput, opening, sequence, viewMode, type ViewMode } from './experience/viewMode'
 import { formatKm } from './ui/WorldLive'
 
 
@@ -1448,6 +1448,77 @@ export default function Journey() {
     [],
   )
 
+  /* THE OPENING (viewMode.ts): some fifty seconds of directed film from
+     the intro, out of darkness to the whole Solar System; the camera
+     plays it, the page gives the words, the black and the score */
+  const [openingBeat, setOpeningBeat] = useState(-1)
+  const [openingDark, setOpeningDark] = useState(0)
+  const openingOn = openingBeat >= 0
+  const endOpening = useCallback(() => {
+    opening.active = false
+    opening.skip = false
+    setOpeningBeat(-1)
+    setOpeningDark(0)
+    document.documentElement.classList.remove('is-opening')
+    lenisRef.current?.start()
+  }, [])
+  const startOpening = () => {
+    opening.active = true
+    opening.clock = 0
+    opening.skip = false
+    lenisRef.current?.stop()
+    document.documentElement.classList.add('is-opening')
+    setOpeningBeat(0)
+    setOpeningDark(1)
+    // (in the click itself: browsers allow sound only after one)
+    if (music) startScore(1)
+  }
+  const skipOpening = useCallback(() => {
+    setCutting(true)
+    window.setTimeout(() => {
+      opening.skip = true
+    }, 280)
+    window.setTimeout(() => {
+      stopScore()
+      endOpening()
+      setCutting(false)
+    }, 520)
+  }, [endOpening, stopScore])
+  useEffect(() => {
+    if (!openingOn) return
+    let frame = 0
+    let last = -1
+    const tick = () => {
+      const t = opening.clock
+      let beat = 0
+      OPENING_BEATS.forEach((b, i) => {
+        if (t >= b.at) beat = i
+      })
+      if (beat !== last) {
+        last = beat
+        setOpeningBeat(beat)
+        score.current?.setShot(beat + 1)
+      }
+      // out of the dark, slowly, over the first six seconds
+      setOpeningDark(1 - Math.min(1, Math.max(0, (t - 0.6) / 5)))
+      if (t >= OPENING_SECONDS) {
+        score.current?.finish()
+        endOpening()
+        return
+      }
+      frame = window.requestAnimationFrame(tick)
+    }
+    frame = window.requestAnimationFrame(tick)
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') skipOpening()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [openingOn, endOpening, skipOpening])
+
   const kmWords = (km: number) =>
     km >= 1e6
       ? `${(km / 1e6).toFixed(km >= 1e7 ? 0 : 1)} million km`
@@ -1651,7 +1722,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 ? 'is-filming' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textShown && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
+      className={`universe-page ${openingOn ? 'is-filming' : ''} ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 ? 'is-filming' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textShown && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -1669,6 +1740,47 @@ export default function Journey() {
       <Loader />
 
       {flying && <FlightHud onLand={land} />}
+
+      {/* the opening: the dark it starts in, its words, its title */}
+      {openingOn && (
+        <>
+          <div className="opening-dark" style={{ opacity: openingDark }} aria-hidden="true" />
+          <div className="opening" role="status" aria-live="polite">
+            <AnimatePresence mode="wait">
+              {openingBeat < OPENING_BEATS.length - 1 ? (
+                <motion.div
+                  key={openingBeat}
+                  className="film-caption"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 1.2, delay: openingBeat === 0 ? 1.5 : 0.3, ease: EASE_OUT_EXPO }}
+                >
+                  <p className="film-name">
+                    <span className="film-num">{String(openingBeat + 1).padStart(2, '0')}</span>
+                    {OPENING_BEATS[openingBeat].title}
+                  </p>
+                  <p className="film-line">{OPENING_BEATS[openingBeat].line}</p>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="title"
+                  className="opening-title"
+                  initial={{ opacity: 0, letterSpacing: '0.3em' }}
+                  animate={{ opacity: 1, letterSpacing: '0.02em' }}
+                  transition={{ duration: 2.2, ease: EASE_OUT_EXPO }}
+                >
+                  <span className="brand-mark" aria-hidden="true" />
+                  You Are Here
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+          <button type="button" className="reveal-skip opening-skip" onClick={skipOpening}>
+            Skip <kbd>Esc</kbd>
+          </button>
+        </>
+      )}
 
       {/* the mode just chosen, said once */}
       {modeNote && (
@@ -2019,7 +2131,7 @@ export default function Journey() {
       {/* PINNED STAGE: text stays put and swaps only once the camera has arrived */}
       <div className={`stage stage-${stageKind}`}>
         <AnimatePresence mode="wait">
-          {textShown && section === 0 && (
+          {textShown && section === 0 && !openingOn && (
             <motion.div
               key="intro"
               className="intro-content"
@@ -2049,6 +2161,11 @@ export default function Journey() {
                   Fly the Shuttle
                 </button>
               </div>
+              <button type="button" className="true-size opening-start" onClick={startOpening}>
+                <Icon name="play" />
+                Watch the opening
+                <span className="true-size-hint">50 seconds, with sound</span>
+              </button>
               {today && (
                 <p className="hero-note">
                   Planets start where they are today, {today}
