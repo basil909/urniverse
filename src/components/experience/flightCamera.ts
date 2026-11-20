@@ -4,6 +4,7 @@ import { SYSTEM_OFFSET } from './orbit'
 import { pilot, VIEW_NEAR } from './pilotState'
 import { ground, groundAltitude } from './groundState'
 import { SHIP_LENGTH } from './flightShip'
+import { viewMode } from './viewMode'
 
 /* ============================================================
    THE CAMERAS (V cycles them)
@@ -48,6 +49,23 @@ const _groundUp = new THREE.Vector3()
 const _bodyQuat = new THREE.Quaternion()
 const _bodyPosDummy = new THREE.Vector3()
 const _bodyScaleDummy = new THREE.Vector3()
+const _away = new THREE.Vector3()
+const _side = new THREE.Vector3()
+const _assistPos = new THREE.Vector3()
+const _assistTarget = new THREE.Vector3()
+const _aimTarget = new THREE.Quaternion()
+
+/* the chase camera turns with weight: its aim follows the ship's a beat
+   behind, as a camera on a spring would */
+const aim = { quaternion: new THREE.Quaternion(), held: false, mode: '' }
+
+/* CINEMATIC ASSIST (cinematic mode only): on a close pass of a world the
+   camera swings out to the side for a few seconds, the ship crossing in
+   front of the world, then returns behind it. The ship stays yours; only
+   the camera moves. Once a minute and a quarter for each world at most. */
+const ASSIST_SECONDS = 8
+const assist = { start: -1, index: -1, weight: 0, cooldown: new Map<number, number>() }
+export const assistState = { on: false }
 
 export function placeCamera(frame: CameraFrame) {
   const {
@@ -81,7 +99,9 @@ export function placeCamera(frame: CameraFrame) {
   viewDistance.current = Math.exp(
     THREE.MathUtils.lerp(Math.log(viewDistance.current), Math.log(pilot.viewTarget), 1 - Math.exp(-delta * 2.5)),
   )
-  const reach = SHIP_LENGTH * (viewDistance.current / VIEW_NEAR)
+  // closer while slow, exploring; drawn back and wider when fast
+  const pace = THREE.MathUtils.smoothstep(pilot.speed, 0.05, 0.85)
+  const reach = SHIP_LENGTH * (viewDistance.current / VIEW_NEAR) * THREE.MathUtils.lerp(0.86, 1.28, pace)
   _camPos
     .set(0, 0, 0)
     .addScaledVector(forward, -reach * 3.2)
@@ -89,6 +109,52 @@ export function placeCamera(frame: CameraFrame) {
     .addScaledVector(_right, reach * yawRate * 0.35)
   camOffset.current.lerp(_camPos, 1 - Math.exp(-delta * 6))
   camera.position.copy(jet.position).add(camOffset.current)
+
+  // cinematic assist: a close pass of a world (not a speck, not landing)
+  const now = performance.now() / 1000
+  const index = pilot.nearestIndex
+  const distance = jet.position.distanceTo(centre)
+  const eligible =
+    viewMode.mode === 'cinematic' &&
+    pilot.cameraMode === 'chase' &&
+    pilot.altitudeKm > 200 &&
+    !pilot.walking &&
+    pilot.immersion < 0.05 &&
+    pilot.landState === 'flying' &&
+    pilot.warpGlow < 0.05 &&
+    index >= 0 &&
+    pilot.nearestRadiusKm > 1500 &&
+    distance < nearestRadius * 4.5 &&
+    distance > nearestRadius * 1.04
+  if (assist.start < 0 && eligible && now > (assist.cooldown.get(index) ?? 0)) {
+    assist.start = now
+    assist.index = index
+    assist.cooldown.set(index, now + 75)
+  }
+  let assistTarget = 0
+  if (assist.start >= 0) {
+    const t = now - assist.start
+    if (t > ASSIST_SECONDS || pilot.cameraMode !== 'chase' || index !== assist.index || pilot.altitudeKm < 150 || pilot.warpGlow > 0.05) assist.start = -1
+    else assistTarget = THREE.MathUtils.smoothstep(t, 0, 1.8) * (1 - THREE.MathUtils.smoothstep(t, ASSIST_SECONDS - 2, ASSIST_SECONDS))
+  }
+  assist.weight += (assistTarget - assist.weight) * (1 - Math.exp(-delta * 5))
+  if (assistTarget === 0 && assist.weight < 0.002) assist.weight = 0
+  assistState.on = assist.weight > 0.02
+  if (assist.weight > 0) {
+    // out from the world, a little to the side, looking back past the
+    // ship at it: the ship small in front, the world filling the frame
+    _away.copy(jet.position).sub(centre).normalize()
+    _side.crossVectors(forward, _away)
+    if (_side.lengthSq() < 1e-8) _side.copy(_right)
+    _side.normalize()
+    _assistPos
+      .copy(jet.position)
+      .addScaledVector(_away, reach * 10)
+      .addScaledVector(_side, reach * 3.5)
+      .addScaledVector(forward, reach * 1.5)
+    camera.position.lerp(_assistPos, assist.weight)
+    _assistTarget.copy(jet.position).addScaledVector(_away, -reach * 8)
+  }
   // other views (V): a slow orbit round the ship, or a camera parked
   // ahead that lets the ship sweep past, then moves on ahead again
   const mode = pilot.cameraMode
@@ -154,10 +220,23 @@ export function placeCamera(frame: CameraFrame) {
     .addScaledVector(_right, -reach * yawRate * 0.9)
     .addScaledVector(_up, reach * pitchRate * 0.5)
   if (mode === 'chase') {
+    if (assist.weight > 0) {
+      _camTarget.lerp(_assistTarget, assist.weight)
+      _up.lerp(levelUp, assist.weight).normalize()
+    }
     camera.up.copy(_up)
     camera.lookAt(_camTarget)
-    camera.rotateZ(-bank.current * 0.35)
+    camera.rotateZ(-bank.current * 0.35 * (1 - assist.weight))
+    // the aim on a spring (not in warp, nor the first frame of a view)
+    _aimTarget.copy(camera.quaternion)
+    if (aim.held && aim.mode === mode && pilot.warpGlow < 0.2 && !pilot.walking) {
+      aim.quaternion.slerp(_aimTarget, 1 - Math.exp(-delta * 7))
+      camera.quaternion.copy(aim.quaternion)
+    } else aim.quaternion.copy(_aimTarget)
+    aim.held = true
+    aim.mode = mode
   } else {
+    aim.held = false
     // the other views keep the horizon level and watch the ship
     camera.up.copy(levelUp)
     camera.lookAt(jet.position)

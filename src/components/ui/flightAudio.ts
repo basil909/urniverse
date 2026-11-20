@@ -175,6 +175,26 @@ export class FlightAudio {
   }
 
   /* touchdown: a thud and a hiss */
+  /* a discovery: two soft bells a fifth apart, far off */
+  chime() {
+    const ctx = this.context
+    if (ctx.state !== 'running') return
+    const now = ctx.currentTime
+    ;[659.25, 987.77].forEach((frequency, i) => {
+      const at = now + i * 0.16
+      const tone = ctx.createOscillator()
+      tone.type = 'sine'
+      tone.frequency.value = frequency
+      const gain = ctx.createGain()
+      gain.gain.setValueAtTime(0, at)
+      gain.gain.linearRampToValueAtTime(0.06, at + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + 2.6)
+      tone.connect(gain).connect(this.master)
+      tone.start(at)
+      tone.stop(at + 2.7)
+    })
+  }
+
   touchdown() {
     this.thump(55, 0.7)
     const ctx = this.context

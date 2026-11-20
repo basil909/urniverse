@@ -391,8 +391,9 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       setAltitude(pilot.altitudeKm)
       setKms(pilot.kms)
       setWarping(pilot.warping)
-      // arriving: what it is
+      // arriving: what it is (and a soft chime, sound on)
       if (lastWarp && !pilot.warping) {
+        window.dispatchEvent(new Event('urniverse-discovery'))
         const world = worldNamed(lastWarp)
         if (world && pilot.nearestIndex === world.index) {
           // and how big it is, in Shuttles (37.24 m long)
@@ -500,6 +501,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     }
     syncSound()
     window.addEventListener(SOUND_EVENT, syncSound)
+    const onDiscovery = () => audio?.chime()
+    window.addEventListener('urniverse-discovery', onDiscovery)
 
     // markers follow the worlds every frame, without re-rendering
     let frame = 0

@@ -2562,7 +2562,7 @@ function RevealEarth() {
    Division). Drawn only when the camera is near the plane among them. */
 const RING_ICE_COUNT = 3200
 const RING_ICE_VERTEX = /* glsl */ `
-uniform vec3 uCamera; uniform float uBox; uniform vec3 uCenter; uniform vec3 uNormal; uniform float uRadius; uniform float uScale;
+uniform vec3 uCamera; uniform float uBox; uniform vec3 uCenter; uniform vec3 uNormal; uniform float uRadius; uniform float uScale; uniform float uSizeScale;
 attribute float aSize;
 varying float vAlpha;
 void main() {
@@ -2577,7 +2577,7 @@ void main() {
   float division = 1.0 - 0.7 * smoothstep(1.93, 1.96, r) * (1.0 - smoothstep(2.01, 2.04, r));
   vec4 mv = viewMatrix * vec4(world, 1.0);
   float d = max(-mv.z, 1e-5);
-  gl_PointSize = clamp(aSize * uScale / d, 1.5, 64.0);
+  gl_PointSize = clamp(aSize * uSizeScale * uScale / d, 1.5, 64.0);
   // not right on the lens, and gone towards the box's edge
   float near = smoothstep(uBox * 0.004, uBox * 0.03, d);
   float far = 1.0 - smoothstep(uBox * 0.3, uBox * 0.5, length(rel));
@@ -2626,6 +2626,7 @@ function RingIce() {
         uNormal: { value: new THREE.Vector3(0, 1, 0) },
         uRadius: { value: 1 },
         uScale: { value: 400 },
+        uSizeScale: { value: 1 },
         uOn: { value: 0 },
       },
       vertexShader: RING_ICE_VERTEX,
@@ -2647,9 +2648,14 @@ function RingIce() {
     if (!p) return
     const u = parts.material.uniforms
     let target = 0
-    if (ringState.ready && !pilot.active) {
+    if (ringState.ready) {
       const R = ringState.radius
-      const box = R * 0.5
+      // flying, the drift is sized to the ship's pace (a few seconds of
+      // flight across), so skimming the rings it streams past
+      const box = pilot.active
+        ? THREE.MathUtils.clamp(Math.max(pilot.kms * 4, 8) / KM_PER_UNIT, 1e-5, R * 0.5)
+        : R * 0.5
+      u.uSizeScale.value = box / (R * 0.5)
       _iceCam.copy(camera.position).sub(ringState.center)
       const h = _iceCam.dot(ringState.normal)
       const r = Math.sqrt(Math.max(_iceCam.lengthSq() - h * h, 0)) / R
