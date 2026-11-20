@@ -201,8 +201,8 @@ export function flyLanding(frame: LandingFrame) {
       // in it, holding that speed through the thin upper air, then slowing
       down =
         km > entry.top
-          ? entry.speed + (km - entry.top) * (0.12 + 0.38 * THREE.MathUtils.smoothstep(km - entry.top, 100, 600))
-          : 2 + (entry.speed - 2) * THREE.MathUtils.smoothstep(km, 20, 20 + 0.55 * (entry.top - 20))
+          ? entry.speed * 1.5 + (km - entry.top) * (0.4 + 0.4 * THREE.MathUtils.smoothstep(km - entry.top, 100, 600))
+          : (2 + (entry.speed - 2) * THREE.MathUtils.smoothstep(km, 20, 20 + 0.55 * (entry.top - 20))) * 1.5
     }
     let along = Math.min(2.5, km * 0.02 + 0.3)
     // making for a coast: across to it as the height comes down, held at
@@ -252,7 +252,12 @@ export function flyLanding(frame: LandingFrame) {
       // at touchdown; L anywhere else is a quicker, steeper glide
       const runway = pilot.runwayApproach
       const along = runway ? 0.1 + 0.055 * THREE.MathUtils.smoothstep(km, 0.05, 0.6) : Math.min(2.5, 0.083 + km * 0.9)
-      let down = 0.0025 + km * 0.5
+      // (quicker than it was: some 8 s from 20 km to the wheels; the last
+      // 80 m held in the flare until the speed is down to landing speed,
+      // or it met the ground at 1,600 km/h and rolled for half a minute)
+      let down = 0.006 + km * 0.85
+      const groundSpeed = Math.sqrt(Math.max(velocity.current.lengthSq() - velocity.current.dot(_groundUp) ** 2, 0)) * KM_PER_UNIT
+      if (!runway && km < 0.08) down *= THREE.MathUtils.smoothstep(groundSpeed, 0.2, 0.11)
       if (runway) {
         // held on the approach's glide, towards the touchdown point
         _runwayLocal.copy(jet.position).applyMatrix4(ground.inverse).normalize()
@@ -261,7 +266,7 @@ export function flyLanding(frame: LandingFrame) {
       }
       flyHeading(heading.current, _groundUp, steerX, delta)
       _wanted.copy(heading.current).multiplyScalar(along).addScaledVector(_groundUp, -down).divideScalar(KM_PER_UNIT)
-      velocity.current.lerp(_wanted, 1 - Math.exp(-delta * 2.5))
+      velocity.current.lerp(_wanted, 1 - Math.exp(-delta * (runway ? 2.5 : 4)))
       jet.position.addScaledVector(velocity.current, delta)
       // nose a little above the path, more in the flare
       const flare = 1 - THREE.MathUtils.smoothstep(km, 0.01, 0.08)
@@ -281,7 +286,7 @@ export function flyLanding(frame: LandingFrame) {
       flyHeading(heading.current, _groundUp, steerX, delta)
       // (at Kennedy as the Shuttle did, its drag chute out: a longer
       // roll-out, stopping a little past the runway's middle)
-      const brake = pilot.runwayApproach ? 0.003 : 0.006
+      const brake = pilot.runwayApproach ? 0.003 : 0.014
       const kms = Math.max(0, velocity.current.length() * KM_PER_UNIT - brake * delta)
       velocity.current.copy(heading.current).multiplyScalar(kms / KM_PER_UNIT)
       jet.position.addScaledVector(velocity.current, delta)
@@ -318,15 +323,16 @@ export function flyLanding(frame: LandingFrame) {
     } else if (pilot.landState === 'lifting') {
       // the takeoff roll (about 0.8 g), rotation at 300 km/h, the climb
       flyHeading(heading.current, _groundUp, steerX, delta)
-      const along = Math.min(0.16, velocity.current.dot(heading.current) * KM_PER_UNIT + 0.008 * delta)
-      if (along > 0.085) liftTime.current += delta
-      const climb = THREE.MathUtils.smoothstep(liftTime.current, 0, 2.5) * 0.2 // the path, radians
+      // (a strong push, some 2 g: off the ground in about 4 s)
+      const along = Math.min(0.24, velocity.current.dot(heading.current) * KM_PER_UNIT + 0.02 * delta)
+      if (along > 0.075) liftTime.current += delta
+      const climb = THREE.MathUtils.smoothstep(liftTime.current, 0, 1.6) * 0.32 // the path, radians
       _wanted.copy(heading.current).multiplyScalar(along).addScaledVector(_groundUp, along * Math.tan(climb)).divideScalar(KM_PER_UNIT)
       velocity.current.copy(_wanted)
       jet.position.addScaledVector(velocity.current, delta)
       const now = groundAltitude(jet.position)
       if (now < rest) jet.position.addScaledVector(_groundUp, rest - now)
-      const rotate = THREE.MathUtils.smoothstep(liftTime.current, 0, 1.2) * 0.1
+      const rotate = THREE.MathUtils.smoothstep(liftTime.current, 0, 0.9) * 0.12
       aimShip(jet.quaternion, heading.current, _groundUp, climb, rotate, delta * 1.5)
       speed.current = velocity.current.length()
       if (km > 0.3) {

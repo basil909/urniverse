@@ -2322,7 +2322,12 @@ export default function Pilot() {
 
     // a wider lens at speed; the near limit follows the ground (the ship
     // is in its own layer, so nothing nearer needs drawing here)
-    const fov = pilot.walking ? 64 : 52 + pilot.speed * (boost ? 16 : 8)
+    // and near a world (not low over it) a little wider, to give it room
+    const nearWorld = !pilot.walking && !onGround && pilot.nearestRadiusKm > 1500
+      ? THREE.MathUtils.smoothstep(nearestRadius * 7 - jet.position.distanceTo(_bodyPos), 0, nearestRadius * 4.5)
+      : 0
+    const fov = pilot.walking ? 64 : 52 + pilot.speed * (boost ? 16 : 8) + nearWorld * 6
+    pilot.boosting = boost
     camera.fov += (fov - camera.fov) * (1 - Math.exp(-delta * 3))
     // (on foot the ground is a metre or two off: a nearer near limit)
     camera.near = pilot.walking ? 1.8e-8 : THREE.MathUtils.clamp(clearance * 0.25, onGround ? 2e-7 : 1e-5, 0.01)

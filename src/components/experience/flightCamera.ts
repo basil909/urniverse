@@ -58,6 +58,7 @@ const _aimTarget = new THREE.Quaternion()
 /* the chase camera turns with weight: its aim follows the ship's a beat
    behind, as a camera on a spring would */
 const aim = { quaternion: new THREE.Quaternion(), held: false, mode: '' }
+const boostShake = { current: 0 }
 
 /* CINEMATIC ASSIST (cinematic mode only): on a close pass of a world the
    camera swings out to the side for a few seconds, the ship crossing in
@@ -109,6 +110,20 @@ export function placeCamera(frame: CameraFrame) {
     .addScaledVector(_right, reach * yawRate * 0.35)
   camOffset.current.lerp(_camPos, 1 - Math.exp(-delta * 6))
   camera.position.copy(jet.position).add(camOffset.current)
+  // a hand-held float, gentlest at speed; a little tremor on boost
+  if (pilot.cameraMode === 'chase' && !onGround) {
+    const t = performance.now() / 1000
+    const float = reach * 0.025 * (1 - 0.6 * pace)
+    camera.position
+      .addScaledVector(_up, Math.sin(t * 0.53) * float)
+      .addScaledVector(_right, Math.sin(t * 0.37 + 1.7) * float * 0.8)
+    boostShake.current += ((pilot.boosting ? 1 : 0) - boostShake.current) * (1 - Math.exp(-delta * 4))
+    if (boostShake.current > 0.01) {
+      _shake.set(Math.sin(t * 31.7) + Math.sin(t * 19.3), Math.sin(t * 27.1 + 1.3) + Math.sin(t * 13.9), 0)
+      camera.position.addScaledVector(_right, _shake.x * reach * 0.006 * boostShake.current)
+      camera.position.addScaledVector(_up, _shake.y * reach * 0.006 * boostShake.current)
+    }
+  }
 
   // cinematic assist: a close pass of a world (not a speck, not landing)
   const now = performance.now() / 1000

@@ -80,6 +80,8 @@ export const pilot = {
   site: { lat: 0, lon: 0 },
   /** 'chase', 'flyby' or 'orbit' (V cycles) */
   cameraMode: 'chase' as 'chase' | 'flyby' | 'orbit',
+  /** Shift held (the camera shakes a little) */
+  boosting: false,
   /** photo mode: no HUD (P) */
   photo: false,
   /** for sound and the HUD: thrust, re-entry heat, air density (0..1) */
