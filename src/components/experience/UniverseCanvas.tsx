@@ -387,6 +387,8 @@ const _rArrival = new THREE.Vector3()
 const _rTarget = new THREE.Vector3()
 
 const _orbitAxis = new THREE.Vector3()
+const _guardCentre = new THREE.Vector3()
+const _guardOffset = new THREE.Vector3()
 const _orbitCentre = new THREE.Vector3()
 const _revealPos = new THREE.Vector3()
 const _revealTarget = new THREE.Vector3()
@@ -546,7 +548,8 @@ function shotPose(
       // (from the Sun's side, no further than most of the way to it: the
       // journey's distances are shortened, and further out the camera
       // would pass it; a wide lens, below, takes in the moons)
-      outPos.copy(_sC).addScaledVector(_sN, Math.min(hero * 6.5, _sC.distanceTo(SYSTEM_OFFSET) * 0.85))
+      // (and well clear of the Sun itself, for the inner worlds)
+      outPos.copy(_sC).addScaledVector(_sN, Math.min(hero * 6.5, Math.max(hero * 1.6, _sC.distanceTo(SYSTEM_OFFSET) - 3.4)))
       outTarget.copy(_sC)
       break
     }
@@ -1169,7 +1172,8 @@ function CinematicCamera({
     let seqNear = 0.08
     if (seqActive) {
       const seconds = SEQUENCE_SECONDS[chapter]
-      seqClock.current = sequence.skip ? seconds : Math.min(seqClock.current + delta, seconds)
+      // (skipped: fast-forward along the path, never a jump across the world)
+      seqClock.current = Math.min(seqClock.current + delta * (sequence.skip ? 7 : 1), seconds)
       const t = seqClock.current / seconds
       seqNear = sequencePose(chapter, t, safeProgress, seqRestPos.current, seqRestTarget.current, _scratchPos, _scratchTarget, seqUp.current)
       if (t >= 1) endSequence()
@@ -1321,6 +1325,11 @@ function CinematicCamera({
         smoothPosition.current.copy(_scratchPos)
         shot.cut = false
       }
+    } else if (shot.cut && shot.index === 0) {
+      // leaving the film: a cut back to the chapter's view (behind the
+      // black), not a glide across the world from the last shot
+      smoothPosition.current.copy(_scratchPos)
+      shot.cut = false
     }
     if (revealBlend.current === 0 && Math.abs(camera.near - shotNear) > 1e-6) {
       camera.near = shotNear
@@ -1335,6 +1344,19 @@ function CinematicCamera({
       initialized.current = true
     }
 
+    /* Between the planets the Sun is in the way more often than not
+       (Mercury to Venus went straight through it): near it, the path
+       bends smoothly out round it, never closer than 2.4 radii */
+    const roundTheSun = (point: THREE.Vector3) => {
+      if (chapter < 2 || chapter > 10) return
+      _guardOffset.copy(point).sub(SYSTEM_OFFSET)
+      const d = _guardOffset.length()
+      const r0 = 4
+      const m = 2.4
+      if (d < r0 && d > 1e-9) point.copy(SYSTEM_OFFSET).addScaledVector(_guardOffset, (m + (1 - (2 * m) / r0) * d + (m / (r0 * r0)) * d * d) / d)
+    }
+    roundTheSun(_scratchPos)
+
     if (reducedMotion) {
       smoothPosition.current.copy(_scratchPos)
     } else {
@@ -1343,6 +1365,28 @@ function CinematicCamera({
         1 - Math.exp(-delta * 8.5),
       )
     }
+    // (and the smoothed camera too: on a fast glide it cuts the corner)
+    roundTheSun(smoothPosition.current)
+    /* Never through a world: whatever the path (a glide between
+       chapters, the camera easing back after a shot or a reveal, the
+       smoothing cutting the inside of a curve), the camera stays outside
+       the world it looks at, the one it is leaving, and the Sun; a path
+       that would cross one slides round it instead. */
+    const keepOut = (index: number, margin: number) => {
+      if (index < 0) {
+        if (chapter > 10) return // (the Solar System shrinks to a point out there)
+        _guardCentre.copy(SYSTEM_OFFSET)
+      } else getPlanetPosition(index, simClock.jd, _guardCentre)
+      const radius = (index < 0 ? 1 : getPlanetVisualRadius(index)) * margin
+      _guardOffset.copy(smoothPosition.current).sub(_guardCentre)
+      const distance = _guardOffset.length()
+      if (distance < radius && distance > 1e-9) smoothPosition.current.copy(_guardCentre).addScaledVector(_guardOffset, radius / distance)
+    }
+    const subject = planet ? chapter - 2 : chapter === 10 ? 2 : -2
+    if (subject >= 0) keepOut(subject, 1.025)
+    // the world just left, while it is still drawn large
+    if (chapter > 2 && chapter <= 10 && local < BLEND * 0.7) keepOut(chapter - 3, 1.05)
+    keepOut(-1, 1.06)
     camera.position.copy(smoothPosition.current)
 
     // ---- flight speed (from the smoothed path, before mouse parallax)
