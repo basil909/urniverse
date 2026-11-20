@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
-import { pilot } from './pilotState'
+import { lowOver, pilot } from './pilotState'
 import { CLOUD_GLSL, cloudVolume } from './clouds'
 import { LOW_RES_GLSL, lowRes, lowResUniforms } from './lowRes'
 
@@ -237,7 +237,10 @@ export default function CloudVolume({ sun, light }: { sun: THREE.Vector3; light:
     const earth = top.current?.parent
     if (!meshes[0] || !meshes[1] || !earth) return
     // on when flying low over Earth
-    const target = pilot.active && pilot.nearestIndex === 2 && pilot.altitudeKm >= 0 ? 1 - THREE.MathUtils.smoothstep(pilot.altitudeKm, 45, 80) : 0
+    // (flying only: from the Himalaya shot's distance the layer breaks
+    // into speckle; the mountains are clear there)
+    const lowKm = pilot.active ? lowOver(2) : -1
+    const target = lowKm >= 0 ? 1 - THREE.MathUtils.smoothstep(lowKm, 45, 80) : 0
     cloudVolume.uCloudOn.value = target
     const on = target > 0.002
     meshes.forEach((mesh) => mesh && (mesh.visible = on))

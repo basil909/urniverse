@@ -4,7 +4,7 @@ import { type RefObject } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
-import { pilot } from './pilotState'
+import { lowOver } from './pilotState'
 
 /* ============================================================
    REAL SURFACE IMAGERY, STREAMED WHILE FLYING
@@ -521,7 +521,7 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     const source = SOURCES[index]
     const mesh = body.current
     if (!source || !mesh) return
-    const engaged = pilot.active && pilot.nearestIndex === index && allowed(gl)
+    const engaged = lowOver(index) >= 0 && allowed(gl)
     if (!engaged) {
       if (owner === index) {
         owner = -1

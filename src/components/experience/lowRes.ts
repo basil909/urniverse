@@ -91,7 +91,13 @@ export class LowResPass extends Pass {
     })
   }
 
-  override setDepthTexture(depthTexture: THREE.Texture) {
+  /* the scene's depth, as the composer gave it to this pass (kept here:
+     the uniforms are shared, and a pass being replaced is handed none as
+     it goes, which would leave the marched effects blind to the scene) */
+  private depth: THREE.Texture | null = null
+
+  override setDepthTexture(depthTexture: THREE.Texture | null) {
+    this.depth = depthTexture
     lowResUniforms.uSceneDepth.value = depthTexture
     lowResUniforms.uSceneDepthOn.value = depthTexture ? 1 : 0
   }
@@ -113,6 +119,8 @@ export class LowResPass extends Pass {
   override render(renderer: THREE.WebGLRenderer, inputBuffer: THREE.WebGLRenderTarget | null) {
     const eye = this.eye
     const mask = eye.layers.mask
+    lowResUniforms.uSceneDepth.value = this.depth
+    lowResUniforms.uSceneDepthOn.value = this.depth ? 1 : 0
     const background = this.world.background
     const autoClear = renderer.autoClear
     renderer.getClearColor(this._clear)

@@ -1567,7 +1567,9 @@ export default function Journey() {
       case 1:
         return `${name}, half-lit by the Sun.`
       case 2:
-        return `${rocky ? 'Low over the ground' : 'Over the cloud tops'}, ${kmWords(shot.altitudeKm)} up.`
+        return activeChapter?.id === 'earth'
+          ? 'The Himalayas in the morning, from 9 km up: Everest ahead, 8,849 m, the highest ground on Earth. Real heights, real imagery.'
+          : `${rocky ? 'Low over the ground' : 'Over the cloud tops'}, ${kmWords(shot.altitudeKm)} up.`
       case 3:
         return `The Sun behind ${name}: its light through the edge of the ${filmIndex === 0 ? 'world' : 'air'}.`
       case 4:
@@ -2294,6 +2296,20 @@ export default function Journey() {
                     <Icon name="orbit" />
                     See the Space Station
                     <span className="true-size-hint">418 km up</span>
+                  </motion.button>
+                )}
+                {activeChapter.id === 'earth' && (
+                  <motion.button
+                    type="button"
+                    className="true-size film-start station-start himalaya-start"
+                    onClick={() => startFilm(2)}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.8, ease: EASE_OUT_EXPO }}
+                  >
+                    <Icon name="land" />
+                    See the Himalayas
+                    <span className="true-size-hint">8,849 m</span>
                   </motion.button>
                 )}
 

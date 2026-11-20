@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
-import { pilot } from './pilotState'
+import { lowView, pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import { DETAIL_PERIOD, GROUND_DETAIL_GLSL, groundLookUniforms } from './groundDetail'
 import { SURFACE_PATCH_GLSL, surfacePatch } from './surfaceTiles'
@@ -484,13 +484,16 @@ export default function Terrain({
     const body = patch?.parent
     if (!patch || !body) return
     groundWorlds[index] = { model, body }
-    if (pilot.active && pilot.nearestIndex === index) fetchGround()
-    const near = pilot.active && pilot.nearestIndex === index && model.ready
+    // (flying low, or a film shot low over this world: lowView)
+    const flying = pilot.active && pilot.nearestIndex === index
+    const filming = !pilot.active && lowView.body === index
+    if (flying || filming) fetchGround()
+    const near = (flying || filming) && model.ready
     if (near) {
-      _ship.copy(pilot.shipWorld)
+      _ship.copy(filming ? lowView.world : pilot.shipWorld)
       // where the ship stands on this world: in the frame it was placed in
       // (the world may have moved on since, sped up; it is carried after)
-      const here = ground.body === index
+      const here = flying && ground.body === index
       if (here) _c.copy(_ship).applyMatrix4(ground.shipFrame)
       body.updateWorldMatrix(true, false)
       ground.inverse.copy(body.matrixWorld).invert()
@@ -528,7 +531,8 @@ export default function Terrain({
     // Earth: stream real elevation and imagery under the ship
     if (earth) {
       const [u, v] = sphereUv(_c)
-      aimEarthGround(u * 360 - 180, v * 180 - 90, altitude * config.radiusKm, delta)
+      if (filming && lowView.aim.km > 0) aimEarthGround(lowView.aim.lon, lowView.aim.lat, lowView.aim.km, delta)
+      else aimEarthGround(u * 360 - 180, v * 180 - 90, altitude * config.radiusKm, delta)
       model.elevation = earthElevation
     }
     const h0 = model.height(_c, fade)

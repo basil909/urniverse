@@ -35,7 +35,7 @@ import {
   FIRST_SATELLITE_ID,
 } from './orbit'
 import { simClock } from './simClock'
-import { pilot } from './pilotState'
+import { lowOver, pilot } from './pilotState'
 import { CLOSE_DETAIL_GLSL } from './closeDetail'
 import Terrain from './Terrain'
 import { sunVisibility } from './sunVisibility'
@@ -2851,10 +2851,17 @@ function Planet({
       atmosphere.uSunPosition.value = planetSun
       // low over this world's ground, its sky lights up (fading out by
       // 60 km up on Earth, 40 km on Mars)
-      const low = pilot.active && pilot.nearestIndex === index && pilot.altitudeKm >= 0
+      /* the scene's depth, for the air to stop at whatever stands in it
+         (the mountains): the material holds its own copies of the shared
+         switches, so they are brought up to date here */
+      if (atmosphere.uSceneDepthOn) {
+        atmosphere.uSceneDepth.value = lowResUniforms.uSceneDepth.value
+        atmosphere.uSceneDepthOn.value = lowResUniforms.uSceneDepthOn.value
+      }
+      const lowKm = lowOver(index)
       const top = planet.name === 'Earth' ? 60 : 40
       if (atmosphere.uGroundSky) {
-        atmosphere.uGroundSky.value = low ? 1 - THREE.MathUtils.smoothstep(pilot.altitudeKm, top * 0.15, top) : 0
+        atmosphere.uGroundSky.value = lowKm >= 0 ? 1 - THREE.MathUtils.smoothstep(lowKm, top * 0.15, top) : 0
       }
       const air = AIR[planet.name]
       if (air && atmosphere.uExaggerate) {

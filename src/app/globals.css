@@ -4593,4 +4593,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   text-transform: none;
   color: var(--text-3);
 }
-.station-start { margin-top: 12px; }
+/* the film's ways in, clear of the figures above them, close together */
+.film-start:not(.station-start) { margin-top: 26px; margin-bottom: 14px; }
+.station-start { margin-top: 0; margin-bottom: 14px; }
+.film-start:last-of-type { margin-bottom: 22px; }

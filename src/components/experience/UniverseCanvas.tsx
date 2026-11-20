@@ -32,6 +32,7 @@ import { lens } from './lens'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import SpaceStation, { stationShotPose } from './SpaceStation'
+import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
 import Pilot, { GroundCarry, pilotObjects } from './Pilot'
 import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
@@ -505,6 +506,8 @@ function shotPose(
 
   switch (which) {
     case 2: {
+      // at Earth: low over the Himalayas, towards Everest (himalaya.ts)
+      if (index === 2 && shot.chapter === 4 && himalayaShotPose(time, outPos, outTarget, shotUp)) return radius
       // over the sunlit side, the Sun some 45 degrees up (bright enough
       // to read the clouds, low enough for relief), looking along the
       // surface towards the limb
@@ -581,6 +584,7 @@ const filmable = (chapter: number) => isPlanetChapter(chapter) || FILM_CHAPTERS.
 
 /** the lens for a shot (null: the chapter's own) */
 function shotFov(chapter: number, which: number) {
+  if (chapter === 4 && which === 2) return 50
   if (isPlanetChapter(chapter)) return which === 6 ? 64 : null
   if (chapter === 10) return which === 6 ? PALE_BLUE_DOT_FOV : PLANET_CONFIG[2].fov
   if (chapter === 1) return which === 6 ? 52 : which === 3 ? 30 : 41
@@ -1489,6 +1493,8 @@ function CinematicCamera({
         const radius = shotPose(shot.index, planet ? chapter - 2 : 2, safeProgress, shot.clock, _scratchPos, _scratchTarget)
         // low over the surface the near plane follows the small worlds
         shotNear = shot.index === 4 ? (chapter === 4 ? 0.0005 : 0.004) : Math.min(0.08, radius * 0.01)
+        // (some 0.6 km, over the mountains)
+        if (isHimalayaShot()) shotNear = 2e-5
       } else if (chapter === 10) {
         paleBlueDotPose(_scratchPos, _scratchTarget)
         shotUp.set(0, 1, 0)
@@ -1532,7 +1538,7 @@ function CinematicCamera({
     }
     roundTheSun(_scratchPos)
 
-    if (reducedMotion) {
+    if (reducedMotion || (shotHere && isHimalayaShot())) {
       smoothPosition.current.copy(_scratchPos)
     } else {
       smoothPosition.current.lerp(
@@ -1558,7 +1564,8 @@ function CinematicCamera({
       if (distance < radius && distance > 1e-9) smoothPosition.current.copy(_guardCentre).addScaledVector(_guardOffset, radius / distance)
     }
     const subject = planet ? chapter - 2 : chapter === 10 ? 2 : -2
-    if (subject >= 0) keepOut(subject, 1.025)
+    // (but for the shot low over the Himalayas)
+    if (subject >= 0 && !(shotHere && isHimalayaShot())) keepOut(subject, 1.025)
     // the world just left, while it is still drawn large
     if (chapter > 2 && chapter <= 10 && local < BLEND * 0.7) keepOut(chapter - 3, 1.05)
     keepOut(-1, 1.06)
@@ -2168,6 +2175,8 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
     const chapter = Math.floor(progressRef.current ?? 0)
     // clamp delta so a backgrounded tab does not jump the planets
     const step = Math.min(delta, 0.1)
+    // the Himalaya shot holds its own morning (himalaya.ts)
+    if (himalayaClock(step)) return
     if (pilot.active) {
       // flying, at true scale, the planets hold their places (Earth alone
       // covers 30 km a second); spins and moons run on the flight's own

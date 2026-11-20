@@ -142,6 +142,26 @@ export const pilot = {
   photoRequest: null as null | { caption: string[] },
 }
 
+/* a film shot low over a world (the Himalayas): the ground, the sky and
+   the clouds come on as they do for the flight, round this point */
+export const lowView = {
+  /** the world it is low over, or -1 */
+  body: -1,
+  altitudeKm: -1,
+  /** the camera, in the scene */
+  world: new THREE.Vector3(),
+  /** where Earth's finest ground tiles are centred (degrees), and the
+      altitude (km) their detail is chosen for: finer than the camera's
+      own height would ask, for a film */
+  aim: { lon: 0, lat: 0, km: 0 },
+}
+
+/** km above this world when low over it (flying, or a low shot); -1 if not */
+export function lowOver(index: number) {
+  if (pilot.active) return pilot.nearestIndex === index ? pilot.altitudeKm : -1
+  return lowView.body === index ? lowView.altitudeKm : -1
+}
+
 export const TIME_STEPS = [0, 1, 60, 600, 3600]
 
 export const VIEW_NEAR = 3.2
