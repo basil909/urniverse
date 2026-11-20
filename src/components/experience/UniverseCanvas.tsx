@@ -10,7 +10,7 @@ import {
   ToneMapping,
   Vignette,
 } from '@react-three/postprocessing'
-import { ToneMappingMode } from 'postprocessing'
+import { BloomEffect, ToneMappingMode } from 'postprocessing'
 import { Html, PerformanceMonitor, useProgress } from '@react-three/drei'
 import { Component, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
@@ -2753,6 +2753,17 @@ function Scene({
 }) {
   const grade = useMemo(() => new GradeEffect(), [])
   useEffect(() => () => grade.dispose(), [grade])
+  /* beside the Space Station, 418 km over sunlit cloud, the glow of the
+     clouds spilled over its thin, dark solar wings and washed them out:
+     the glow is softer there, and the exposure a little lower */
+  const bloomRef = useRef<BloomEffect | null>(null)
+  const glowLevel = useRef(1)
+  useFrame(({ gl }, delta) => {
+    const station = shot.index === 4 && shot.chapter === 4 && !pilot.active
+    glowLevel.current += ((station ? 0 : 1) - glowLevel.current) * (1 - Math.exp(-delta * 4))
+    if (bloomRef.current) bloomRef.current.intensity = THREE.MathUtils.lerp(0.22, 0.82, glowLevel.current)
+    gl.toneMappingExposure = THREE.MathUtils.lerp(0.92, 1.12, glowLevel.current)
+  })
 
   return (
 
@@ -2862,7 +2873,7 @@ function Scene({
         <primitive object={getShipPass()} />
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
-        <Bloom intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />
+        <Bloom ref={bloomRef} intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />
 
         {/* a documentary's colour: navy blacks, cool shade, warm sun */}
         <primitive object={grade} />

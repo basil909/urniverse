@@ -236,11 +236,8 @@ function Spacecraft({ jetRef }: { jetRef: { current: THREE.Group | null } }) {
       // load the models the first time we fly (the Voyager file serves both)
       wanted.current = true
       SPACECRAFT.forEach((craft, i) =>
-        loadModel(craft.model)
-          .then((model) => {
-            if (craft.name === 'Space Station') detailStation(model)
-            return model
-          })
+        // (the station built here, from its real layout: issModel.ts)
+        (craft.name === 'Space Station' ? Promise.resolve(buildStation()) : loadModel(craft.model))
           .then((model) => setModels((list) => list.map((m, j) => (j === i ? (craft.name === 'Voyager 2' ? model.clone() : model) : m))))
           .catch(() => {}),
       )
@@ -1110,7 +1107,7 @@ function Jet({ thrust }: { thrust: { current: number } }) {
 
 const SHUTTLE_URL = '/models/space-shuttle.glb'
 import { detailShuttle } from './shuttleSurface'
-import { detailStation } from './stationSurface'
+import { buildStation } from './issModel'
 import { PUFF_COUNT, PUFF_FRAGMENT, PUFF_VERTEX, RCS_JETS, plumeGeometry, plumeMaterial, rcsState, throatMaterial } from './plume'
 
 type ShuttleModel = {

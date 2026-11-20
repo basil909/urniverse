@@ -1,17 +1,17 @@
 'use client'
 
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { useFrame, useThree } from '@react-three/fiber'
+import { createPortal, useFrame, useThree } from '@react-three/fiber'
 import { Html } from '@react-three/drei'
 import * as THREE from 'three'
 
-import { getPlanetOrbitPosition, getPlanetPosition, getPlanetVisualRadius } from './orbit'
+import { getPlanetOrbitPosition, getPlanetPosition, getPlanetVisualRadius, SYSTEM_OFFSET } from './orbit'
+import { getShipPass, shipCamera, shipScene } from './shipLayer'
 import { simClock } from './simClock'
-import { FIRST_CRAFT_ID, spaceBodyOrbitPosition, SPACECRAFT } from './spaceBodies'
+import { FIRST_CRAFT_ID, spaceBodyOrbitPosition } from './spaceBodies'
 import { shot } from './shots'
 import { pilot } from './pilotState'
-import { loadModel } from './Pilot'
-import { detailStation } from './stationSurface'
+import { buildStation } from './issModel'
 
 /* ============================================================
    THE SPACE STATION, IN THE JOURNEY
@@ -25,7 +25,6 @@ import { detailStation } from './stationSurface'
 ============================================================ */
 
 const EARTH_CHAPTER = 4
-const STATION = SPACECRAFT[0]
 const _earthOrbit = new THREE.Vector3()
 const _earth = new THREE.Vector3()
 
@@ -44,6 +43,10 @@ const _up = new THREE.Vector3()
 const _east = new THREE.Vector3()
 const _toSun = new THREE.Vector3()
 const _basis = new THREE.Matrix4()
+const _sunDir = new THREE.Vector3()
+/* where the station stands in the ship's layer: far from its origin,
+   where the (unseen) Shuttle waits */
+const STATION_AT = new THREE.Vector3(0, 0, 6000)
 /** where the station stands in its shot */
 const shotStation = new THREE.Vector3()
 export function stationShotPose(time: number, sun: THREE.Vector3, outPos: THREE.Vector3, outTarget: THREE.Vector3, outUp: THREE.Vector3) {
@@ -73,6 +76,9 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
   const marker = useRef<THREE.Group>(null)
   const tag = useRef<HTMLDivElement>(null)
   const model = useRef<THREE.Group>(null)
+  const sunLight = useRef<THREE.DirectionalLight>(null)
+  const earthLight = useRef<THREE.HemisphereLight>(null)
+  const shipped = useRef(false)
   const [station, setStation] = useState<THREE.Object3D | null>(null)
   const wanted = useRef(false)
   const shown = useRef(0)
@@ -106,37 +112,65 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
     const filming = shot.index === 4 && shot.chapter === EARTH_CHAPTER && !pilot.active
     if (filming && !wanted.current) {
       wanted.current = true
-      loadModel(STATION.model)
-        .then((m) => {
-          // its real surfaces (stationSurface.ts)
-          detailStation(m)
-          setStation(m)
-        })
-        .catch(() => {})
+      // built here, from its real layout (issModel.ts)
+      const built = buildStation()
+      built.traverse((object) => {
+        const mesh = object as THREE.Mesh
+        if (!mesh.isMesh) return
+        // (the lattice's holes would cast as a solid bar)
+        const lattice = (mesh.material as THREE.MeshStandardMaterial).alphaTest > 0
+        mesh.castShadow = !lattice
+        mesh.receiveShadow = true
+      })
+      setStation(built)
     }
+    /* the station at its true size (109 m), in the ship's own layer, as
+       the Shuttle is in flight: drawn after the world and its air, so
+       nothing of the world can come between it and the camera. The
+       camera there copies the real one's view, some 230 m back. */
     const m = model.current
     if (m) {
-      m.visible = filming && !!station
-      if (m.visible) {
-        // close to the lens, ahead and a little low, slowly turning
+      const on = filming && !!station
+      m.visible = on
+      if (on) {
+        getShipPass().enabled = true
+        shipped.current = true
         const forward = new THREE.Vector3()
         camera.getWorldDirection(forward)
         const right = forward.clone().cross(camera.up).normalize()
         const upV = right.clone().cross(forward).normalize()
-        // seen from above and behind, as from a visiting craft: the truss
-        // across the frame, the arrays laid along the way it flies, its
-        // top to space; the whole station small in the lower frame, the
-        // Earth beyond
-        const d = 0.0042
-        m.position.copy(camera.position).addScaledVector(forward, d).addScaledVector(upV, -d * 0.04)
-        // (the model's long truss is its own y axis: across the frame)
+        // (the station's x is its truss: across the frame; z the way it
+        // flies; y up, away from the Earth)
         const up = camera.position.clone().sub(_earth).normalize()
         const along = forward.clone().addScaledVector(up, -forward.dot(up)).normalize()
         const across = up.clone().cross(along).normalize()
-        _basis.makeBasis(along, across, up)
+        _basis.makeBasis(across, up, along)
+        m.position.copy(STATION_AT)
         m.quaternion.setFromRotationMatrix(_basis)
-        m.rotateZ(Math.sin(shot.clock * 0.12) * 0.12)
-        m.scale.setScalar(d * 0.47)
+        m.rotateY(Math.sin(shot.clock * 0.12) * 0.12)
+        m.scale.setScalar(109)
+        const persp = camera as THREE.PerspectiveCamera
+        const back = 232
+        shipCamera.position.copy(STATION_AT).addScaledVector(forward, -back).addScaledVector(upV, back * 0.04)
+        shipCamera.quaternion.copy(camera.quaternion)
+        shipCamera.fov = persp.fov
+        shipCamera.aspect = persp.aspect
+        shipCamera.near = 1
+        shipCamera.far = 2000
+        shipCamera.updateProjectionMatrix()
+        // the Sun, and the Earth's light from below
+        const sun = _sunDir.copy(SYSTEM_OFFSET).sub(_earth).normalize()
+        const light = sunLight.current
+        if (light) {
+          light.position.copy(STATION_AT).addScaledVector(sun, 300)
+          light.target.position.copy(STATION_AT)
+          light.target.updateMatrixWorld()
+        }
+        const fill = earthLight.current
+        if (fill) fill.position.copy(STATION_AT).addScaledVector(up, 300)
+      } else if (shipped.current && !pilot.active) {
+        getShipPass().enabled = false
+        shipped.current = false
       }
     }
   })
@@ -158,9 +192,31 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
           </div>
         </Html>
       </group>
-      <group ref={model} visible={false}>
-        {station && <primitive object={station} />}
-      </group>
+      {createPortal(
+        <>
+          <group ref={model} visible={false}>
+            {station && <primitive object={station} />}
+          </group>
+          <directionalLight
+            ref={sunLight}
+            color="#fff2dc"
+            intensity={2.6}
+            castShadow
+            shadow-mapSize-width={2048}
+            shadow-mapSize-height={2048}
+            shadow-camera-left={-70}
+            shadow-camera-right={70}
+            shadow-camera-top={70}
+            shadow-camera-bottom={-70}
+            shadow-camera-near={100}
+            shadow-camera-far={500}
+            shadow-bias={-0.0004}
+            shadow-normalBias={0.05}
+          />
+          <hemisphereLight ref={earthLight} color="#0b0f18" groundColor="#7ea6d8" intensity={0.9} />
+        </>,
+        shipScene,
+      )}
     </>
   )
 }
