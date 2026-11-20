@@ -11,6 +11,7 @@ import { FIRST_CRAFT_ID, spaceBodyOrbitPosition, SPACECRAFT } from './spaceBodie
 import { shot } from './shots'
 import { pilot } from './pilotState'
 import { loadModel } from './Pilot'
+import { detailStation } from './stationSurface'
 
 /* ============================================================
    THE SPACE STATION, IN THE JOURNEY
@@ -58,7 +59,8 @@ export function stationShotPose(time: number, sun: THREE.Vector3, outPos: THREE.
   // looking along the orbit towards the Sun's side of the horizon
   _toSun.copy(sun).sub(_st)
   _toSun.addScaledVector(_up, -_toSun.dot(_up)).normalize()
-  _east.copy(_toSun).applyAxisAngle(_up, 0.9 + Math.sin(time * 0.05) * 0.05)
+  // (the Sun behind the camera, over a shoulder: the station lit from the front)
+  _east.copy(_toSun).applyAxisAngle(_up, Math.PI - 0.75 + Math.sin(time * 0.05) * 0.05)
   // a little above and behind the station
   outPos.copy(_st).addScaledVector(_up, R * 0.004).addScaledVector(_east, -R * 0.006)
   // looking down past the station, the horizon across the middle of the frame
@@ -104,7 +106,13 @@ export default function SpaceStation({ progressRef }: { progressRef: RefObject<n
     const filming = shot.index === 4 && shot.chapter === EARTH_CHAPTER && !pilot.active
     if (filming && !wanted.current) {
       wanted.current = true
-      loadModel(STATION.model).then(setStation).catch(() => {})
+      loadModel(STATION.model)
+        .then((m) => {
+          // its real surfaces (stationSurface.ts)
+          detailStation(m)
+          setStation(m)
+        })
+        .catch(() => {})
     }
     const m = model.current
     if (m) {
