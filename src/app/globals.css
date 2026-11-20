@@ -4444,3 +4444,35 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   .film-controls { justify-content: space-between; flex-wrap: wrap; }
   .film-progress { bottom: 7vh; }
 }
+
+/* ============================================================
+   CAMERA MODES: the note on switching, the free view's hands, Skip
+   ============================================================ */
+.mode-note {
+  position: fixed;
+  left: 50%;
+  top: 84px;
+  transform: translateX(-50%);
+  z-index: 95;
+  max-width: calc(100vw - 32px);
+  padding: 9px 16px;
+  border: 1px solid var(--surface-edge);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: var(--surface-blur);
+  backdrop-filter: var(--surface-blur);
+  color: var(--text-1);
+  font-size: 13px;
+  text-align: center;
+  animation: mode-note 3.8s var(--ease) forwards;
+  pointer-events: none;
+}
+@keyframes mode-note {
+  0% { opacity: 0; transform: translate(-50%, -6px); }
+  10%, 82% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 0); }
+}
+.is-interactive .universe-canvas { cursor: grab; touch-action: pan-y; }
+.is-orbiting, .is-orbiting * { cursor: grabbing !important; }
+.sequence-skip { z-index: 70; }
+@media (prefers-reduced-motion: reduce) { .mode-note { animation: none; } }

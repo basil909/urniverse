@@ -6,10 +6,24 @@
    button says otherwise; coloured by the text.
 ============================================================ */
 
-export type IconName = 'play' | 'pause' | 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
+export type IconName = 'camera' | 'orbit' | 'play' | 'pause' | 'scale' | 'shuttle' | 'clock' | 'sound' | 'muted' | 'exit' | 'compass' | 'keys' | 'land' | 'thrust' | 'link' | 'check' | 'close' | 'arrow' | 'plus' | 'search'
 
 const PATHS: Record<IconName, React.ReactNode> = {
   play: <path d="M8.2 5.6v12.8L18.4 12z" />,
+  // a cine camera: the directed view
+  camera: (
+    <>
+      <rect x="3.2" y="7.2" width="12.4" height="9.6" rx="2" />
+      <path d="M15.6 10.6l5.2-2.9v8.6l-5.2-2.9z" />
+    </>
+  ),
+  // a world and its orbit: the free view
+  orbit: (
+    <>
+      <circle cx="12" cy="12" r="3.2" />
+      <ellipse cx="12" cy="12" rx="9.2" ry="4" transform="rotate(-24 12 12)" />
+    </>
+  ),
   pause: (
     <>
       <path d="M9 6v12" />

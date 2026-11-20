@@ -63,6 +63,7 @@ import { SURFACE_PATCH_GLSL, surfacePatch, useSurfacePatches } from './surfaceTi
 import { lens, whenOpened } from './lens'
 import { reveal } from './scaleReveal'
 import { shot } from './shots'
+import { viewMode } from './viewMode'
 import { SHIELD_GLSL, shieldUniforms } from './TextShield'
 import Belts from './Belts'
 import Comet from './Comet'
@@ -1744,7 +1745,8 @@ export default function SolarSystem({
       )
 
     const onDown = (event: PointerEvent) => {
-      if (event.button !== 0 || blocked(event.target)) return
+      // (in interactive mode a drag orbits the camera instead)
+      if (event.button !== 0 || blocked(event.target) || viewMode.mode === 'interactive') return
       if (focusedPlanetIndex(progressRef.current ?? 0) < 0) return
       spin.current.dragging = true
       spin.current.velocity = 0

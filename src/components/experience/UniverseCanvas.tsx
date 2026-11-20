@@ -47,6 +47,8 @@ import {
 } from './orbit'
 import { EARTH_KM, REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal } from './scaleReveal'
 import { shot } from './shots'
+import { SEQUENCE_EVENT, resetOrbit, sequence, viewMode } from './viewMode'
+import { ringState } from './groundState'
 
 /* ============================================================
    CINEMATIC SOLAR SYSTEM JOURNEY
@@ -384,6 +386,8 @@ const _rHero = new THREE.Vector3()
 const _rArrival = new THREE.Vector3()
 const _rTarget = new THREE.Vector3()
 
+const _orbitAxis = new THREE.Vector3()
+const _orbitCentre = new THREE.Vector3()
 const _revealPos = new THREE.Vector3()
 const _revealTarget = new THREE.Vector3()
 
@@ -754,6 +758,183 @@ function chapterShotPose(which: number, chapter: number, time: number, outPos: T
 }
 
 /* ============================================================
+   DIRECTED ARRIVALS (cinematic mode; see viewMode.ts)
+   At five chapters the glide in ends on a shot of its own, and from
+   there a short directed sequence runs to the chapter's usual view: a
+   path through keyframes (Catmull-Rom), eased in and out, never inside
+   the world. The chapter's words wait until it lands.
+============================================================ */
+
+const SEQUENCE_SECONDS: Record<number, number> = { 1: 8, 2: 7, 4: 10, 7: 11, 10: 10 }
+
+const _kPoints = [0, 1, 2, 3, 4].map(() => new THREE.Vector3())
+const _kTargets = [0, 1, 2, 3, 4].map(() => new THREE.Vector3())
+const _kA = new THREE.Vector3()
+const _kB = new THREE.Vector3()
+const _kC = new THREE.Vector3()
+const _kS = new THREE.Vector3()
+const _kSide = new THREE.Vector3()
+const _kN = new THREE.Vector3()
+const _kU = new THREE.Vector3()
+const _kW = new THREE.Vector3()
+const _kLocalUp = new THREE.Vector3()
+const _kPbd = new THREE.Vector3()
+const _kPbdTarget = new THREE.Vector3()
+
+/* a point on a Catmull-Rom path through `points` (the ends repeated) */
+function catmull(points: THREE.Vector3[], count: number, u: number, out: THREE.Vector3) {
+  const segments = count - 1
+  const x = THREE.MathUtils.clamp(u, 0, 1) * segments
+  const i = Math.min(Math.floor(x), segments - 1)
+  const t = x - i
+  const p0 = points[Math.max(i - 1, 0)]
+  const p1 = points[i]
+  const p2 = points[i + 1]
+  const p3 = points[Math.min(i + 2, count - 1)]
+  const t2 = t * t
+  const t3 = t2 * t
+  return out.set(0, 0, 0)
+    .addScaledVector(p0, -0.5 * t3 + t2 - 0.5 * t)
+    .addScaledVector(p1, 1.5 * t3 - 2.5 * t2 + 1)
+    .addScaledVector(p2, -1.5 * t3 + 2 * t2 + 0.5 * t)
+    .addScaledVector(p3, 0.5 * t3 - 0.5 * t2)
+}
+const dir = (v: THREE.Vector3, a: THREE.Vector3, sa: number, b: THREE.Vector3, sb: number, c: THREE.Vector3, sc: number) =>
+  v.copy(a).multiplyScalar(sa).addScaledVector(b, sb).addScaledVector(c, sc).normalize()
+
+/** the lens through a sequence */
+function sequenceFov(chapter: number, t: number) {
+  if (chapter === 10) return THREE.MathUtils.lerp(PLANET_CONFIG[2].fov, PALE_BLUE_DOT_FOV, THREE.MathUtils.smoothstep(t, 0.35, 1))
+  return fovFor(chapter)
+}
+
+/* the pose at t (0..1) of a chapter's sequence, ending on its usual view
+   (restPos, restTarget); writes the camera's up; returns the near plane */
+function sequencePose(
+  chapter: number,
+  t: number,
+  progress: number,
+  restPos: THREE.Vector3,
+  restTarget: THREE.Vector3,
+  outPos: THREE.Vector3,
+  outTarget: THREE.Vector3,
+  outUp: THREE.Vector3,
+) {
+  const e = smoother(t)
+  outUp.set(0, 1, 0)
+  let count = 0
+  let centre: THREE.Vector3 | null = null
+  let floor = 0
+  let near = 0.08
+  let localUpWeight = 0
+
+  if (chapter === 1) {
+    // the Sun: low over its surface, then back to the corona, then the
+    // planets for scale
+    const S = SYSTEM_OFFSET
+    dir(_kS, SUN.position, 1, S, -1, _worldUp, 0)
+    _kSide.crossVectors(_worldUp, _kS).normalize()
+    _kPoints[0].copy(S).addScaledVector(_kS, 1.3).addScaledVector(_kSide, 0.15)
+    _kTargets[0].copy(S).addScaledVector(_kA.copy(_kS).addScaledVector(_kSide, 1.25).normalize(), 1)
+    // (far enough back that the disc and its corona fit the frame)
+    _kPoints[1].copy(S).addScaledVector(dir(_kA, _kS, 1, _kSide, 0.6, _worldUp, 0.15), 3.3)
+    _kTargets[1].copy(S)
+    _kPoints[2].copy(restPos)
+    _kTargets[2].copy(restTarget)
+    count = 3
+    centre = S
+    floor = 1.12
+    outUp.copy(_kS).lerp(_worldUp, THREE.MathUtils.smoothstep(e, 0, 0.55)).normalize()
+    near = THREE.MathUtils.lerp(0.01, 0.08, THREE.MathUtils.smoothstep(e, 0.2, 0.8))
+  } else if (chapter === 10) {
+    // the Pale Blue Dot: pull away from Earth until it is a point
+    paleBlueDotPose(_kPbd, _kPbdTarget)
+    getPlanetPosition(2, simClock.jd, _kC)
+    const rE = getPlanetVisualRadius(2)
+    _kA.copy(_kPbd).sub(_kC)
+    const far = _kA.length()
+    _kA.normalize()
+    const pull = Math.pow(e, 1.25)
+    const distance = Math.exp(THREE.MathUtils.lerp(Math.log(rE * 5.5), Math.log(far), pull))
+    outPos.copy(_kC).addScaledVector(_kA, distance)
+    outTarget.copy(_kC)
+    return 0.08
+  } else {
+    const index = chapter - 2
+    getPlanetPosition(index, simClock.jd, _kC)
+    const R = getPlanetVisualRadius(index)
+    centre = _kC
+    // low over a small world the near plane comes close
+    near = Math.min(0.08, R * 0.02)
+    _kS.copy(SYSTEM_OFFSET).sub(_kC).normalize()
+    _kSide.crossVectors(_worldUp, _kS).normalize()
+    const hero = restPos.distanceTo(_kC)
+
+    if (chapter === 2) {
+      // Mercury: a fast pass low over the craters, swinging out round it
+      _kPoints[0].copy(_kC).addScaledVector(dir(_kA, _kSide, -0.85, _kS, 0.3, _worldUp, 0.2), R * 3.4)
+      _kPoints[1].copy(_kC).addScaledVector(dir(_kA, _kSide, 0.05, _kS, 0.95, _worldUp, 0.3), R * 1.14)
+      _kPoints[2].copy(_kC).addScaledVector(dir(_kA, _kSide, 0.92, _kS, 0.35, _worldUp, 0.05), R * 1.8)
+      _kPoints[3].copy(restPos)
+      for (let i = 0; i < 3; i += 1) _kTargets[i].copy(_kC)
+      _kTargets[3].copy(restTarget)
+      count = 4
+      floor = 1.08
+    } else if (chapter === 4) {
+      // Earth: in from space, down to the cloud tops along the horizon,
+      // a beat there, and back out
+      dir(_kA, restPos, 1, _kC, -1, _worldUp, 0)
+      _kPoints[0].copy(_kC).addScaledVector(_kA, hero * 2.1)
+      _kTargets[0].copy(_kC)
+      shotPose(5, 2, progress, 0, _kPoints[1], _kTargets[1])
+      _kLocalUp.copy(shotUp)
+      _kB.copy(_kTargets[1]).sub(_kPoints[1]).normalize()
+      _kPoints[2].copy(_kPoints[1]).addScaledVector(_kB, R * 0.07)
+      _kTargets[2].copy(_kTargets[1]).addScaledVector(_kB, R * 0.07)
+      _kPoints[3].copy(restPos)
+      _kTargets[3].copy(restTarget)
+      count = 4
+      floor = 1.035
+      localUpWeight = THREE.MathUtils.smoothstep(e, 0.12, 0.3) * (1 - THREE.MathUtils.smoothstep(e, 0.7, 0.9))
+      near = Math.min(0.08, R * 0.01)
+    } else {
+      // Saturn: down through the gap in the rings (the Cassini Division,
+      // some two radii out), out beneath them, the moons in view
+      const n = ringState.ready ? _kN.copy(ringState.normal) : _kN.set(0, 1, 0)
+      dir(_kB, restPos, 1, _kC, -1, _worldUp, 0)
+      const above = _kB.dot(n) >= 0 ? 1 : -1
+      _kU.copy(_kB).addScaledVector(n, -_kB.dot(n)).normalize()
+      _kW.crossVectors(n, _kU).normalize()
+      const at = (angle: number, radius: number, height: number, out: THREE.Vector3) =>
+        out.copy(_kC).addScaledVector(_kU, Math.cos(angle) * R * radius).addScaledVector(_kW, Math.sin(angle) * R * radius).addScaledVector(n, above * R * height)
+      at(0, 4.4, 1.5, _kPoints[0])
+      _kTargets[0].copy(_kC)
+      at(0.25, 1.99, 0.24, _kPoints[1])
+      at(0.62, 1.99, -0.5, _kTargets[1])
+      at(0.38, 1.99, -0.24, _kPoints[2])
+      _kTargets[2].copy(_kC)
+      at(0.7, 3.8, -0.75, _kPoints[3])
+      _kTargets[3].copy(_kC)
+      _kPoints[4].copy(restPos)
+      _kTargets[4].copy(restTarget)
+      count = 5
+      floor = 1.06
+    }
+  }
+
+  catmull(_kPoints, count, e, outPos)
+  catmull(_kTargets, count, e, outTarget)
+  // never inside the world
+  if (centre) {
+    const radius = chapter === 1 ? 1 : getPlanetVisualRadius(chapter - 2)
+    _kA.copy(outPos).sub(centre)
+    if (_kA.length() < radius * floor) outPos.copy(centre).addScaledVector(_kA.normalize(), radius * floor)
+  }
+  if (localUpWeight > 0) outUp.lerp(_kLocalUp, localUpWeight).normalize()
+  return near
+}
+
+/* ============================================================
    CAMERA CONTROLLER
 ============================================================ */
 
@@ -799,6 +980,17 @@ function CinematicCamera({
   )
 
   const piloting = useRef(false)
+  // directed arrivals: armed by the glide in, played once arrived
+  const seqChapter = useRef(-1)
+  const seqArmed = useRef(false)
+  const seqDone = useRef(false)
+  const seqClock = useRef(0)
+  const seqUp = useRef(new THREE.Vector3(0, 1, 0))
+  const seqRestPos = useRef(new THREE.Vector3())
+  const seqRestTarget = useRef(new THREE.Vector3())
+  // interactive: the orbit as eased
+  const orbitChapter = useRef(-1)
+  const orbit = useRef({ yaw: 0, pitch: 0, zoom: 1 })
   // the true-size reveal: how much of it the camera follows (1 in it,
   // easing to 0 after), and the near plane it needed
   const revealBlend = useRef(0)
@@ -854,19 +1046,49 @@ function CinematicCamera({
       heroTime.current = 0
       heroDrift[chapter] = 0
     }
-    if ((planet || chapter <= 1) && (local >= BLEND || chapter === 0) && !reducedMotion) {
+    // directed arrivals (cinematic mode): armed by the glide in
+    const endSequence = () => {
+      seqDone.current = true
+      window.dispatchEvent(new CustomEvent(SEQUENCE_EVENT, { detail: { chapter: seqChapter.current, on: false } }))
+    }
+    if (chapter !== seqChapter.current) {
+      if (seqArmed.current && !seqDone.current) endSequence()
+      seqChapter.current = chapter
+      seqArmed.current = false
+      seqDone.current = false
+      seqClock.current = 0
+    }
+    const canDirect = viewMode.mode === 'cinematic' && !reducedMotion && SEQUENCE_SECONDS[chapter] !== undefined
+    if (canDirect && !seqArmed.current && !seqDone.current && chapter > 0 && local < BLEND) {
+      seqArmed.current = true
+      sequence.chapter = chapter
+      sequence.skip = false
+      window.dispatchEvent(new CustomEvent(SEQUENCE_EVENT, { detail: { chapter, on: true } }))
+    }
+    if (seqArmed.current && !seqDone.current && !canDirect) endSequence()
+    const directing = seqArmed.current && !seqDone.current
+    const seqActive = directing && local >= BLEND
+
+    if ((planet || chapter <= 1) && (local >= BLEND || chapter === 0) && !reducedMotion && !directing) {
       heroTime.current += delta
-      heroDrift[chapter] = ease(
+      heroDrift[chapter] = viewMode.mode === 'cinematic' ? ease(
         (heroTime.current - HERO_DELAY) / HERO_DURATION,
-      )
+      ) : 0
     }
 
     // lens changes travel with the flight (e.g. the long lens on Earth
     // opening up to the wide galaxy view during the pull-back)
     // a shot's own lens
     const filmFov = shot.index > 0 && shot.chapter === chapter && filmable(chapter) && local >= BLEND ? shotFov(chapter, shot.index) : null
+    const seqFov = directing
+      ? local < BLEND
+        ? THREE.MathUtils.lerp(fovFor(chapter - 1), sequenceFov(chapter, 0), ease(local / BLEND))
+        : sequenceFov(chapter, Math.min(seqClock.current / SEQUENCE_SECONDS[chapter], 1))
+      : null
     const baseFov = filmFov !== null
       ? filmFov
+      : seqFov !== null
+      ? seqFov
       : chapter > 0 && local < BLEND
         ? THREE.MathUtils.lerp(fovFor(chapter - 1), fovFor(chapter), ease(local / BLEND))
         : fovFor(chapter)
@@ -899,6 +1121,13 @@ function CinematicCamera({
     if (chapter === 12 && camera.aspect < 1) {
       _currPos.copy(LOCAL_GROUP_VIEW.portraitPosition)
       _currTarget.copy(LOCAL_GROUP_VIEW.portraitTarget)
+    }
+    seqRestPos.current.copy(_currPos)
+    seqRestTarget.current.copy(_currTarget)
+    if (directing && local < BLEND) {
+      sequencePose(chapter, 0, safeProgress, seqRestPos.current, seqRestTarget.current, _currPos, _currTarget, seqUp.current)
+      // come in along the shot's own line of sight
+      _arrival.copy(_currPos).sub(_currTarget).multiplyScalar(0.8).add(_currPos)
     }
 
     if (chapter > 0 && local < BLEND) {
@@ -937,8 +1166,17 @@ function CinematicCamera({
        way round the planet and back (moons, rings and stars shift with
        real depth), then settles before the next flight. The backlit shots
        have their own drift. */
+    let seqNear = 0.08
+    if (seqActive) {
+      const seconds = SEQUENCE_SECONDS[chapter]
+      seqClock.current = sequence.skip ? seconds : Math.min(seqClock.current + delta, seconds)
+      const t = seqClock.current / seconds
+      seqNear = sequencePose(chapter, t, safeProgress, seqRestPos.current, seqRestTarget.current, _scratchPos, _scratchTarget, seqUp.current)
+      if (t >= 1) endSequence()
+    }
+
     const restful = (planet && !HERO_BACKLIT.has(chapter - 2)) || chapter <= 1
-    if (restful && (local >= BLEND || chapter === 0) && !reducedMotion) {
+    if (restful && (local >= BLEND || chapter === 0) && !reducedMotion && viewMode.mode === 'cinematic' && !directing) {
       const settle = ease((heroTime.current - 0.8) / 3)
       const leave = 1 - THREE.MathUtils.smoothstep(local, 0.86, 0.99)
       // the wide views barely turn (the words and the scene are composed)
@@ -989,6 +1227,41 @@ function CinematicCamera({
       }
     }
 
+    /* interactive: the visitor's orbit and zoom about what the chapter
+       is looking at (eased; back to the chapter's view on leaving it) */
+    if (chapter !== orbitChapter.current) {
+      orbitChapter.current = chapter
+      resetOrbit()
+    }
+    const interactive = viewMode.mode === 'interactive' && chapter > 0
+    const ok = 1 - Math.exp(-delta * 7)
+    const o = orbit.current
+    o.yaw += ((interactive ? viewMode.yaw : 0) - o.yaw) * ok
+    o.pitch += ((interactive ? viewMode.pitch : 0) - o.pitch) * ok
+    o.zoom += ((interactive ? viewMode.zoom : 1) - o.zoom) * ok
+    if (Math.abs(o.yaw) > 1e-4 || Math.abs(o.pitch) > 1e-4 || Math.abs(o.zoom - 1) > 1e-4) {
+      _driftOffset.copy(_scratchPos).sub(_scratchTarget)
+      _driftOffset.applyAxisAngle(_worldUp, o.yaw)
+      const length = _driftOffset.length()
+      _orbitAxis.crossVectors(_driftOffset, _worldUp)
+      if (_orbitAxis.lengthSq() > 1e-10 && length > 1e-6) {
+        // (never over the pole: the view would flip)
+        const elevation = Math.asin(THREE.MathUtils.clamp(_driftOffset.y / length, -1, 1))
+        const pitch = THREE.MathUtils.clamp(o.pitch, -1.35 - elevation, 1.35 - elevation)
+        _driftOffset.applyAxisAngle(_orbitAxis.normalize(), pitch)
+      }
+      _driftOffset.multiplyScalar(o.zoom)
+      if (planet) {
+        getPlanetPosition(chapter - 2, simClock.jd, _orbitCentre)
+        const R = getPlanetVisualRadius(chapter - 2)
+        _scratchPos.copy(_scratchTarget).add(_driftOffset)
+        _orbitAxis.copy(_scratchPos).sub(_orbitCentre)
+        if (_orbitAxis.length() < R * 1.3) _scratchPos.copy(_orbitCentre).addScaledVector(_orbitAxis.normalize(), R * 1.3)
+      } else {
+        _scratchPos.copy(_scratchTarget).add(_driftOffset)
+      }
+    }
+
     /* the true-size reveal: the camera follows its path while it runs,
        and eases back to the chapter's own view after */
     const revealHere = reveal.active && reveal.chapter === chapter && (planet || chapter === 1)
@@ -1030,7 +1303,7 @@ function CinematicCamera({
     /* the six shots: the camera takes the shot's own setup; at a cut it
        jumps there (the page has faded to black) */
     const shotHere = shot.index > 0 && shot.chapter === chapter && filmable(chapter) && local >= BLEND
-    let shotNear = 0.08
+    let shotNear = seqActive ? seqNear : 0.08
     if (shotHere) {
       shot.clock += reducedMotion ? 0 : delta
       if (planet || (chapter === 10 && shot.index < 6)) {
@@ -1107,7 +1380,7 @@ function CinematicCamera({
     // planet sits left of the words (as a film frames a subject off-centre)
     const wide = camera.aspect > 1.2
     heroFrame.closer = wide ? 0.8 : 1
-    const shiftTarget = planet && wide && revealBlend.current === 0 && !shotHere ? 1 : 0
+    const shiftTarget = planet && wide && revealBlend.current === 0 && !shotHere && !seqActive ? 1 : 0
     const shiftBefore = lensShift.current
     lensShift.current += (shiftTarget - lensShift.current) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
     if (Math.abs(lensShift.current - shiftBefore) > 1e-5 || (shiftTarget === 0 && camera.filmOffset !== 0 && lensShift.current < 1e-4)) {
@@ -1127,7 +1400,7 @@ function CinematicCamera({
     }
 
     // a shot low over a world stands the camera on its local vertical
-    camera.up.copy(shotHere ? shotUp : _worldUp)
+    camera.up.copy(shotHere ? shotUp : seqActive ? seqUp.current : _worldUp)
     camera.lookAt(_scratchTarget)
 
     // bank: roll gently into sideways motion, level out when it stops

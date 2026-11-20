@@ -35,6 +35,7 @@ import { PLANETS, getPlanetHeliocentricAU, julianDate } from './experience/orbit
 import { REVEAL_END, REVEAL_HOLD, REVEAL_PULL, reveal, revealFigures } from './experience/scaleReveal'
 import { SHOTS, SHOT_SECONDS, shot } from './experience/shots'
 import { FILM_SCORE_EVENT, FilmScore } from './ui/filmScore'
+import { MODE_KEY, SEQUENCE_EVENT, attachOrbitInput, sequence, viewMode, type ViewMode } from './experience/viewMode'
 import { formatKm } from './ui/WorldLive'
 
 
@@ -1214,6 +1215,60 @@ export default function Journey() {
   const canSpin = textOn && active >= 1 && active <= 8
   const planetName = activeChapter ? titleCase(activeChapter.label) : ''
 
+  /* Cinematic or interactive (viewMode.ts): remembered; interactive
+     mode listens for the visitor's orbit and zoom */
+  const [mode, setMode] = useState<ViewMode>('cinematic')
+  const [modeNote, setModeNote] = useState('')
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(MODE_KEY) === 'interactive') setMode('interactive')
+    } catch {}
+  }, [])
+  useEffect(() => {
+    viewMode.mode = mode
+    document.documentElement.classList.toggle('is-interactive', mode === 'interactive')
+    if (mode !== 'interactive') return
+    return attachOrbitInput()
+  }, [mode])
+  const switchMode = () => {
+    const next: ViewMode = mode === 'cinematic' ? 'interactive' : 'cinematic'
+    setMode(next)
+    try {
+      localStorage.setItem(MODE_KEY, next)
+    } catch {}
+    setModeNote(
+      next === 'interactive'
+        ? 'Interactive: drag to orbit, pinch or Ctrl + scroll to zoom, 0 to reset'
+        : 'Cinematic: the camera is directed again',
+    )
+  }
+  useEffect(() => {
+    if (!modeNote) return
+    const timer = window.setTimeout(() => setModeNote(''), 3800)
+    return () => window.clearTimeout(timer)
+  }, [modeNote])
+
+  /* a directed arrival (cinematic mode): the words wait until it lands */
+  const [holdChapter, setHoldChapter] = useState(-1)
+  useEffect(() => {
+    const onSequence = (event: Event) => {
+      const { chapter, on } = (event as CustomEvent<{ chapter: number; on: boolean }>).detail
+      setHoldChapter((current) => (on ? chapter : current === chapter ? -1 : current))
+    }
+    window.addEventListener(SEQUENCE_EVENT, onSequence)
+    return () => window.removeEventListener(SEQUENCE_EVENT, onSequence)
+  }, [])
+  const holding = holdChapter === section
+  const textShown = textOn && !holding
+  useEffect(() => {
+    if (!holding) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') sequence.skip = true
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [holding])
+
   /* True size (scaleReveal.ts): the reveal at the Sun or a planet other
      than Earth. 0 off; 1 running, nothing said yet; 2 "This is Earth.";
      3 "And this is ..."; 4 the figures */
@@ -1515,6 +1570,15 @@ export default function Journey() {
       },
     })),
     {
+      id: 'action-camera-mode',
+      group: 'Actions',
+      title: mode === 'cinematic' ? 'Camera: interactive' : 'Camera: cinematic',
+      hint: mode === 'cinematic' ? 'orbit and zoom yourself' : 'the directed camera',
+      keywords: 'camera mode cinematic interactive orbit zoom free directed',
+      icon: <Icon name={mode === 'cinematic' ? 'orbit' : 'camera'} />,
+      run: switchMode,
+    },
+    {
       id: 'action-fly',
       group: 'Actions',
       title: 'Fly the Shuttle',
@@ -1587,7 +1651,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 ? 'is-filming' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textOn && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
+      className={`universe-page ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 ? 'is-filming' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textShown && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -1605,6 +1669,20 @@ export default function Journey() {
       <Loader />
 
       {flying && <FlightHud onLand={land} />}
+
+      {/* the mode just chosen, said once */}
+      {modeNote && (
+        <div className="mode-note" role="status">
+          {modeNote}
+        </div>
+      )}
+
+      {/* a directed arrival is playing: it can be skipped */}
+      {holding && textOn && (
+        <button type="button" className="reveal-skip sequence-skip" onClick={() => (sequence.skip = true)}>
+          Skip <kbd>Esc</kbd>
+        </button>
+      )}
 
       {/* a cut: a moment of black between shots */}
       <div className={`cut ${cutting ? 'is-on' : ''}`} aria-hidden="true" />
@@ -1755,8 +1833,8 @@ export default function Journey() {
 
       {/* Shows briefly on each planet, then fades away on its own */}
       {canSpin && (
-        <div className="spin-hint" key={`hint-${active}`} aria-hidden="true">
-          Drag to rotate
+        <div className="spin-hint" key={`hint-${active}-${mode}`} aria-hidden="true">
+          {mode === 'interactive' ? 'Drag to orbit · pinch to zoom' : 'Drag to rotate'}
         </div>
       )}
 
@@ -1803,6 +1881,18 @@ export default function Journey() {
           >
             <Icon name="shuttle" />
           </button>
+          {!flying && (
+            <button
+              type="button"
+              className="tool-button"
+              aria-pressed={mode === 'interactive'}
+              aria-label={mode === 'cinematic' ? 'Camera: cinematic. Switch to interactive' : 'Camera: interactive. Switch to cinematic'}
+              data-tip={mode === 'cinematic' ? 'Camera: cinematic' : 'Camera: interactive'}
+              onClick={switchMode}
+            >
+              <Icon name={mode === 'cinematic' ? 'camera' : 'orbit'} />
+            </button>
+          )}
           <MotionControl />
           <SoundToggle section={section} />
         </div>
@@ -1929,7 +2019,7 @@ export default function Journey() {
       {/* PINNED STAGE: text stays put and swaps only once the camera has arrived */}
       <div className={`stage stage-${stageKind}`}>
         <AnimatePresence mode="wait">
-          {textOn && section === 0 && (
+          {textShown && section === 0 && (
             <motion.div
               key="intro"
               className="intro-content"
@@ -1968,7 +2058,7 @@ export default function Journey() {
             </motion.div>
           )}
 
-          {textOn && activeChapter && (
+          {textShown && activeChapter && (
             <motion.div
               key={activeChapter.id}
               className="story-content"
@@ -2125,7 +2215,7 @@ export default function Journey() {
             </motion.div>
           )}
 
-          {textOn && section === TOTAL_SECTIONS - 1 && (
+          {textShown && section === TOTAL_SECTIONS - 1 && (
             <motion.div
               key="return"
               className="return-content"
