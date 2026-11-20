@@ -679,6 +679,8 @@ function AirStreaks({ state }: { state: { velocity: THREE.Vector3; amount: numbe
 const _sunTint = new THREE.Color()
 const _sunBase = new THREE.Color('#fff0d0')
 const _inverseCamera = new THREE.Quaternion()
+const _rcsTurn = new THREE.Vector3()
+const _rcsChange = new THREE.Vector3()
 
 /* the Shuttle's silhouette as the Sun sees it, for its shadow on the
    ground: its body alone (layer 5), drawn white on black from the Sun's
@@ -1104,6 +1106,7 @@ function Jet({ thrust }: { thrust: { current: number } }) {
 
 const SHUTTLE_URL = '/models/space-shuttle.glb'
 import { detailShuttle } from './shuttleSurface'
+import { RCS_JETS, plumeGeometry, plumeMaterial, throatMaterial } from './plume'
 
 type ShuttleModel = {
   body: THREE.Mesh
@@ -1456,48 +1459,72 @@ function mergeGeometries(parts: THREE.BufferGeometry[]) {
 function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: number } }) {
   const flames = useRef<THREE.Group[]>([])
   const boosterFlames = useRef<THREE.Group[]>([])
-  const fire = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        color: '#ffc46b', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-      }),
-    [],
-  )
-  useEffect(() => () => fire.dispose(), [fire])
+  // the exhaust (plume.ts): the main engines, the boosters, the steering jets
   const look = useMemo(
     () => ({
-      outer: new THREE.MeshBasicMaterial({
-        color: '#7fb6ff', transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-      }),
-      core: new THREE.MeshBasicMaterial({
-        color: '#fff2dc', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
-      }),
-      outerGeometry: new THREE.ConeGeometry(1, 9, 18, 1, true).translate(0, 4.5, 0),
-      coreGeometry: new THREE.ConeGeometry(0.6, 3.5, 14, 1, true).translate(0, 1.75, 0),
+      main: plumeMaterial('main'),
+      booster: plumeMaterial('booster'),
+      rcs: RCS_JETS.map(() => plumeMaterial('rcs')),
+      throat: throatMaterial(),
+      geometry: plumeGeometry(),
+      disc: new THREE.CircleGeometry(1, 32),
     }),
     [],
   )
   useEffect(
     () => () => {
-      look.outer.dispose()
-      look.core.dispose()
-      look.outerGeometry.dispose()
-      look.coreGeometry.dispose()
+      look.main.dispose()
+      look.booster.dispose()
+      look.rcs.forEach((m) => m.dispose())
+      look.throat.dispose()
+      look.geometry.dispose()
+      look.disc.dispose()
     },
     [look],
   )
+  const rcsGroups = useRef<(THREE.Group | null)[]>([])
+  const rcsLevel = useRef(RCS_JETS.map(() => 0))
+  const lastTurn = useRef(new THREE.Vector3())
   useFrame((state, delta) => {
     const t = thrust.current
     const time = state.clock.elapsedTime
     const flicker = 0.92 + Math.sin(time * 47) * 0.05 + Math.sin(time * 29) * 0.03
+    // in air the plume is short and narrow, with diamonds; in vacuum long,
+    // wide and faint
+    const vacuum = 1 - THREE.MathUtils.smoothstep(pilot.air, 0, 0.25)
+    const length = (2 + t * THREE.MathUtils.lerp(13, 26, vacuum)) * flicker
     flames.current.forEach((flame) => {
       if (!flame) return
-      flame.scale.y = (0.15 + t * 1.4 * flicker) * flame.userData.radius
+      flame.scale.y = length * flame.userData.radius
       // the main engines gimbal with the turn, a few degrees
       flame.rotation.set(Math.PI / 2 - THREE.MathUtils.clamp(pilot.turn.pitch * 0.08, -0.15, 0.15), 0, THREE.MathUtils.clamp(pilot.turn.yaw * 0.08, -0.15, 0.15))
     })
-    look.outer.opacity = 0.15 + t * 0.5
-    look.core.opacity = 0.3 + t * 0.65
+    look.main.uniforms.uThrust.value = 0.08 + t * 0.92
+    look.main.uniforms.uVacuum.value = vacuum
+    look.main.uniforms.uLength.value = length
+    look.main.uniforms.uTime.value = time
+    look.throat.uniforms.uThrust.value = 0.15 + t * 0.85
+    look.booster.uniforms.uThrust.value = 1
+    look.booster.uniforms.uTime.value = time
+    look.booster.uniforms.uLength.value = 8
+    look.booster.uniforms.uVacuum.value = vacuum
+    // the steering jets: short puffs as a turn starts or changes, each from
+    // the thrusters that push that way
+    const turnNow = _rcsTurn.set(pilot.turn.pitch, pilot.turn.yaw, pilot.turn.roll)
+    const change = _rcsChange.copy(turnNow).sub(lastTurn.current).divideScalar(Math.max(delta, 1 / 120))
+    lastTurn.current.copy(turnNow)
+    RCS_JETS.forEach((jet, i) => {
+      const want = THREE.MathUtils.clamp(jet.fires(change.x * 0.25, change.y * 0.25, change.z * 0.25), 0, 1)
+      const level = rcsLevel.current
+      level[i] = want > level[i] ? want : level[i] * Math.exp(-delta * 9)
+      const group = rcsGroups.current[i]
+      if (group) {
+        group.visible = level[i] > 0.02 && !stack.attached
+        const puff = 0.6 + 0.4 * Math.sin(time * 61 + i * 1.7)
+        group.scale.set(0.006, 0.05 * (0.5 + level[i]) * puff, 0.006)
+        look.rcs[i].uniforms.uThrust.value = level[i]
+      }
+    })
     // the launch stack: on the ship, then falling away when it separates
     // (the boosters back and out, the tank down from the belly, tumbling)
     if (stack.boosterGone >= 0) stack.boosterGone += delta
@@ -1518,7 +1545,7 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
       const flame = boosterFlames.current[i]
       if (flame) {
         flame.visible = boosterOn && stack.boosterFire > 0
-        flame.scale.set(booster.radius * 1.3, booster.radius * (7 + 0.8 * flicker), booster.radius * 1.3)
+        flame.scale.set(booster.radius * 1.15, booster.radius * (8 + 0.8 * flicker), booster.radius * 1.15)
       }
     })
     if (model.tank) {
@@ -1532,7 +1559,6 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
         model.tank.rotation.set(0.04 * gone, 0.02 * gone, 0)
       }
     }
-    fire.opacity = 0.75 + 0.15 * flicker
   })
   return (
     <group>
@@ -1549,24 +1575,37 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
               if (group) boosterFlames.current[i] = group
             }}
           >
-            <mesh geometry={look.outerGeometry} material={fire} />
-            <mesh geometry={look.coreGeometry} material={look.core} />
+            <mesh geometry={look.geometry} material={look.booster} />
           </group>
         </group>
       ))}
-      {model.engines.map((engine, i) => (
+      {RCS_JETS.map((jet, i) => (
         <group
-          key={i}
-          position={engine.position}
-          rotation={[Math.PI / 2, 0, 0]}
-          scale={[engine.radius, engine.radius, engine.radius]}
-          userData={{ radius: engine.radius }}
+          key={`rcs-${i}`}
+          position={jet.at}
+          quaternion={new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...jet.dir))}
+          visible={false}
           ref={(group) => {
-            if (group) flames.current[i] = group
+            rcsGroups.current[i] = group
           }}
         >
-          <mesh geometry={look.outerGeometry} material={look.outer} />
-          <mesh geometry={look.coreGeometry} material={look.core} />
+          <mesh geometry={look.geometry} material={look.rcs[i]} />
+        </group>
+      ))}
+      {model.engines.map((engine, i) => (
+        <group key={i} position={engine.position}>
+          <group
+            rotation={[Math.PI / 2, 0, 0]}
+            scale={[engine.radius, engine.radius, engine.radius]}
+            userData={{ radius: engine.radius }}
+            ref={(group) => {
+              if (group) flames.current[i] = group
+            }}
+          >
+            <mesh geometry={look.geometry} material={look.main} />
+          </group>
+          {/* the throat, white-hot, a little up inside the bell, facing aft */}
+          <mesh geometry={look.disc} material={look.throat} position={[0, 0, -engine.radius * 0.5]} scale={engine.radius * 0.75} />
         </group>
       ))}
     </group>
