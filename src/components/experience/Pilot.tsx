@@ -1088,6 +1088,7 @@ function Jet({ thrust }: { thrust: { current: number } }) {
 ============================================================ */
 
 const SHUTTLE_URL = '/models/space-shuttle.glb'
+import { detailShuttle } from './shuttleSurface'
 
 type ShuttleModel = {
   body: THREE.Mesh
@@ -1233,10 +1234,10 @@ function useShuttle() {
         const length = bodyBounds.max.z - bodyBounds.min.z
         await centreAndScale(merged, center, 1 / length, breathe, bodyBounds)
         if (cancelled) return
-        const body = new THREE.Mesh(
-          merged,
-          new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide }),
-        )
+        const skin = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide })
+        // tiles, blankets, seams, carbon-carbon (shuttleSurface.ts)
+        detailShuttle(skin)
+        const body = new THREE.Mesh(merged, skin)
         // the three main engines: the largest engine groups
         const engines = [...engineBoxes.values()]
           .map((box) => ({ box, size: box.getSize(new THREE.Vector3()) }))
