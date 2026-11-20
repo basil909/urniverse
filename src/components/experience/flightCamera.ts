@@ -102,12 +102,13 @@ export function placeCamera(frame: CameraFrame) {
   )
   // closer while slow, exploring; drawn back and wider when fast
   const pace = THREE.MathUtils.smoothstep(pilot.speed, 0.05, 0.85)
-  const reach = SHIP_LENGTH * (viewDistance.current / VIEW_NEAR) * THREE.MathUtils.lerp(0.86, 1.28, pace)
+  // (and a little further back while the engines push)
+  const reach = SHIP_LENGTH * (viewDistance.current / VIEW_NEAR) * THREE.MathUtils.lerp(0.86, 1.28, pace) * (1 + 0.1 * pilot.thrust)
   _camPos
     .set(0, 0, 0)
     .addScaledVector(forward, -reach * 3.2)
     .addScaledVector(_up, reach * (0.85 + pitchRate * 0.12))
-    .addScaledVector(_right, reach * yawRate * 0.35)
+    .addScaledVector(_right, reach * yawRate * 0.6)
   camOffset.current.lerp(_camPos, 1 - Math.exp(-delta * 6))
   camera.position.copy(jet.position).add(camOffset.current)
   // a hand-held float, gentlest at speed; a little tremor on boost
@@ -234,6 +235,8 @@ export function placeCamera(frame: CameraFrame) {
   _camTarget
     .copy(jet.position)
     .addScaledVector(forward, reach * 6)
+    // the ship a little low in the frame, the way ahead given the room
+    .addScaledVector(_up, reach * 0.14)
     .addScaledVector(_right, -reach * yawRate * 0.9)
     .addScaledVector(_up, reach * pitchRate * 0.5)
   if (mode === 'chase') {

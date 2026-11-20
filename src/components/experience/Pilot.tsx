@@ -1106,7 +1106,7 @@ function Jet({ thrust }: { thrust: { current: number } }) {
 
 const SHUTTLE_URL = '/models/space-shuttle.glb'
 import { detailShuttle } from './shuttleSurface'
-import { RCS_JETS, plumeGeometry, plumeMaterial, throatMaterial } from './plume'
+import { PUFF_COUNT, PUFF_FRAGMENT, PUFF_VERTEX, RCS_JETS, plumeGeometry, plumeMaterial, rcsState, throatMaterial } from './plume'
 
 type ShuttleModel = {
   body: THREE.Mesh
@@ -1456,6 +1456,145 @@ function mergeGeometries(parts: THREE.BufferGeometry[]) {
   return merged
 }
 
+/* the steering jets' gas (plume.ts): pulsed bursts, a flash at the port,
+   a cloud thrown out and expanding */
+function RcsPuffs() {
+  const size = useThree((state) => state.size)
+  const parts = useMemo(() => {
+    const positions = new Float32Array(PUFF_COUNT * 3)
+    const ages = new Float32Array(PUFF_COUNT).fill(1)
+    const sizes = new Float32Array(PUFF_COUNT)
+    const velocities = new Float32Array(PUFF_COUNT * 3)
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.setAttribute('aAge', new THREE.BufferAttribute(ages, 1))
+    geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1))
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 2)
+    const material = new THREE.ShaderMaterial({
+      uniforms: { uHalfHeight: { value: 400 } },
+      vertexShader: PUFF_VERTEX,
+      fragmentShader: PUFF_FRAGMENT,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })
+    return { positions, ages, sizes, velocities, geometry, material, next: 0, carry: RCS_JETS.map(() => 0) }
+  }, [])
+  useEffect(() => () => {
+    parts.geometry.dispose()
+    parts.material.dispose()
+  }, [parts])
+  useFrame((state, rawDelta) => {
+    const delta = Math.min(rawDelta, 0.05)
+    const time = state.clock.elapsedTime
+    parts.material.uniforms.uHalfHeight.value = size.height * 0.5 * Math.min(window.devicePixelRatio, 2)
+    const LIFE = 0.5
+    // age and move what is out there
+    for (let i = 0; i < PUFF_COUNT; i += 1) {
+      if (parts.ages[i] >= 1) continue
+      parts.ages[i] = Math.min(1, parts.ages[i] + delta / LIFE)
+      const slow = Math.exp(-delta * 2.5)
+      parts.velocities[i * 3] *= slow
+      parts.velocities[i * 3 + 1] *= slow
+      parts.velocities[i * 3 + 2] *= slow
+      parts.positions[i * 3] += parts.velocities[i * 3] * delta
+      parts.positions[i * 3 + 1] += parts.velocities[i * 3 + 1] * delta
+      parts.positions[i * 3 + 2] += parts.velocities[i * 3 + 2] * delta
+    }
+    // fire: pulses of some 80 ms, more often the harder the jet works
+    RCS_JETS.forEach((jet, j) => {
+      const level = rcsState.levels[j]
+      if (level < 0.05) return
+      const pulse = Math.sin(time * 38 + j * 2.1) > 0.6 - level * 1.2
+      if (!pulse) return
+      parts.carry[j] += delta * 260 * (0.4 + level)
+      while (parts.carry[j] >= 1) {
+        parts.carry[j] -= 1
+        const i = parts.next
+        parts.next = (parts.next + 1) % PUFF_COUNT
+        const spread = 0.55
+        _puffDir.set(...jet.dir)
+        _puffSide.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(spread * 2)
+        _puffDir.add(_puffSide.addScaledVector(_puffDir, -_puffSide.dot(_puffDir))).normalize()
+        const speed = 0.35 + Math.random() * 0.45
+        parts.positions.set([jet.at[0] + jet.dir[0] * 0.003, jet.at[1] + jet.dir[1] * 0.003, jet.at[2] + jet.dir[2] * 0.003], i * 3)
+        parts.velocities.set([_puffDir.x * speed, _puffDir.y * speed, _puffDir.z * speed], i * 3)
+        parts.ages[i] = Math.random() * 0.05
+        // (some 1 m at the port, blooming to several metres)
+        parts.sizes[i] = 0.02 + Math.random() * 0.015
+      }
+    })
+    parts.geometry.attributes.position.needsUpdate = true
+    ;(parts.geometry.attributes.aAge as THREE.BufferAttribute).needsUpdate = true
+    ;(parts.geometry.attributes.aSize as THREE.BufferAttribute).needsUpdate = true
+  })
+  return <points geometry={parts.geometry} material={parts.material} frustumCulled={false} />
+}
+const _puffDir = new THREE.Vector3()
+const _puffSide = new THREE.Vector3()
+
+/* ============================================================
+   SPACE DUST
+   Out in space, a few faint motes catch the sunlight and drift past the
+   ship at their own depths (a cinematic liberty: the dust between the
+   planets is far too fine to see), stretching a little with speed, so
+   the travel can be felt. None in air (the air streaks), nor in warp
+   (the star streaks), nor standing on the ground.
+============================================================ */
+const DUST = 260
+const DUST_BOX = 14 // ship lengths
+
+function SpaceDust({ state }: { state: { velocity: THREE.Vector3; amount: number } }) {
+  const parts = useMemo(() => {
+    const seeds = new Float32Array(DUST * 3)
+    for (let i = 0; i < DUST * 3; i += 1) seeds[i] = (Math.random() - 0.5) * DUST_BOX
+    const geometry = new THREE.BufferGeometry()
+    const positions = new Float32Array(DUST * 6)
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+    geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), DUST_BOX)
+    const material = new THREE.LineBasicMaterial({
+      color: '#f3e6cf',
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+    return { seeds, geometry, positions, material, offset: new THREE.Vector3(), dir: new THREE.Vector3() }
+  }, [])
+  useEffect(() => () => {
+    parts.geometry.dispose()
+    parts.material.dispose()
+  }, [parts])
+  const lines = useRef<THREE.LineSegments>(null)
+  useFrame((_, rawDelta) => {
+    const delta = Math.min(rawDelta, 0.05)
+    const amount = state.amount
+    if (lines.current) lines.current.visible = amount > 0.01
+    if (amount <= 0.01) return
+    // (the true speed is thousands of ship lengths a second: drawn at a
+    // pace that reads, faster as the ship goes faster)
+    const speed = state.velocity.length()
+    const seen = Math.min(3 + Math.log10(1 + speed) * 9, 34)
+    parts.dir.copy(state.velocity)
+    if (parts.dir.lengthSq() < 1e-12) parts.dir.set(0, 0, 1)
+    parts.dir.normalize()
+    parts.offset.addScaledVector(parts.dir, -seen * delta)
+    const tail = Math.min(seen * 0.02, 0.55)
+    const half = DUST_BOX / 2
+    const wrap = (value: number) => ((((value + half) % DUST_BOX) + DUST_BOX) % DUST_BOX) - half
+    for (let i = 0; i < DUST; i += 1) {
+      const x = wrap(parts.seeds[i * 3] + parts.offset.x)
+      const y = wrap(parts.seeds[i * 3 + 1] + parts.offset.y)
+      const z = wrap(parts.seeds[i * 3 + 2] + parts.offset.z)
+      parts.positions.set([x, y, z, x + parts.dir.x * (tail + 0.01), y + parts.dir.y * (tail + 0.01), z + parts.dir.z * (tail + 0.01)], i * 6)
+    }
+    parts.geometry.attributes.position.needsUpdate = true
+    parts.material.opacity = amount * 0.3
+  })
+  return <lineSegments ref={lines} geometry={parts.geometry} material={parts.material} frustumCulled={false} />
+}
+
 function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: number } }) {
   const flames = useRef<THREE.Group[]>([])
   const boosterFlames = useRef<THREE.Group[]>([])
@@ -1464,7 +1603,6 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     () => ({
       main: plumeMaterial('main'),
       booster: plumeMaterial('booster'),
-      rcs: RCS_JETS.map(() => plumeMaterial('rcs')),
       throat: throatMaterial(),
       geometry: plumeGeometry(),
       disc: new THREE.CircleGeometry(1, 32),
@@ -1475,15 +1613,14 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     () => () => {
       look.main.dispose()
       look.booster.dispose()
-      look.rcs.forEach((m) => m.dispose())
       look.throat.dispose()
       look.geometry.dispose()
       look.disc.dispose()
     },
     [look],
   )
-  const rcsGroups = useRef<(THREE.Group | null)[]>([])
   const rcsLevel = useRef(RCS_JETS.map(() => 0))
+  const engineLight = useRef<THREE.PointLight>(null)
   const lastTurn = useRef(new THREE.Vector3())
   useFrame((state, delta) => {
     const t = thrust.current
@@ -1517,14 +1654,10 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
       const want = THREE.MathUtils.clamp(jet.fires(change.x * 0.25, change.y * 0.25, change.z * 0.25), 0, 1)
       const level = rcsLevel.current
       level[i] = want > level[i] ? want : level[i] * Math.exp(-delta * 9)
-      const group = rcsGroups.current[i]
-      if (group) {
-        group.visible = level[i] > 0.02 && !stack.attached
-        const puff = 0.6 + 0.4 * Math.sin(time * 61 + i * 1.7)
-        group.scale.set(0.006, 0.05 * (0.5 + level[i]) * puff, 0.006)
-        look.rcs[i].uniforms.uThrust.value = level[i]
-      }
+      rcsState.levels[i] = stack.attached ? 0 : level[i]
     })
+    // the engines light the ship's tail while they burn
+    if (engineLight.current) engineLight.current.intensity = (0.02 + t * 0.09) * flicker
     // the launch stack: on the ship, then falling away when it separates
     // (the boosters back and out, the tank down from the belly, tumbling)
     if (stack.boosterGone >= 0) stack.boosterGone += delta
@@ -1579,19 +1712,8 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
           </group>
         </group>
       ))}
-      {RCS_JETS.map((jet, i) => (
-        <group
-          key={`rcs-${i}`}
-          position={jet.at}
-          quaternion={new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...jet.dir))}
-          visible={false}
-          ref={(group) => {
-            rcsGroups.current[i] = group
-          }}
-        >
-          <mesh geometry={look.geometry} material={look.rcs[i]} />
-        </group>
-      ))}
+      <RcsPuffs />
+      <pointLight ref={engineLight} position={[0, -0.03, 0.58]} color="#dfe4ff" intensity={0} distance={0.9} decay={2} />
       {model.engines.map((engine, i) => (
         <group key={i} position={engine.position}>
           <group
@@ -1679,6 +1801,7 @@ export default function Pilot() {
   const orbitAngle = useRef(0)
   const flyby = useRef<THREE.Vector3 | null>(null) // relative to the Sun
   const streaks = useRef({ velocity: new THREE.Vector3(), amount: 0 })
+  const dust = useRef({ velocity: new THREE.Vector3(), amount: 0 })
   // automatic quality: the pixel ratio steps down when frames run long
   const setDpr = useThree((state) => state.setDpr)
   const startDpr = useRef(0)
@@ -2421,6 +2544,10 @@ export default function Pilot() {
     streaks.current.velocity.copy(velocity.current).divideScalar(SHIP_LENGTH)
     streaks.current.amount =
       pilot.altitudeKm < 40 && !warp.current ? pilot.air * THREE.MathUtils.smoothstep(pilot.kms, 0.02, 0.15) : 0
+    // out in space, the dust drifting past
+    dust.current.velocity.copy(streaks.current.velocity)
+    const dustWanted = !warp.current && pilot.warpGlow < 0.05 && pilot.air < 0.02 && pilot.landState === 'flying' && !pilot.walking ? THREE.MathUtils.smoothstep(pilot.kms, 0.05, 1) : 0
+    dust.current.amount += (dustWanted - dust.current.amount) * (1 - Math.exp(-delta * 2))
     pilot.thrust = thrust.current
     pilot.heat = heat.current
 
@@ -2547,6 +2674,7 @@ export default function Pilot() {
             <Plasma heat={heat} />
           </group>
           <AirStreaks state={streaks.current} />
+          <SpaceDust state={dust.current} />
           <SurfaceLife jetRef={ship} />
           <RingChunks jetRef={ship} />
           <AsteroidField jetRef={ship} />

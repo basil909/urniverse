@@ -152,3 +152,36 @@ export const RCS_JETS: { at: [number, number, number]; dir: [number, number, num
   { at: [-0.076, -0.04, 0.462], dir: [0, -1, 0], fires: (pitch, _y, roll) => Math.max(0, -pitch, -roll) },
   { at: [0.076, -0.04, 0.462], dir: [0, -1, 0], fires: (pitch, _y, roll) => Math.max(0, -pitch, roll) },
 ]
+
+/* the steering jets' firing (0..1 each), written by the Shuttle, read by
+   the puffs */
+export const rcsState = { levels: RCS_JETS.map(() => 0) }
+
+/* ---- the puffs: a real thruster firing is a flash at the port, then a
+   cloud of gas thrown out and expanding, fading in a fraction of a
+   second; fired in short pulses. Particles in the ship's own frame. ---- */
+export const PUFF_COUNT = 360
+export const PUFF_VERTEX = /* glsl */ `
+uniform float uHalfHeight;
+attribute float aAge;
+attribute float aSize;
+varying float vAge;
+void main() {
+  vAge = aAge;
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  float grow = 1.0 + aAge * 5.0;
+  gl_PointSize = clamp(aSize * grow * projectionMatrix[1][1] * uHalfHeight / max(-mv.z, 1e-5), 1.5, 160.0);
+  gl_Position = projectionMatrix * mv;
+}`
+export const PUFF_FRAGMENT = /* glsl */ `
+varying float vAge;
+void main() {
+  if (vAge >= 1.0) discard;
+  float d = length(gl_PointCoord - 0.5) * 2.0;
+  float soft = exp(-d * d * 3.2) * (1.0 - smoothstep(0.8, 1.0, d));
+  // the flash: hot, yellow-white; then a pale, thinning cloud
+  float flash = 1.0 - smoothstep(0.0, 0.12, vAge);
+  vec3 color = mix(vec3(0.85, 0.87, 0.9), vec3(1.0, 0.9, 0.7), flash);
+  float a = soft * (flash * 1.6 + pow(1.0 - vAge, 2.2) * 0.3);
+  gl_FragColor = vec4(color * a, 1.0);
+}`
