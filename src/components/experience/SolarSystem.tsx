@@ -1019,6 +1019,22 @@ void main() {
 
 const SUN_FRAGMENT_SHADER = /* glsl */ `
 
+/* ============================================================
+   THE PHOTOSPHERE
+   - granulation: bright, domed cells of rising gas parted by dark lanes
+     of sinking gas (cellular noise, the cells wandering as they churn),
+     at the scales the eye can resolve from where it is: the real
+     granules (~1,000 km, a 700th of the radius) and finer cells close
+     in; from further out a coarser texture stands for them; the
+     supergranule network (~30,000 km) round them all
+   - limb darkening, per colour (blue fades faster), so the centre is a
+     white gold and the edge a deep orange-red, as in photographs
+   - sunspot groups in the two activity belts (some 5 to 35 degrees north
+     and south): dark umbrae in streaked penumbrae, bright faculae round
+     them that show best towards the limb
+   - a slow flow under it all, so the surface is never still
+============================================================ */
+
 uniform float uTime;
 varying vec3 vNormal;
 varying vec3 vWorldPosition;
@@ -1027,59 +1043,136 @@ varying vec3 vLocalPosition;
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y), mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
 float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += noise(p) * a; p = p * 2.02 + vec3(1.7, 9.2, 3.1); a *= 0.5; } return v; }
+vec3 hash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
+
+/* the sunspot groups, in the two active belts: where each spot stands on
+   the Sun (a direction) and its penumbra's radius (radii); leaders and
+   followers, as real groups lie, roughly east-west */
+const int SPOT_COUNT = 10;
+const vec4 SPOTS[10] = vec4[](
+  vec4(0.9228, 0.2419, 0.2998, 0.034),
+  vec4(0.8586, 0.2672, 0.4375, 0.02),
+  vec4(0.8936, 0.2250, 0.3885, 0.011),
+  vec4(-0.0332, -0.3090, 0.9505, 0.03),
+  vec4(-0.1665, -0.2840, 0.9443, 0.017),
+  vec4(-0.8818, 0.3746, -0.2865, 0.025),
+  vec4(-0.8273, 0.3907, -0.4035, 0.013),
+  vec4(0.3052, -0.1564, -0.9393, 0.021),
+  vec4(0.3999, -0.1822, -0.8982, 0.011),
+  vec4(-0.8446, -0.4384, 0.3074, 0.014)
+);
+
+/* cellular noise: distances to the nearest and next cell centre (the
+   centres wandering slowly), and the nearest cell's own random value */
+vec3 cells(vec3 p, float t) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  float d1 = 8.0;
+  float d2 = 8.0;
+  float id = 0.0;
+  for (int z = -1; z <= 1; z++) {
+    for (int y = -1; y <= 1; y++) {
+      for (int x = -1; x <= 1; x++) {
+        vec3 g = vec3(float(x), float(y), float(z));
+        vec3 o = hash33(i + g);
+        o = 0.5 + 0.42 * sin(t + 6.2831 * o);
+        vec3 r = g + o - f;
+        float d = dot(r, r);
+        if (d < d1) { d2 = d1; d1 = d; id = hash33(i + g + 17.0).x; } else if (d < d2) { d2 = d; }
+      }
+    }
+  }
+  return vec3(sqrt(vec2(d1, d2)), id);
+}
+
+/* granules: domed cells, dark lanes between (about 0.6 on average:
+   what a layer too fine to see contributes) */
+const float GRAIN_MEAN = 0.6;
+float granules(vec3 p, float t) {
+  vec3 c = cells(p, t);
+  float lane = smoothstep(0.02, 0.38, c.y - c.x);
+  float dome = 1.0 - 0.45 * smoothstep(0.1, 0.9, c.x);
+  return (0.2 + 0.8 * lane) * dome * (0.72 + 0.4 * c.z);
+}
+
+/* a layer of cells, scale of them to the radius, faded in once a cell spans a
+   few pixels (px: radii per pixel) */
+float layer(vec3 p, float scale, float t, float px) {
+  float seen = 1.0 - smoothstep(0.1, 0.35, px * scale);
+  if (seen <= 0.0) return GRAIN_MEAN;
+  return mix(GRAIN_MEAN, granules(p * scale, t), seen);
+}
 
 void main() {
   vec3 n = normalize(vNormal);
   vec3 viewDir = normalize(cameraPosition - vWorldPosition);
   float mu = clamp(dot(n, viewDir), 0.0, 1.0);
   vec3 p = normalize(vLocalPosition);
-
-  /* granulation: two scales of slowly churning convection cells (fine
-     granules inside a larger supergranule network) */
-  float cells = 1.0 - abs(noise(p * 34.0 + vec3(0.0, uTime * 0.03, uTime * 0.02)) * 2.0 - 1.0);
-  float fine = 1.0 - abs(noise(p * 72.0 - vec3(uTime * 0.025, 0.0, uTime * 0.02)) * 2.0 - 1.0);
-  cells = pow(cells, 2.6) * 0.7 + pow(fine, 3.0) * 0.3;
-  float network = 1.0 - abs(noise(p * 9.0 + vec3(uTime * 0.006)) * 2.0 - 1.0);
-  cells *= 0.82 + 0.18 * smoothstep(0.3, 0.9, network);
-  float churn = fbm(p * 2.4 + vec3(uTime * 0.006, 0.0, 0.0));
-
-  /* faculae (bright active regions) and rare, small sunspots */
-  float faculae = smoothstep(0.6, 0.8, fbm(p * 5.5 - vec3(0.0, uTime * 0.01, 0.0)));
-  float spots = smoothstep(0.8, 0.87, fbm(p * 1.8 + vec3(3.1, 0.0, 1.4)));
-
-  /* limb darkening: dimmer and redder towards the edge, as on the real Sun */
-  float limb = 1.0 - 0.68 * (1.0 - pow(mu, 0.7));
-  /* golden centre, deepening to orange and red at the limb */
-  vec3 core = vec3(1.0, 0.84, 0.52);
-  vec3 middle = vec3(1.0, 0.6, 0.2);
-  vec3 edge = vec3(0.85, 0.27, 0.05);
-  vec3 base = mix(edge, middle, smoothstep(0.0, 0.6, mu));
-  base = mix(base, core, smoothstep(0.6, 1.0, mu));
-
-  /* flying close: real granules are ~1,000 km across (a 700th of the
-     radius), bright cells of rising gas parted by dark lanes; they
-     resolve as you come in, finer cells within them below that */
   float px = length(fwidth(p));
-  float near1 = 1.0 - smoothstep(0.25, 0.9, px * 700.0);
-  if (near1 > 0.0) {
-    float g = 1.0 - abs(noise(p * 700.0 + vec3(uTime * 0.05, 0.0, uTime * 0.04)) * 2.0 - 1.0);
-    float g2 = 1.0 - abs(noise(p * 2600.0 - vec3(0.0, uTime * 0.08, 0.0)) * 2.0 - 1.0);
-    float near2 = 1.0 - smoothstep(0.25, 0.9, px * 2600.0);
-    float granules = pow(g, 2.4) * (1.0 - 0.3 * near2) + pow(g2, 3.0) * 0.3 * near2;
-    cells = mix(cells, granules, near1 * 0.85);
+  float t = uTime;
+
+  /* the slow flow: everything drifts a little */
+  vec3 q = p + 0.025 * (vec3(fbm(p * 3.0 + vec3(t * 0.01)), fbm(p * 3.0 + vec3(7.1, -t * 0.008, 0.0)), fbm(p * 3.0 + vec3(3.7, 1.3, t * 0.009))) - 0.5);
+
+  /* granulation, coarse to fine: each finer layer takes over as it
+     resolves (from afar a coarser texture stands for the real cells) */
+  float grain = layer(q, 110.0, t * 0.3, px);
+  float g2 = layer(q, 700.0, t * 0.6, px);
+  float g3 = layer(q, 2600.0, t * 0.9, px);
+  float fine2 = 1.0 - smoothstep(0.1, 0.35, px * 700.0);
+  float fine3 = 1.0 - smoothstep(0.1, 0.35, px * 2600.0);
+  grain = mix(grain, g2, fine2 * 0.8);
+  grain = mix(grain, g3 * 0.6 + g2 * 0.4, fine3 * 0.5);
+
+  /* the supergranule network: faint bright rims round cells ~40 times
+     larger, clearer towards the limb */
+  vec3 sg = cells(q * 26.0, t * 0.015);
+  float network = 1.0 - smoothstep(0.0, 0.1, sg.y - sg.x);
+
+  /* large, slow brightness variations */
+  float mottle = fbm(q * 5.0 + vec3(0.0, t * 0.004, 0.0));
+
+  /* the sunspots: a dark umbra in a lighter penumbra, its edge ragged
+     and its gas in fine radial streaks; bright faculae round each group */
+  float penumbra = 0.0;
+  float umbra = 0.0;
+  float faculae = 0.0;
+  float streaks = 1.0;
+  for (int i = 0; i < SPOT_COUNT; i++) {
+    vec3 c = SPOTS[i].xyz;
+    float r = SPOTS[i].w;
+    float d = length(p - c);
+    if (d > r * 3.0) continue;
+    vec3 side = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
+    vec3 up = cross(side, c);
+    vec3 off = p - c;
+    float angle = atan(dot(off, up), dot(off, side));
+    float ragged = 1.0 + 0.18 * (noise(vec3(cos(angle), sin(angle), float(i)) * 3.0) - 0.5);
+    float pen = 1.0 - smoothstep(0.82, 1.0, d / (r * ragged));
+    float umb = 1.0 - smoothstep(0.34, 0.46, d / (r * ragged));
+    float fil = 0.7 + 0.3 * noise(vec3(cos(angle) * 40.0, sin(angle) * 40.0, d / r * 3.0 + float(i)));
+    if (pen > penumbra) { penumbra = pen; streaks = fil; }
+    umbra = max(umbra, umb);
+    faculae = max(faculae, (1.0 - smoothstep(1.1, 2.8, d / r)) * (1.0 - pen) * (0.6 + 0.4 * noise(p * 300.0)));
   }
 
-  /* exposed so the cells read: dark lanes between bright granules */
-  float tone = 0.6 + 0.42 * cells + 0.1 * churn + 0.2 * faculae;
-  vec3 color = base * tone * limb;
-  /* a sunspot: a dark umbra inside a lighter, streaked penumbra */
-  float umbra = smoothstep(0.86, 0.9, fbm(p * 1.8 + vec3(3.1, 0.0, 1.4)));
-  float streaks = 0.75 + 0.25 * sin(atan(p.y, p.x) * 220.0 + fbm(p * 40.0) * 6.0);
-  color *= 1.0 - spots * 0.45 * streaks - umbra * 0.4;
+  /* brightness: the granulation's contrast, the mottling, the faculae
+     and network (both brighter towards the limb) */
+  float bright = (0.44 + 0.74 * grain) * (0.86 + 0.28 * mottle);
+  bright += faculae * (0.06 + 0.5 * (1.0 - mu));
+  bright += network * 0.08 * (1.0 - mu);
 
-  // only the hottest centre is bright enough to bloom; the rest stays
-  // below the bloom threshold so the surface is visible, not a white disc
-  gl_FragColor = vec4(color * 1.0, 1.0);
+  /* limb darkening, per colour: the edge reddens */
+  vec3 darkening = vec3(0.45, 0.66, 0.9);
+  vec3 limb = 1.0 - darkening * (1.0 - pow(mu, 0.8));
+  vec3 base = vec3(1.0, 0.71, 0.38);
+  vec3 color = base * limb * bright * 0.98;
+
+  /* the spots: a streaked penumbra, a dark, warm umbra */
+  color *= mix(1.0, 0.55 * streaks, penumbra);
+  color *= mix(vec3(1.0), vec3(0.28, 0.17, 0.12), umbra);
+
+  gl_FragColor = vec4(color, 1.0);
 }`
 
 
@@ -1994,6 +2087,7 @@ function Sun() {
         />
       </mesh>
 
+      <SunRim />
       <Corona />
       <FlightGlare />
       <Prominences />
@@ -2230,6 +2324,95 @@ void main() {
 
   gl_FragColor = vec4((vec3(1.0, 0.68, 0.34) * glow + plasma) * uOpacity, 1.0);
 }`
+
+/* ============================================================
+   THE SUN'S RIM, CLOSE IN
+   Where the far corona (a flat glow, below) has faded, near the Sun:
+   the chromosphere, a thin red layer of hot gas over the limb, ragged
+   with spicules (jets a few thousand km tall), and the inner corona's
+   glow above it, in faint streamers. A shell round the Sun, lit by how
+   close each line of sight passes to the limb.
+============================================================ */
+
+const SUN_RIM_SHELL = 1.3
+
+const SUN_RIM_VERTEX = /* glsl */ `
+varying vec3 vWorldPosition;
+varying vec3 vCenter;
+varying float vRadius;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPosition = wp.xyz;
+  vCenter = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vRadius = length(modelMatrix[0].xyz) / ${SUN_RIM_SHELL.toFixed(2)};
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`
+
+const SUN_RIM_FRAGMENT = /* glsl */ `
+uniform float uTime;
+varying vec3 vWorldPosition;
+varying vec3 vCenter;
+varying float vRadius;
+
+float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y), mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
+
+void main() {
+  vec3 ray = normalize(vWorldPosition - cameraPosition);
+  vec3 oc = vCenter - cameraPosition;
+  float away = length(oc) / vRadius;
+  // (close in only: further out the flat corona takes over)
+  float close = 1.0 - smoothstep(4.0, 9.0, away);
+  if (close <= 0.0) discard;
+  float along = dot(oc, ray);
+  if (along <= 0.0) discard;
+  vec3 rel = cameraPosition + ray * along - vCenter;
+  float h = length(rel) / vRadius - 1.0;
+  if (h <= 0.0) discard;
+
+  // round the limb: an angle about the line of sight
+  vec3 axis = normalize(oc);
+  vec3 e1 = normalize(cross(axis, abs(axis.y) < 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 e2 = cross(axis, e1);
+  float a = atan(dot(rel, e2), dot(rel, e1));
+  vec2 ring = vec2(cos(a), sin(a));
+
+  // the chromosphere: some 0.6% of the radius, ragged with spicules
+  float spicules = noise(vec3(ring * 160.0, uTime * 0.25)) * 0.6 + noise(vec3(ring * 520.0, uTime * 0.4)) * 0.4;
+  float chromo = exp(-h / (0.004 + 0.006 * spicules));
+  // the inner corona: a glow over a few tenths of the radius, in streamers
+  float streamers = 0.55 + 0.45 * noise(vec3(ring * 7.0, uTime * 0.01)) + 0.25 * noise(vec3(ring * 23.0, 2.0));
+  float corona = exp(-h / 0.03) * 0.4 + exp(-h / (0.1 * streamers)) * 0.14 * streamers;
+
+  vec3 color = vec3(1.0, 0.32, 0.22) * chromo * 1.2 + vec3(1.0, 0.82, 0.6) * corona;
+  gl_FragColor = vec4(color * close, 1.0);
+}`
+
+function SunRim() {
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        uniforms: { uTime: { value: 0 } },
+        vertexShader: SUN_RIM_VERTEX,
+        fragmentShader: SUN_RIM_FRAGMENT,
+        side: THREE.BackSide,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+    [],
+  )
+  useEffect(() => () => material.dispose(), [material])
+  useFrame((_, delta) => {
+    material.uniforms.uTime.value += delta
+  })
+  return (
+    <mesh material={material} scale={SUN_RIM_SHELL} renderOrder={1}>
+      <sphereGeometry args={[1, 96, 64]} />
+    </mesh>
+  )
+}
 
 function Corona() {
   const mesh = useRef<THREE.Mesh>(null)
