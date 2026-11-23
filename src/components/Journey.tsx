@@ -1391,6 +1391,11 @@ export default function Journey() {
   /* the dive to the galaxy's centre (galaxyDive.ts): scroll moves the
      camera along the way, forward or back; Esc or the button leaves */
   const [diving, setDiving] = useState(false)
+  // (a touch screen swipes rather than scrolls: the words say so)
+  const [touchScreen, setTouchScreen] = useState(false)
+  useEffect(() => {
+    setTouchScreen(window.matchMedia('(pointer: coarse)').matches)
+  }, [])
   const [divePlace, setDivePlace] = useState(0)
   const diveDistance = useRef<HTMLSpanElement>(null)
   const diveBar = useRef<HTMLSpanElement>(null)
@@ -1924,7 +1929,7 @@ export default function Journey() {
           <div className="film-controls">
             <span className="dive-readout">
               <span ref={diveDistance} />
-              <span className="dive-hint">Scroll to go deeper, back to rise</span>
+              <span className="dive-hint">{touchScreen ? 'Swipe up to go deeper, down to rise' : 'Scroll to go deeper, back to rise'}</span>
             </span>
             <button type="button" className="btn btn--ghost btn--sm" onClick={endDive}>
               Back to the story
@@ -2455,7 +2460,7 @@ export default function Journey() {
                   >
                     <Icon name="arrow" />
                     Dive to the centre
-                    <span className="true-size-hint">26,000 light-years, by scroll</span>
+                    <span className="true-size-hint">26,000 light-years, by {touchScreen ? 'swipe' : 'scroll'}</span>
                   </motion.button>
                 )}
 

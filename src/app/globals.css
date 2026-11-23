@@ -4692,6 +4692,16 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
    already says where you are), so "Jupiter" and "Neptune" fit whole */
 @media (max-width: 420px) {
   .chapter-menu-number { display: none; }
+  /* (room for "Pale Blue Dot" and "Local Group" whole: the menu a little
+     nearer the dot, the tools a little closer, the name a touch smaller) */
+  .chapter-menu { left: calc(var(--pad) + 14px); }
+  .hud-tools { gap: 2px; }
+  .chapter-menu-button {
+    padding: 0 8px 0 12px;
+    gap: 5px;
+    max-width: calc(100vw - 2 * var(--pad) - 14px - 5 * var(--control-height) - 8px - 2px);
+  }
+  .chapter-menu-name { font-size: 12.5px; }
 }
 
 /* ---- travelling: the place you are passing or reaching, quietly, in the
