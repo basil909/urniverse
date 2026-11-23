@@ -1745,7 +1745,15 @@ export default function Journey() {
 
       {/* between chapters the frame narrows to a wide screen, as in a film */}
       <div className="letterbox letterbox-top" aria-hidden="true" />
-      <div className="letterbox letterbox-bottom" aria-hidden="true" />
+      <div className="letterbox letterbox-bottom" aria-hidden="true">
+        {/* travelling: where you are, like a film's location title */}
+        {activeChapter && (
+          <span key={activeChapter.id} className="travel-title" style={{ ['--travel-accent' as string]: activeChapter.accent }}>
+            <span className="travel-title-number">{String(active + 1).padStart(2, '0')}</span>
+            {titleCase(activeChapter.label)}
+          </span>
+        )}
+      </div>
 
       <Loader />
 

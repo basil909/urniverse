@@ -407,7 +407,7 @@ export default function LocalGroup({ progressRef }: { progressRef: RefObject<num
       {named.map((galaxy, i) => (
         <Html
           key={galaxy.name}
-          position={[galaxy.at.x, galaxy.at.y - galaxy.radius * 0.6, galaxy.at.z]}
+          position={[galaxy.at.x, galaxy.at.y - galaxy.radius * 1.15, galaxy.at.z]}
           center
           zIndexRange={[5, 0]}
           style={{ pointerEvents: 'none' }}

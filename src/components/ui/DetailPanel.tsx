@@ -170,7 +170,10 @@ export default function DetailPanel({
           transition={{ duration: 0.5, ease: EASE }}
         >
           <header className="dp-head">
-            <div className="dp-eyebrow">{eyebrow}</div>
+            <div className="dp-eyebrow">
+              {/* (it names the tab you are on: "06 · Right now") */}
+              {tab === 'overview' ? eyebrow : eyebrow.replace(/About$/, tabs.find((entry) => entry.id === tab)?.label ?? 'About')}
+            </div>
             <h2 id="detail-title" className="dp-title">
               {name}
             </h2>

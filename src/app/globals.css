@@ -2664,8 +2664,9 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
-/* long notes wrap rather than run off a narrow screen */
-.galaxy-label span { max-width: 150px; white-space: normal; line-height: 1.35; }
+/* long notes wrap rather than run off a narrow screen (two lines, not a
+   word to a line: the label is placed with no width of its own) */
+.galaxy-label span { width: max-content; max-width: 170px; white-space: normal; line-height: 1.35; }
 
 /* ============================================================
    DESIGN PASS
@@ -4669,7 +4670,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 @media (max-width: 640px) {
   .hud-tools { gap: 4px; }
   .chapter-menu-button {
-    max-width: calc(100vw - 2 * var(--pad) - 20px - 5 * var(--control-height) - 16px - 8px);
+    max-width: calc(100vw - 2 * var(--pad) - 20px - 5 * var(--control-height) - 16px - 2px);
     padding: 0 10px 0 13px;
     gap: 7px;
   }
@@ -4679,3 +4680,35 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 @media (max-width: 420px) and (pointer: coarse) {
   :root { --control-height: 40px; }
 }
+/* the narrowest phones: the chapter's name alone (its coloured dot, left,
+   already says where you are), so "Jupiter" and "Neptune" fit whole */
+@media (max-width: 420px) {
+  .chapter-menu-number { display: none; }
+}
+
+/* ---- travelling: the place you are passing or reaching, quietly, in the
+   lower cinema bar (as a film names a location) ---- */
+.letterbox-bottom { display: grid; place-items: center; }
+.travel-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  font: 400 15px / 1 var(--serif);
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.82);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.6s var(--ease), transform 0.8s var(--ease);
+}
+.travel-title-number {
+  font: 600 10px / 1 var(--sans);
+  letter-spacing: 0.18em;
+  color: var(--travel-accent, var(--planet-accent));
+}
+.is-travelling .travel-title {
+  opacity: 1;
+  transform: none;
+  transition-delay: 0.45s;
+}
+@media (max-width: 760px) { .travel-title { font-size: 13.5px; } }
+@media (prefers-reduced-motion: reduce) { .travel-title { transition: none; transform: none; } }
