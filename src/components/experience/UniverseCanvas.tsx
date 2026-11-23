@@ -33,6 +33,8 @@ import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import SpaceStation, { stationShotPose } from './SpaceStation'
 import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
+import { dive, divePose } from './galaxyDive'
+import { journeyMotion } from './viewMode'
 import Pilot, { GroundCarry, pilotObjects } from './Pilot'
 import PhotoCapture from './PhotoCapture'
 import NearStars, { skyHandOver } from './NearStars'
@@ -1242,7 +1244,11 @@ function CinematicCamera({
         : sequenceFov(chapter, Math.min(seqClock.current / SEQUENCE_SECONDS[chapter], 1))
       : null
     const openingFov = opening.active && chapter === 0 ? openingPose(opening.clock, _openingScratch, _openingScratch2, _openingScratch3).fov : null
-    const baseFov = openingFov !== null
+    // (the dive to the galaxy's centre: a wide lens, for depth)
+    const diveFov = dive.active && chapter === 11 ? 62 : null
+    const baseFov = diveFov !== null
+      ? diveFov
+      : openingFov !== null
       ? openingFov
       : filmFov !== null
       ? filmFov
@@ -1513,6 +1519,13 @@ function CinematicCamera({
       smoothPosition.current.copy(_scratchPos)
       shot.cut = false
     }
+    /* the dive to the centre (galaxyDive.ts): the camera follows the way
+       to where the visitor has scrolled, easing after it */
+    const diveHere = dive.active && chapter === 11
+    if (diveHere) {
+      dive.s += (dive.target - dive.s) * (reducedMotion ? 1 : 1 - Math.exp(-delta * 2.2))
+      if (divePose(dive.s, _scratchPos, _scratchTarget, shotUp)) shotNear = 0.004
+    }
     if (revealBlend.current === 0 && Math.abs(camera.near - shotNear) > 1e-6) {
       camera.near = shotNear
       camera.updateProjectionMatrix()
@@ -1627,7 +1640,10 @@ function CinematicCamera({
     }
 
     // a shot low over a world stands the camera on its local vertical
-    camera.up.copy(shotHere ? shotUp : seqActive ? seqUp.current : openingOn ? openingUp.current : _worldUp)
+    camera.up.copy(shotHere || diveHere ? shotUp : seqActive ? seqUp.current : openingOn ? openingUp.current : _worldUp)
+    // for the sound (soundscape.ts): how deep into the journey, how fast
+    journeyMotion.depth = diveHere ? 11 + dive.s * 1.5 : safeProgress
+    journeyMotion.speed = diveHere ? Math.min(1, Math.abs(dive.target - dive.s) * 6) : flight.intensity
     camera.lookAt(_scratchTarget)
 
     // bank: roll gently into sideways motion, level out when it stops

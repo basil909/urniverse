@@ -2,8 +2,12 @@
    files). Per chapter a soft chord: four detuned voices that glide to the
    next chord as you travel, a slow "breathing" filter, a faint wash of
    filtered noise like wind, and now and then a distant bell note from the
-   chord, all through a long reverb. Quiet by design; off until the
-   visitor turns it on. */
+   chord, all through a long reverb. Under it a deep drone that follows
+   the journey: lower and fuller the further out you go (deepest diving
+   to the galaxy's centre), its tone opening and a rush of air rising
+   with the camera's speed. And small sounds to the hand: a soft whoosh
+   over a world, a glassy tick over a point of interest, a tiny click on
+   a press. Quiet by design; off until the visitor turns it on. */
 
 /* chord voicings per section (intro, Sun, 8 planets, Pale Blue Dot,
    Milky Way, Local Group, return), in Hz */
@@ -37,6 +41,14 @@ export class Soundscape {
   private bellTimer = 0
   private section = 0
   private stopped = false
+  /* the journey's drone, and the rush of moving */
+  private deep: OscillatorNode
+  private deepUpper: OscillatorNode
+  private deepLevel: GainNode
+  private deepTone: BiquadFilterNode
+  private rushLevel: GainNode
+  private rushBand: BiquadFilterNode
+  private lastTouch = 0
 
   constructor() {
     const Context = window.AudioContext ?? (window as AudioWindow).webkitAudioContext
@@ -118,7 +130,117 @@ export class Soundscape {
     wind.connect(this.reverb)
     noise.start()
 
+    // the journey's drone: a sub-bass sine and a sawtooth an octave up,
+    // through a low-pass that opens with speed
+    this.deep = ctx.createOscillator()
+    this.deep.type = 'sine'
+    this.deep.frequency.value = 55
+    this.deepUpper = ctx.createOscillator()
+    this.deepUpper.type = 'sawtooth'
+    this.deepUpper.frequency.value = 110
+    this.deepUpper.detune.value = -6
+    this.deepTone = ctx.createBiquadFilter()
+    this.deepTone.type = 'lowpass'
+    this.deepTone.frequency.value = 180
+    this.deepTone.Q.value = 0.9
+    const upperLevel = ctx.createGain()
+    upperLevel.gain.value = 0.35
+    this.deepLevel = ctx.createGain()
+    this.deepLevel.gain.value = 0.05
+    this.deep.connect(this.deepTone)
+    this.deepUpper.connect(upperLevel).connect(this.deepTone)
+    this.deepTone.connect(this.deepLevel)
+    this.deepLevel.connect(this.master)
+    this.deepLevel.connect(this.reverb)
+    this.deep.start()
+    this.deepUpper.start()
+
+    // the rush of moving: noise through a band that climbs with speed
+    const rush = ctx.createBufferSource()
+    rush.buffer = this.noiseBuffer(3)
+    rush.loop = true
+    this.rushBand = ctx.createBiquadFilter()
+    this.rushBand.type = 'bandpass'
+    this.rushBand.frequency.value = 300
+    this.rushBand.Q.value = 0.7
+    this.rushLevel = ctx.createGain()
+    this.rushLevel.gain.value = 0
+    rush.connect(this.rushBand).connect(this.rushLevel)
+    this.rushLevel.connect(this.master)
+    this.rushLevel.connect(this.reverb)
+    rush.start()
+
     this.scheduleBell()
+  }
+
+  /** the journey's depth (chapters, 0..~14) and the camera's speed (0..1) */
+  setMotion(depth: number, speed: number) {
+    if (this.stopped || this.context.state !== 'running') return
+    const now = this.context.currentTime
+    const deep = Math.min(Math.max(depth / 14, 0), 1)
+    const fast = Math.min(Math.max(speed, 0), 1)
+    // from 55 Hz at the start to an octave below at the far end
+    const pitch = 55 * Math.pow(2, -deep)
+    this.deep.frequency.setTargetAtTime(pitch, now, 0.6)
+    this.deepUpper.frequency.setTargetAtTime(pitch * 2, now, 0.6)
+    this.deepLevel.gain.setTargetAtTime(0.05 + 0.11 * deep + 0.05 * fast, now, 0.5)
+    this.deepTone.frequency.setTargetAtTime(150 + 90 * (1 - deep) + 520 * fast, now, 0.25)
+    this.rushLevel.gain.setTargetAtTime(0.11 * Math.pow(fast, 1.4), now, 0.2)
+    this.rushBand.frequency.setTargetAtTime(280 + 1400 * fast, now, 0.25)
+  }
+
+  /** a sound to the hand: over a world, over a point, or a press */
+  touch(kind: 'world' | 'point' | 'press', pitch = 0) {
+    const ctx = this.context
+    if (this.stopped || ctx.state !== 'running') return
+    const now = ctx.currentTime
+    // (never a clatter: one at a time)
+    if (now - this.lastTouch < (kind === 'press' ? 0.04 : 0.09)) return
+    this.lastTouch = now
+    const out = ctx.createGain()
+    out.connect(this.master)
+    out.connect(this.reverb)
+    if (kind === 'world') {
+      // a soft whoosh, rising, and a low note of the chord under it
+      const air = ctx.createBufferSource()
+      air.buffer = this.noiseBuffer(0.6)
+      const band = ctx.createBiquadFilter()
+      band.type = 'bandpass'
+      band.Q.value = 1.4
+      band.frequency.setValueAtTime(380, now)
+      band.frequency.exponentialRampToValueAtTime(1500, now + 0.4)
+      const level = ctx.createGain()
+      level.gain.setValueAtTime(0, now)
+      level.gain.linearRampToValueAtTime(0.22, now + 0.12)
+      level.gain.exponentialRampToValueAtTime(0.001, now + 0.55)
+      air.connect(band).connect(level).connect(out)
+      air.start(now)
+      air.stop(now + 0.6)
+      const note = ctx.createOscillator()
+      note.type = 'sine'
+      note.frequency.value = CHORDS[this.section][1] * 2 * Math.pow(2, pitch / 12)
+      const noteLevel = ctx.createGain()
+      noteLevel.gain.setValueAtTime(0, now)
+      noteLevel.gain.linearRampToValueAtTime(0.035, now + 0.05)
+      noteLevel.gain.exponentialRampToValueAtTime(0.0005, now + 1.4)
+      note.connect(noteLevel).connect(out)
+      note.start(now)
+      note.stop(now + 1.5)
+    } else {
+      // glass: a short, high, damped tone (a press shorter and higher)
+      const tone = ctx.createOscillator()
+      tone.type = 'sine'
+      tone.frequency.value = (kind === 'press' ? 2900 : 1900) * Math.pow(2, pitch / 12)
+      const level = ctx.createGain()
+      const length = kind === 'press' ? 0.05 : 0.16
+      level.gain.setValueAtTime(0, now)
+      level.gain.linearRampToValueAtTime(kind === 'press' ? 0.025 : 0.03, now + 0.004)
+      level.gain.exponentialRampToValueAtTime(0.0004, now + length)
+      tone.connect(level).connect(out)
+      tone.start(now)
+      tone.stop(now + length + 0.02)
+    }
+    window.setTimeout(() => out.disconnect(), 2000)
   }
 
   /** fade in (must follow a user gesture: browsers block sound before one) */

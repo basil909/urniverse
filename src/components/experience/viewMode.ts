@@ -12,6 +12,11 @@
 
 export type ViewMode = 'cinematic' | 'interactive'
 
+/* how deep into the journey the camera is (the chapter, with its
+   fraction; the galaxy dive goes deeper still) and how fast it is moving
+   (0..1): written by the camera each frame, heard by the soundscape */
+export const journeyMotion = { depth: 0, speed: 0 }
+
 export const viewMode = {
   mode: 'cinematic' as ViewMode,
   /** the visitor's orbit about the chapter's subject (radians) and zoom */

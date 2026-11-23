@@ -20,6 +20,7 @@ import FlightHud from './ui/FlightHud'
 import ChapterMenu from './ui/ChapterMenu'
 import TimeBar from './ui/TimeBar'
 import ZoomControl from './ui/ZoomControl'
+import { DIVE_PLACES, dive } from './experience/galaxyDive'
 import CommandPalette, { type Command } from './ui/CommandPalette'
 import LiveCounter from './ui/LiveCounter'
 import { PICK_EVENT } from './experience/PlanetPicker'
@@ -898,6 +899,12 @@ export default function Journey() {
     }
 
     lenis.options.virtualScroll = ({ deltaX, deltaY, event }) => {
+      // scrolling paused (a film, the reveal, the galaxy dive): no glide to
+      // the next chapter (it was forced through the pause before)
+      if (lenis.isStopped) {
+        if (event.cancelable) event.preventDefault()
+        return false
+      }
       if (snapping) return true // locked: Lenis cancels the event
 
       // scrolling inside the details panel: let it scroll natively
@@ -1381,6 +1388,93 @@ export default function Journey() {
       window.setTimeout(() => setCutting(false), 460),
     ]
   }, [])
+  /* the dive to the galaxy's centre (galaxyDive.ts): scroll moves the
+     camera along the way, forward or back; Esc or the button leaves */
+  const [diving, setDiving] = useState(false)
+  const [divePlace, setDivePlace] = useState(0)
+  const diveDistance = useRef<HTMLSpanElement>(null)
+  const diveBar = useRef<HTMLSpanElement>(null)
+  const startDive = () => {
+    dive.active = true
+    dive.target = 0
+    dive.s = 0
+    setDivePlace(0)
+    lenisRef.current?.stop()
+    setDiving(true)
+  }
+  const endDive = useCallback(() => {
+    dive.active = false
+    lenisRef.current?.start()
+    setDiving(false)
+  }, [])
+  useEffect(() => {
+    if (diving && section !== 11) endDive()
+  }, [section, diving, endDive])
+  useEffect(() => {
+    if (!diving) return
+    const step = (amount: number) => {
+      dive.target = Math.min(1, Math.max(0, dive.target + amount))
+    }
+    // (a trackpad's own inertia carries on through its wheel events)
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      step((event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY) / 9000)
+    }
+    let touchY: number | null = null
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY ?? null
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY
+      if (touchY === null || y === undefined) return
+      if ((event.target as HTMLElement | null)?.closest?.('button')) return
+      event.preventDefault()
+      step((touchY - y) / 2400)
+      touchY = y
+    }
+    const onKey = (event: KeyboardEvent) => {
+      const forward = ['ArrowDown', 'ArrowRight', 'PageDown', ' '].includes(event.key)
+      const back = ['ArrowUp', 'ArrowLeft', 'PageUp'].includes(event.key)
+      if (!forward && !back && !['Home', 'End', 'Escape'].includes(event.key)) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      if (forward) step(0.06)
+      else if (back) step(-0.06)
+      else if (event.key === 'Home') dive.target = 0
+      else if (event.key === 'End') dive.target = 1
+      else endDive()
+    }
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true })
+    window.addEventListener('touchstart', onTouchStart, { passive: true })
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('keydown', onKey, true)
+    // the words follow the camera
+    let frame = 0
+    let place = -1
+    const tick = () => {
+      frame = window.requestAnimationFrame(tick)
+      if (diveDistance.current) {
+        const ly = Math.round(dive.distanceLy / 100) * 100
+        diveDistance.current.textContent = `${ly.toLocaleString('en-GB')} light-years from the centre`
+      }
+      if (diveBar.current) diveBar.current.style.transform = `scaleX(${dive.s.toFixed(4)})`
+      if (dive.place !== place) {
+        place = dive.place
+        setDivePlace(place)
+      }
+    }
+    tick()
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('wheel', onWheel, { capture: true })
+      window.removeEventListener('touchstart', onTouchStart)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [diving, endDive])
+
   const startFilm = (first = 1) => {
     shot.chapter = section
     lenisRef.current?.stop()
@@ -1732,7 +1826,7 @@ export default function Journey() {
     <MotionConfig reducedMotion="user">
     <main
       ref={rootRef}
-      className={`universe-page ${openingOn ? 'is-filming' : ''} ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 ? 'is-filming' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textShown && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
+      className={`universe-page ${openingOn ? 'is-filming' : ''} ${revealStep > 0 ? 'is-revealing' : ''} ${film !== 0 || diving ? 'is-filming' : ''} ${diving ? 'is-diving' : ''} ${canSpin && !flying ? 'can-spin' : ''} ${detailOpen ? 'detail-is-open' : ''} ${flying ? 'is-flying' : ''} ${!textShown && section > 0 && !flying && !detailOpen ? 'is-travelling' : ''}`}
       style={
         {
           '--planet-accent': activeChapter?.accent ?? '#9bb8ff',
@@ -1816,6 +1910,29 @@ export default function Journey() {
 
       {/* a cut: a moment of black between shots */}
       <div className={`cut ${cutting ? 'is-on' : ''}`} aria-hidden="true" />
+
+      {/* the dive: where you are, how far from the centre, the way out */}
+      {diving && (
+        <div className="film dive" role="group" aria-label="The dive to the centre of the Milky Way">
+          <motion.div key={divePlace} className="film-caption" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.9, ease: EASE_OUT_EXPO }}>
+            <p className="film-name">
+              <span className="film-num">{String(divePlace + 1).padStart(2, '0')}</span>
+              {DIVE_PLACES[divePlace].name}
+            </p>
+            <p className="film-line">{DIVE_PLACES[divePlace].note}</p>
+          </motion.div>
+          <div className="film-controls">
+            <span className="dive-readout">
+              <span ref={diveDistance} />
+              <span className="dive-hint">Scroll to go deeper, back to rise</span>
+            </span>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={endDive}>
+              Back to the story
+            </button>
+          </div>
+        </div>
+      )}
+      {diving && <span ref={diveBar} className="dive-progress" aria-hidden="true" />}
 
       {/* the six shots: a lower third naming the shot, and the controls */}
       {film !== 0 && (
@@ -2325,6 +2442,20 @@ export default function Journey() {
                     <Icon name="land" />
                     See the Himalayas
                     <span className="true-size-hint">8,849 m</span>
+                  </motion.button>
+                )}
+                {activeChapter.id === 'galaxy' && (
+                  <motion.button
+                    type="button"
+                    className="true-size film-start station-start dive-start"
+                    onClick={startDive}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.7, ease: EASE_OUT_EXPO }}
+                  >
+                    <Icon name="arrow" />
+                    Dive to the centre
+                    <span className="true-size-hint">26,000 light-years, by scroll</span>
                   </motion.button>
                 )}
 

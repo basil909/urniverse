@@ -31,19 +31,10 @@ const CLUSTER_COUNT = 80
 
 const ARM_COUNT = 4
 
-/* the central bar's direction in the disc */
-const BAR_ANGLE = 0.45
-const BAR_COS = Math.cos(BAR_ANGLE)
-const BAR_SIN = Math.sin(BAR_ANGLE)
-export const GALAXY_RADIUS = 22
-/* the bar's half-length: about 16,000 light-years */
-const BAR_HALF = 7
-/* the arms' pitch, about 12.5 degrees: how far they wind per step out */
-const ARM_WIND = 1 / Math.tan((12.5 * Math.PI) / 180)
-/* the Sun: 26,000 ly out, about 0.92 rad round from the Perseus arm, which
-   puts the Sagittarius arm just inside it (see the notes above) */
-export const SUN_RADIUS = GALAXY_RADIUS * 0.56
-export const SUN_ANGLE = BAR_ANGLE + ARM_WIND * Math.log(SUN_RADIUS / BAR_HALF) + 0.92
+import { ARM_WIND, BAR_ANGLE, BAR_COS, BAR_HALF, BAR_SIN, GALAXY_RADIUS, SUN_ANGLE, SUN_RADIUS } from './galaxyLayout'
+import { dive, galaxyFrame } from './galaxyDive'
+import Nebulae from './Nebulae'
+export { GALAXY_RADIUS, SUN_ANGLE, SUN_RADIUS }
 
 // Far backdrop, upper right of the intro view, so it never sits behind the Sun
 export const GALAXY_POSITION: [number, number, number] = [48, 30, -125]
@@ -304,12 +295,15 @@ const glowFragmentShader = /* glsl */ `
    MAIN COMPONENT
 ============================================================ */
 
+const _cameraLocal = new THREE.Vector3()
+
 export default function Galaxy({
   progressRef,
 }: {
   progressRef?: MutableRefObject<number>
 }) {
   const galaxy = useRef<THREE.Group>(null)
+  const camera = useThree((state) => state.camera)
   const marker = useRef<HTMLDivElement>(null)
   const markerOpacity = useRef(0)
 
@@ -764,18 +758,25 @@ export default function Galaxy({
       // (and stays, small, in the Local Group chapter)
       (1 - THREE.MathUtils.smoothstep(progress, 13.0, 13.12))
     galaxy.current.visible = fade > 0.001
-    glowStrength.current = 0.6 * fade
+    galaxyFrame.object = galaxy.current
+    // the glow is a flat sheet in the disc: down near it (diving), it gives
+    // way to the stars and the nebulae
+    const height = Math.abs(galaxy.current.worldToLocal(_cameraLocal.copy(camera.position)).y)
+    const above = THREE.MathUtils.smoothstep(height, 0.6, 5)
+    glowStrength.current = 0.6 * fade * THREE.MathUtils.lerp(0.25, 1, above)
     glowMaterial.uniforms.uStrength.value = glowStrength.current
     starMaterial.uniforms.uFade.value = fade
     if (dustMaterial.current) dustMaterial.current.opacity = 0.42 * fade
     if (clusterMaterial.current) clusterMaterial.current.opacity = 0.2 * fade
-    if (coreMaterial.current) coreMaterial.current.opacity = 0.14 * fade
+    // (the core's round glow, too: from within the disc it would hang over
+    // the horizon like a ball)
+    if (coreMaterial.current) coreMaterial.current.opacity = 0.14 * fade * above
 
     // marker shows only once the camera has settled on the galaxy
     if (marker.current && progressRef) {
       const progress = progressRef.current ?? 0
       const local = progress - GALAXY_CHAPTER
-      const target = (local >= 0.18 && local < 0.93 ? 1 : 0) * (shot.index >= 2 && shot.index <= 5 ? 0 : 1)
+      const target = (local >= 0.18 && local < 0.93 ? 1 : 0) * (shot.index >= 2 && shot.index <= 5 ? 0 : 1) * (dive.active ? 0 : 1)
       markerOpacity.current +=
         (target - markerOpacity.current) * (1 - Math.exp(-delta * 4))
       marker.current.style.opacity = markerOpacity.current.toFixed(3)
@@ -885,6 +886,26 @@ export default function Galaxy({
               }
             />
           </points>
+        )}
+
+        {/* ==================================================
+            THE NEBULAE NEAR THE SUN (volumetric, Nebulae.tsx)
+        ================================================== */}
+        <Nebulae />
+
+        {/* ==================================================
+            SAGITTARIUS A*: the glow round the central black hole
+            (its disc of hot gas), and a point of light at its heart
+        ================================================== */}
+        {softDot && (
+          <>
+            <sprite scale={[0.22, 0.22, 1]} renderOrder={-1}>
+              <spriteMaterial map={softDot} color="#ffb070" opacity={0.25} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
+            </sprite>
+            <sprite scale={[0.05, 0.05, 1]} renderOrder={-1}>
+              <spriteMaterial map={softDot} color="#fff4e6" opacity={0.8} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
+            </sprite>
+          </>
         )}
 
         {/* ==================================================
