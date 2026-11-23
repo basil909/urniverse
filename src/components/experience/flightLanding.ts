@@ -257,7 +257,10 @@ export function flyLanding(frame: LandingFrame) {
       // or it met the ground at 1,600 km/h and rolled for half a minute)
       let down = 0.006 + km * 0.85
       const groundSpeed = Math.sqrt(Math.max(velocity.current.lengthSq() - velocity.current.dot(_groundUp) ** 2, 0)) * KM_PER_UNIT
-      if (!runway && km < 0.08) down *= THREE.MathUtils.smoothstep(groundSpeed, 0.2, 0.11)
+      // (held while faster than 0.2 km/s, free to settle below 0.11: three's
+      // smoothstep needs its edges in order, unlike GLSL's, so it is
+      // written as one minus; reversed, it held the ship 59 m up forever)
+      if (!runway && km < 0.08) down *= 1 - THREE.MathUtils.smoothstep(groundSpeed, 0.11, 0.2)
       if (runway) {
         // held on the approach's glide, towards the touchdown point
         _runwayLocal.copy(jet.position).applyMatrix4(ground.inverse).normalize()

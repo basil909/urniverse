@@ -139,7 +139,9 @@ export class FlightAudio {
   }
 
   async start() {
-    await this.context.resume()
+    // (stopped before it could resume: its resume rejects; nothing to do)
+    await this.context.resume().catch(() => {})
+    if (this.stopped || this.context.state === 'closed') return
     const now = this.context.currentTime
     this.master.gain.setTargetAtTime(0.55, now, 0.6)
   }
@@ -149,7 +151,7 @@ export class FlightAudio {
     this.stopped = true
     const now = this.context.currentTime
     this.master.gain.setTargetAtTime(0, now, 0.25)
-    window.setTimeout(() => this.context.close(), 1200)
+    window.setTimeout(() => this.context.close().catch(() => {}), 1200)
   }
 
   update(state: FlightSoundState) {

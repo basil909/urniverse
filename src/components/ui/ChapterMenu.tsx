@@ -31,19 +31,43 @@ export default function ChapterMenu({
 
   useEffect(() => {
     if (!open) return
+    const items = () => [...(root.current?.querySelectorAll<HTMLButtonElement>('.chapter-menu-item') ?? [])]
+    // open on the chapter you are in
+    const frame = window.requestAnimationFrame(() => {
+      const list = items()
+      ;(list.find((item) => item.classList.contains('is-here')) ?? list[0])?.focus({ preventScroll: true })
+    })
+    /* while it is open the arrow keys move through it (first, and no
+       further: the page's own arrow keys travel between chapters) */
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        event.stopImmediatePropagation()
         setOpen(false)
         button.current?.focus()
+        return
       }
+      const list = items()
+      if (!list.length) return
+      const at = list.indexOf(document.activeElement as HTMLButtonElement)
+      let next = -1
+      if (event.key === 'ArrowDown') next = at < 0 ? 0 : Math.min(list.length - 1, at + 1)
+      else if (event.key === 'ArrowUp') next = at < 0 ? list.length - 1 : Math.max(0, at - 1)
+      else if (event.key === 'Home' || event.key === 'PageUp') next = 0
+      else if (event.key === 'End' || event.key === 'PageDown') next = list.length - 1
+      else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') next = at
+      if (next < 0) return
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      list[next]?.focus()
     }
     const onDown = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false)
     }
-    window.addEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
     window.addEventListener('pointerdown', onDown)
     return () => {
-      window.removeEventListener('keydown', onKey)
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('keydown', onKey, true)
       window.removeEventListener('pointerdown', onDown)
     }
   }, [open])

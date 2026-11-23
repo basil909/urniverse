@@ -123,7 +123,9 @@ export class Soundscape {
 
   /** fade in (must follow a user gesture: browsers block sound before one) */
   async start() {
-    await this.context.resume()
+    // (stopped before it could resume: its resume rejects; nothing to do)
+    await this.context.resume().catch(() => {})
+    if (this.stopped || this.context.state === 'closed') return
     const now = this.context.currentTime
     this.master.gain.cancelScheduledValues(now)
     this.master.gain.setValueAtTime(this.master.gain.value, now)
@@ -132,13 +134,15 @@ export class Soundscape {
 
   /** fade out, then close */
   stop() {
+    // (once: a second close of a closed context rejects)
+    if (this.stopped) return
     this.stopped = true
     window.clearTimeout(this.bellTimer)
     const now = this.context.currentTime
     this.master.gain.cancelScheduledValues(now)
     this.master.gain.setValueAtTime(this.master.gain.value, now)
     this.master.gain.linearRampToValueAtTime(0, now + 1.2)
-    window.setTimeout(() => this.context.close(), 1500)
+    window.setTimeout(() => this.context.close().catch(() => {}), 1500)
   }
 
   /** step back (almost silent) while another score plays, or return */

@@ -134,7 +134,10 @@ export class FilmScore {
 
   /** begin (after a click), on a shot */
   async start(shot: number) {
-    await this.ctx.resume()
+    // (a context closed before it could resume, the film left at once,
+    // rejects its resume: nothing to play then)
+    await this.ctx.resume().catch(() => {})
+    if (this.closed || this.ctx.state === 'closed') return
     const now = this.ctx.currentTime
     this.master.gain.cancelScheduledValues(now)
     this.master.gain.setValueAtTime(0, now)

@@ -1746,7 +1746,8 @@ export default function Pilot() {
   // own layer only: a box round the one-unit ship
   useEffect(() => {
     gl.shadowMap.enabled = true
-    gl.shadowMap.type = THREE.PCFSoftShadowMap
+    // (PCF: three folded its soft variant into it, and warns if asked for that)
+    gl.shadowMap.type = THREE.PCFShadowMap
     const light = sunLight.current
     if (!light) return
     light.castShadow = true
