@@ -1687,6 +1687,141 @@ void main() {
 
 const _trail = new THREE.Vector3()
 
+/* ============================================================
+   LAYERED STAR DUST
+   Three layers of faint points round the camera, each at a depth of its
+   own: near, middle and far (boxes 6, 24 and 90 units across, wrapping
+   round you as you go). Fixed in space, so as the camera moves the near
+   layer slides past quickly and the far one barely at all; the pointer
+   leans them too, the near most. Depth you can feel, not see. (Flying,
+   the ship has dust of its own.)
+============================================================ */
+
+const DEPTH_LAYERS = [
+  { box: 6, count: 220, size: 1.7, alpha: 0.42, lean: 0.06 },
+  { box: 24, count: 520, size: 1.3, alpha: 0.32, lean: 0.1 },
+  { box: 90, count: 1100, size: 1.05, alpha: 0.24, lean: 0.16 },
+]
+
+const DEPTH_VERTEX = /* glsl */ `
+uniform vec3 uCamera;
+uniform vec3 uLean;
+uniform float uBox;
+uniform float uSize;
+uniform float uPixelRatio;
+attribute float aShade;
+varying float vFade;
+varying float vShade;
+void main() {
+  // wrapped into a box that travels with the camera (fixed in space
+  // within it), and leaned by the pointer
+  vec3 rel = mod(position - uCamera + uBox * 0.5, uBox) - uBox * 0.5;
+  vec3 world = uCamera + rel + uLean;
+  float d = length(rel);
+  // faded in from the box's edge (no popping as they wrap) and near the lens
+  vFade = (1.0 - smoothstep(uBox * 0.32, uBox * 0.5, d)) * smoothstep(uBox * 0.03, uBox * 0.1, d);
+  vShade = aShade;
+  vec4 mv = viewMatrix * vec4(world, 1.0);
+  gl_Position = projectionMatrix * mv;
+  gl_PointSize = uSize * uPixelRatio * (0.75 + 0.5 * aShade);
+}`
+
+const DEPTH_FRAGMENT = /* glsl */ `
+uniform float uAlpha;
+varying float vFade;
+varying float vShade;
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float r = dot(c, c) * 4.0;
+  if (r > 1.0) discard;
+  // warm to cool, as the stars are
+  vec3 color = mix(vec3(1.0, 0.86, 0.7), vec3(0.74, 0.84, 1.0), vShade);
+  gl_FragColor = vec4(color, (1.0 - r) * vFade * uAlpha * (0.55 + 0.45 * vShade));
+}`
+
+const _leanRight = new THREE.Vector3()
+const _leanUp = new THREE.Vector3()
+
+function DepthStars() {
+  const camera = useThree((state) => state.camera)
+  const pointer = useThree((state) => state.pointer)
+  const dpr = useThree((state) => state.viewport.dpr)
+  const group = useRef<THREE.Group>(null)
+  const lean = useRef(new THREE.Vector2())
+  const layers = useMemo(
+    () =>
+      DEPTH_LAYERS.map((layer, k) => {
+        const random = (i: number) => {
+          const x = Math.sin((i + 1) * 12.9898 + k * 78.233) * 43758.5453
+          return x - Math.floor(x)
+        }
+        const positions = new Float32Array(layer.count * 3)
+        const shades = new Float32Array(layer.count)
+        for (let i = 0; i < layer.count; i += 1) {
+          positions[i * 3] = random(i * 4) * layer.box
+          positions[i * 3 + 1] = random(i * 4 + 1) * layer.box
+          positions[i * 3 + 2] = random(i * 4 + 2) * layer.box
+          shades[i] = random(i * 4 + 3)
+        }
+        const geometry = new THREE.BufferGeometry()
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+        geometry.setAttribute('aShade', new THREE.BufferAttribute(shades, 1))
+        const material = new THREE.ShaderMaterial({
+          uniforms: {
+            uCamera: { value: new THREE.Vector3() },
+            uLean: { value: new THREE.Vector3() },
+            uBox: { value: layer.box },
+            uSize: { value: layer.size },
+            uPixelRatio: { value: 1 },
+            uAlpha: { value: layer.alpha },
+          },
+          vertexShader: DEPTH_VERTEX,
+          fragmentShader: DEPTH_FRAGMENT,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        })
+        return { geometry, material, layer }
+      }),
+    [],
+  )
+  useEffect(
+    () => () =>
+      layers.forEach(({ geometry, material }) => {
+        geometry.dispose()
+        material.dispose()
+      }),
+    [layers],
+  )
+  useFrame((_, delta) => {
+    const g = group.current
+    if (!g) return
+    g.visible = !pilot.active
+    if (!g.visible) return
+    // the pointer's lean, eased
+    lean.current.x += (pointer.x - lean.current.x) * (1 - Math.exp(-delta * 1.5))
+    lean.current.y += (pointer.y - lean.current.y) * (1 - Math.exp(-delta * 1.5))
+    _leanRight.set(1, 0, 0).applyQuaternion(camera.quaternion)
+    _leanUp.set(0, 1, 0).applyQuaternion(camera.quaternion)
+    layers.forEach(({ material, layer }) => {
+      const u = material.uniforms
+      u.uCamera.value.copy(camera.position)
+      u.uLean.value
+        .copy(_leanRight)
+        .multiplyScalar(lean.current.x * layer.box * layer.lean * 0.1)
+        .addScaledVector(_leanUp, lean.current.y * layer.box * layer.lean * 0.06)
+      u.uPixelRatio.value = Math.min(dpr, 2)
+    })
+  })
+  return (
+    <group ref={group}>
+      {layers.map(({ geometry, material }, i) => (
+        <points key={i} geometry={geometry} material={material} frustumCulled={false} renderOrder={-2} />
+      ))}
+    </group>
+  )
+}
+
 function StarStreaks() {
   const camera = useThree((state) => state.camera)
   const lines = useRef<THREE.LineSegments>(null)
@@ -2863,6 +2998,7 @@ function Scene({
       <WarmUp />
 
       <StarStreaks />
+      <DepthStars />
 
       {/* last: the far, tiny things drawn lightly (flight) */}
       <FocusCull />

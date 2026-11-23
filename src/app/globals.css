@@ -4170,12 +4170,22 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
    while you watch, titles set like a film's
    ============================================================ */
 
+/* the bars' height: on a landscape screen, whatever leaves a picture of
+   2.39:1 between them (anamorphic widescreen: some 150 px each on a
+   1440 x 900 laptop); a phone, or a screen already that wide, keeps a
+   thin pair */
+:root { --bar: 9vh; }
+@media (max-width: 760px) { :root { --bar: 7vh; } }
+@media (min-width: 761px) and (min-aspect-ratio: 13/10) and (max-aspect-ratio: 2/1) {
+  :root { --bar: max(9vh, calc((100vh - 100vw / 2.39) / 2)); }
+}
+
 .letterbox {
   position: fixed;
   left: 0;
   right: 0;
   z-index: 60;
-  height: 9vh;
+  height: var(--bar);
   background: #000;
   pointer-events: none;
   transition: transform 1.1s cubic-bezier(0.65, 0, 0.35, 1);
@@ -4183,7 +4193,6 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .letterbox-top { top: 0; transform: translateY(-101%); }
 .letterbox-bottom { bottom: 0; transform: translateY(101%); }
 .is-travelling .letterbox { transform: none; transition-duration: 0.9s; }
-@media (max-width: 760px) { .letterbox { height: 7vh; } }
 @media (prefers-reduced-motion: reduce) { .letterbox { display: none; } }
 
 /* watching: the controls and the pointer fade away; back on any move */
@@ -4261,7 +4270,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(9vh + 34px);
+  bottom: calc(var(--bar) + 34px);
   z-index: 70;
   display: grid;
   justify-items: center;
@@ -4294,7 +4303,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .reveal-skip {
   position: fixed;
   right: var(--pad);
-  bottom: calc(9vh + 30px);
+  bottom: calc(var(--bar) + 30px);
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -4310,8 +4319,8 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   font: 500 10.5px / 1 var(--sans);
 }
 @media (max-width: 760px) {
-  .reveal { bottom: calc(7vh + 24px); }
-  .reveal-skip { bottom: auto; top: calc(7vh + 14px); }
+  .reveal { bottom: calc(var(--bar) + 24px); }
+  .reveal-skip { bottom: auto; top: calc(var(--bar) + 14px); }
 }
 
 .reveal-tag {
@@ -4373,7 +4382,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   position: fixed;
   left: var(--pad);
   right: var(--pad);
-  bottom: calc(9vh + 26px);
+  bottom: calc(var(--bar) + 26px);
   z-index: 70;
   display: flex;
   align-items: flex-end;
@@ -4438,7 +4447,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 .film-progress {
   position: fixed;
   left: 0;
-  bottom: 9vh;
+  bottom: var(--bar);
   height: 1px;
   width: 100%;
   background: color-mix(in srgb, var(--planet-accent) 70%, transparent);
@@ -4447,9 +4456,8 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 }
 @keyframes film-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (max-width: 760px) {
-  .film { flex-direction: column; align-items: stretch; bottom: calc(7vh + 16px); }
+  .film { flex-direction: column; align-items: stretch; bottom: calc(var(--bar) + 16px); }
   .film-controls { justify-content: space-between; flex-wrap: wrap; }
-  .film-progress { bottom: 7vh; }
 }
 
 /* ============================================================
@@ -4500,7 +4508,7 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   position: fixed;
   left: var(--pad);
   right: var(--pad);
-  bottom: calc(9vh + 26px);
+  bottom: calc(var(--bar) + 26px);
   z-index: 70;
   display: flex;
   justify-content: flex-start;
@@ -4712,3 +4720,12 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 }
 @media (max-width: 760px) { .travel-title { font-size: 13.5px; } }
 @media (prefers-reduced-motion: reduce) { .travel-title { transition: none; transform: none; } }
+
+/* ---- widescreen: the film's words set in the lower bar, as subtitles,
+   leaving the picture whole; Skip in the bar too, above the zoom ---- */
+@media (min-width: 761px) and (min-aspect-ratio: 13/10) and (max-aspect-ratio: 2/1) {
+  .film,
+  .opening:not(:has(.opening-title)) { bottom: max(18px, calc((var(--bar) - 116px) / 2)); }
+  .film-line { font-size: clamp(20px, 1.8vw, 27px); }
+  .reveal-skip { bottom: calc(var(--bar) - 46px); }
+}
