@@ -509,8 +509,31 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
 
     // markers follow the worlds every frame, without re-rendering
     let frame = 0
+    // where the instruments at the foot of the screen begin (the readout,
+    // the hint above it, Thrust on a phone): measured now and then, so the
+    // hint sits just above the readout and the edge arrows keep above both
+    let ticks = 0
+    let floor = 0
+    let floorEased = 0
+    let readoutTop = 0
     const place = () => {
       frame = requestAnimationFrame(place)
+      if (ticks++ % 15 === 0) {
+        const tops: number[] = []
+        const readoutBox = document.querySelector<HTMLElement>('.flight-readout')
+        const thrustBox = document.querySelector<HTMLElement>('.flight-thrust')
+        if (readoutBox) tops.push(readoutBox.getBoundingClientRect().top)
+        if (thrustBox) tops.push(thrustBox.getBoundingClientRect().top)
+        readoutTop = tops.length ? Math.min(...tops) : window.innerHeight - 104
+        const hintBox = document.querySelector<HTMLElement>('.flight-hint')
+        // (a phone: the hint sits up top, off the ship, CSS)
+        if (hintBox && window.innerWidth > 640) {
+          hintBox.style.bottom = `${Math.round(window.innerHeight - readoutTop + 14)}px`
+          if (!hintBox.classList.contains('is-hidden')) readoutTop = Math.min(readoutTop, hintBox.getBoundingClientRect().top)
+        } else if (hintBox) hintBox.style.bottom = ''
+        floor = window.innerHeight - readoutTop + 16
+      }
+      floorEased = floorEased ? floorEased + (floor - floorEased) * 0.12 : floor
       audio?.update({ thrust: pilot.thrust, air: pilot.air, kms: pilot.kms, heat: pilot.heat, warp: pilot.warpGlow })
       if (pilot.landState === 'rolling' && lastLand !== 'rolling') audio?.touchdown()
       lastLand = pilot.landState
@@ -539,9 +562,11 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       // keep clear of the readout below and the toolbar above
       const insetX = 46
       const insetTop = 64
-      // (on narrower screens the readout sits higher: the arrows keep above it)
-      const insetBottom = width < 1100 ? 150 : 104
+      // (above the readout, the hint and Thrust, wherever they sit)
+      const insetBottom = Math.max(64, floorEased)
       const placed: { x: number; y: number; km: number; label: HTMLElement; quiet: boolean }[] = []
+      // the arrows at the edge, kept apart (below)
+      const edges: { element: HTMLButtonElement; x: number; y: number; km: number; chars: number; side: boolean }[] = []
       // close to a world, the rest of the sky goes quiet: worlds beyond its
       // own neighbourhood (its moons, its craft) keep their mark, and their
       // name comes back when you turn to look at them
@@ -577,6 +602,10 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         element.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`
         element.dataset.edge = onScreen ? 'false' : 'true'
         element.dataset.side = x > width * 0.62 ? 'left' : 'right'
+        if (!onScreen) {
+          const sideways = Math.abs(x - insetX) < 1 || Math.abs(x - (width - insetX)) < 1
+          edges.push({ element, x, y, km: marker.km, chars: WORLDS[slot].name.length + 9, side: sideways })
+        }
         // once the world itself is plainly visible, its marker steps aside;
         // a planet's moons only show near it, the rest only nearby; the
         // one being warped to always shows
@@ -613,6 +642,40 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         element.style.transform = `translate(${(((feature.x + 1) / 2) * width).toFixed(1)}px, ${(((1 - feature.y) / 2) * height).toFixed(1)}px)`
         if (element.textContent !== feature.name) element.textContent = feature.name
       })
+      // arrows at the edge that would land on one another (the inner
+      // planets, all off the same way): the nearest keeps its place, the
+      // rest step inwards, a row at a time, until each reads on its own
+      const boxes: { left: number; right: number; top: number; bottom: number }[] = []
+      edges
+        .filter((edge) => !edge.element.classList.contains('is-hidden'))
+        .sort((a, b) => a.km - b.km)
+        .forEach((edge) => {
+          const wide = 25 + edge.chars * 7.6
+          const left = edge.element.dataset.side === 'left'
+          const x = edge.x
+          let y = edge.y
+          const boxAt = (px: number, py: number) => ({
+            left: left ? px + 6 - wide : px - 6,
+            right: left ? px + 6 : px - 6 + wide,
+            top: py - 9,
+            bottom: py + 9,
+          })
+          let box = boxAt(x, y)
+          const hits = (b: typeof box) => boxes.some((o) => b.left < o.right && b.right > o.left && b.top < o.bottom && b.bottom > o.top)
+          // (along a side edge: down, or up past the middle; the top and
+          // bottom edges: inwards, towards the middle)
+          const step = edge.side ? (y < height / 2 ? 20 : -20) : y < height / 2 ? 20 : -20
+          for (let tries = 0; tries < 8 && hits(box); tries++) {
+            y += step
+            box = boxAt(x, y)
+          }
+          boxes.push(box)
+          if (y !== edge.y) {
+            edge.element.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`
+            const item = placed.find((p) => edge.element.contains(p.label))
+            if (item) item.y = y
+          }
+        })
       // where markers crowd (the inner planets from far away), only the
       // nearest keeps its name
       placed.sort((a, b) => a.km - b.km)

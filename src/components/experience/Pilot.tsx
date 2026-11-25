@@ -1153,8 +1153,9 @@ function useShuttle() {
   useEffect(() => {
     let cancelled = false
     let built: ShuttleModel | null = null
+    let retry = 0
     // NASA's file is Draco-compressed: three.js's own decoder, served from /draco/
-    const stopWaiting = whenShuttleWanted(() => modelLoader().load(
+    const load = (tries: number) => modelLoader().load(
       SHUTTLE_URL,
       async (gltf) => {
         if (cancelled) return
@@ -1340,14 +1341,22 @@ function useShuttle() {
       },
       undefined,
       (error) => {
+        if (cancelled) return
+        // a dropped connection: tried again, twice, before giving up
+        if (tries < 2) {
+          retry = window.setTimeout(() => load(tries + 1), 2000 * (tries + 1))
+          return
+        }
         // only then the built-in jet stands in
         console.warn('Shuttle model could not be loaded:', error)
         pilotObjects.shuttleStatus = 'failed'
         setFailed(true)
       },
-    ))
+    )
+    const stopWaiting = whenShuttleWanted(() => load(0))
     return () => {
       cancelled = true
+      window.clearTimeout(retry)
       stopWaiting()
       built?.body.geometry.dispose()
       ;(built?.body.material as THREE.Material | undefined)?.dispose()

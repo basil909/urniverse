@@ -38,11 +38,11 @@ function SizeDrawing({ index, name }: { index: number; name: string }) {
 
   return (
     <figure className="world-figure">
-      <svg viewBox={`0 0 ${Math.max(cx2 + r2 + 20, 200)} 112`} role="img" aria-label={`${name} and ${otherName} to scale: ${caption}`}>
+      <svg viewBox={`0 0 ${Math.max(cx2 + r2 + 20, 200)} 124`} role="img" aria-label={`${name} and ${otherName} to scale: ${caption}`}>
         <circle cx={cx1} cy={56} r={r1} className="world-figure-self" />
         <circle cx={cx2} cy={56} r={r2} className="world-figure-other" />
-        <text x={cx1} y={108} textAnchor="middle">{name}</text>
-        <text x={cx2} y={108} textAnchor="middle">{otherName}</text>
+        <text x={cx1} y={120} textAnchor="middle">{name}</text>
+        <text x={cx2} y={120} textAnchor="middle">{otherName}</text>
       </svg>
       <figcaption>To scale: {caption}</figcaption>
     </figure>

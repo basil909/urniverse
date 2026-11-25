@@ -3977,6 +3977,8 @@ function MoonSystem({
           // wide screen)
           const ndc = _tagMoon.project(camera)
           if (ndc.x < -0.8 || (camera instanceof THREE.PerspectiveCamera && camera.aspect > 1 && ndc.x > 0.2)) shown = false
+          // nor cut off at the screen's edge (a phone's narrow view)
+          if (ndc.x > 0.8 || Math.abs(ndc.y) > 0.86) shown = false
         }
         const opacity = shown ? '1' : '0'
         if (tag.style.opacity !== opacity) tag.style.opacity = opacity

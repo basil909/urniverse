@@ -2104,7 +2104,7 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
   background: color-mix(in srgb, var(--planet-accent) 26%, var(--surface));
 }
 @media (max-width: 640px) {
-  .flight-hint { white-space: normal; width: 80%; text-align: center; bottom: 216px; }
+  .flight-hint { white-space: normal; width: 80%; text-align: center; top: calc(env(safe-area-inset-top, 0px) + 92px); bottom: auto; }
 }
 
 
@@ -4631,6 +4631,8 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), var(--surface-light);
   transition: opacity 0.4s;
 }
+/* (the detail panel open over it: out of the way, not peeking from under) */
+.universe-page.detail-is-open .zoom-bar { opacity: 0; pointer-events: none; }
 .zoom-button,
 .zoom-reset {
   display: grid;
