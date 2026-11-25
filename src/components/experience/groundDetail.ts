@@ -81,6 +81,13 @@ export function groundLookUniforms(index: number) {
 }
 
 export const GROUND_DETAIL_GLSL = /* glsl */ `
+#ifndef U_DYN
+#define U_DYN
+/* always 0 (never set): added to a loop count so that the Direct3D shader
+   compiler behind WebGL on Windows cannot unroll the loop; unrolled, it
+   took seconds and stalled the page while the shaders compiled */
+uniform int uDyn;
+#endif
 uniform vec3 uDetailOrigin; uniform vec3 uCamL;
 uniform float uLookRough; uniform float uLookCraters; uniform float uLookStones; uniform float uLookRipples;
 uniform float uLookRegolith; uniform float uLookSurge;
@@ -155,7 +162,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float
   // ---- relief: octaves from 16 m to a centimetre, each once it spans pixels
   float lambda = 16.0;
   float amp = uLookRough * rough * (1.0 - sand * 0.7) * (1.0 - veg * 0.4);
-  for (int k = 0; k < 11; k++) {
+  for (int k = 0; k < 11 + uDyn; k++) {
     float seen = 1.0 - smoothstep(lambda * 0.18, lambda * 0.5, px);
     if (seen <= 0.0) break;
     vec4 n = gdAt(pm, lambda, float(k) * 13.7);
@@ -181,7 +188,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float
     float tanE = sunSin / max(length(sunT), 1e-3);
     sunT = normalize(sunT + vec3(1e-6));
     float cell = 2.0;
-    for (int s = 0; s < 4; s++) {
+    for (int s = 0; s < 4 + uDyn; s++) {
       // too small to see here: done
       if (cell < px * 3.0) { cell *= 4.0; continue; }
       float seenAll = 1.0 - smoothstep(cell * 0.06, cell * 0.2, px);
@@ -190,7 +197,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float
       vec3 x = pm / cell;
       vec3 base = floor(x - 0.5);
       float period = GD_PERIOD / cell;
-      for (int i = 0; i < 8; i++) {
+      for (int i = 0; i < 8 + uDyn; i++) {
         vec3 c = base + vec3(float(i & 1), float((i >> 1) & 1), float((i >> 2) & 1));
         vec3 r3 = gdHash3(c + float(s) * 101.0, period);
         float seenC = seenAll;
@@ -245,7 +252,7 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float
       vec3 x = pm / cell;
       vec3 base = floor(x - 0.5);
       float period = GD_PERIOD / cell;
-      for (int i = 0; i < 8; i++) {
+      for (int i = 0; i < 8 + uDyn; i++) {
         vec3 c = base + vec3(float(i & 1), float((i >> 1) & 1), float((i >> 2) & 1));
         vec3 r3 = gdHash3(c + 37.0 + float(s) * 53.0, period);
         if (r3.x > chance) continue;

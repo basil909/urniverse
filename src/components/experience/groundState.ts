@@ -86,6 +86,13 @@ function valueNoise(x: number, y: number, z: number) {
 }
 
 export const GROUND_GLSL = /* glsl */ `
+#ifndef U_DYN
+#define U_DYN
+/* always 0 (never set): added to a loop count so that the Direct3D shader
+   compiler behind WebGL on Windows cannot unroll the loop; unrolled, it
+   took seconds and stalled the page while the shaders compiled */
+uniform int uDyn;
+#endif
 float gHash(ivec3 c) {
   uvec3 u = uvec3(c);
   uint h = (u.x * 0x8da6b343u) ^ (u.y * 0xd8163841u) ^ (u.z * 0xcb1ab31fu);
@@ -175,7 +182,7 @@ float gHeight(vec3 d, float spacing) {
   float finest = ${FINE_DETAIL_M.toFixed(1)} / uRadiusM;
   float amp = uRough;
   float f = uDetailFreq;
-  for (int k = 0; k < ${OCTAVES}; k++) {
+  for (int k = 0; k < ${OCTAVES} + uDyn; k++) {
     float wavelength = 1.0 / f;
     float shown = smoothstep(spacing * 2.0, spacing * 4.0, wavelength);
     if (shown <= 0.0) break;
@@ -401,6 +408,20 @@ export const shipShadow = {
 /* Earth's cloud deck: its drift over the ground (fraction of a turn) and
    height, written by the cloud layer */
 export const cloudDeck = { shift: 0, height: 0.012 }
+
+/* the ground patch's shader (Terrain.tsx): the largest in the site, some
+   seven seconds for Direct3D to compile on Windows, which stalled the
+   whole page as it loaded (and any moment it compiled in, the page
+   stalled with it). So it is left out of the loading's warm-up and
+   compiled only when it is about to be needed (UniverseCanvas's
+   TerrainWarm): as you fly, or reach for the Himalayas; until it is
+   ready the ground stays the planet's own sphere */
+export const terrainWarm = { state: 'idle' as 'idle' | 'compiling' | 'ready', wanted: false }
+
+/** the ground patch's shader is about to be needed: compile it now */
+export function requestTerrain() {
+  terrainWarm.wanted = true
+}
 
 /* the cut in the planet's sphere under the patch (shared uniforms) */
 export const groundHole = {

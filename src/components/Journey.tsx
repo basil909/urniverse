@@ -21,6 +21,7 @@ import ChapterMenu from './ui/ChapterMenu'
 import TimeBar from './ui/TimeBar'
 import ZoomControl from './ui/ZoomControl'
 import { DIVE_PLACES, dive } from './experience/galaxyDive'
+import { requestTerrain } from './experience/groundState'
 import CommandPalette, { type Command } from './ui/CommandPalette'
 import LiveCounter from './ui/LiveCounter'
 import { PICK_EVENT } from './experience/PlanetPicker'
@@ -973,11 +974,24 @@ export default function Journey() {
   }, [])
 
   useEffect(() => {
+    /* the page's scrollable height, measured only when it can change (a
+       resize, the content growing): read on every scroll, just after the
+       timeline was written to the page's style, it forced the browser to
+       lay the whole page out again each frame of a glide */
+    let scrollable = 1
+    const measure = () => {
+      scrollable = document.documentElement.scrollHeight - window.innerHeight
+    }
+    measure()
+    const resized = new ResizeObserver(() => {
+      measure()
+      handleScroll()
+    })
+    resized.observe(document.body)
+
     const updateScroll = () => {
       frame.current = null
 
-      const scrollable =
-        document.documentElement.scrollHeight - window.innerHeight
       const sectionHeight = Math.max(1, scrollable / MAX_PROGRESS)
       const scrollProgress = Math.min(
         MAX_PROGRESS,
@@ -1028,13 +1042,18 @@ export default function Journey() {
     window.addEventListener('scroll', handleScroll, {
       passive: true,
     })
-    window.addEventListener('resize', handleScroll)
+    const onResize = () => {
+      measure()
+      handleScroll()
+    }
+    window.addEventListener('resize', onResize)
 
     updateScroll()
 
     return () => {
+      resized.disconnect()
       window.removeEventListener('scroll', handleScroll)
-      window.removeEventListener('resize', handleScroll)
+      window.removeEventListener('resize', onResize)
 
       if (frame.current !== null) {
         window.cancelAnimationFrame(frame.current)
@@ -2439,7 +2458,13 @@ export default function Journey() {
                   <motion.button
                     type="button"
                     className="true-size film-start station-start himalaya-start"
-                    onClick={() => startFilm(2)}
+                    // (its ground's shader, compiled while the hand is on its way)
+                    onPointerEnter={requestTerrain}
+                    onFocus={requestTerrain}
+                    onClick={() => {
+                      requestTerrain()
+                      startFilm(2)
+                    }}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.8, delay: 0.8, ease: EASE_OUT_EXPO }}

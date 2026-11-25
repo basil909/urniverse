@@ -10,7 +10,7 @@ import { DETAIL_PERIOD, GROUND_DETAIL_GLSL, groundLookUniforms } from './groundD
 import { SURFACE_PATCH_GLSL, surfacePatch } from './surfaceTiles'
 import { aimEarthGround, earthElevation, earthGround, releaseEarthGround } from './earthTiles'
 import { sphereUv } from './groundState'
-import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, groundWorlds, shipShadow } from './groundState'
+import { GROUND, GROUND_GLSL, GroundModel, ground, groundHole, groundWorlds, shipShadow, terrainWarm } from './groundState'
 import { CLOUD_GLSL, cloudVolume } from './clouds'
 import { earthToday } from './earthToday'
 import { earthEclipse, MOON_SHADOW_GLSL } from './eclipse'
@@ -84,6 +84,11 @@ void main() {
 }`
 
 const TERRAIN_FRAGMENT = /* glsl */ `
+#ifndef U_DYN
+#define U_DYN
+/* always 0: a loop bound Direct3D cannot unroll (see groundState.ts) */
+uniform int uDyn;
+#endif
 uniform sampler2D uMap; uniform int uPlanetId;
 uniform vec3 uSunL; uniform float uLight; uniform vec3 uLightTint;
 uniform vec3 uSky; uniform float uSkyLight; uniform vec3 uHaze; uniform float uHazeK; uniform float uWorldRadius;
@@ -147,7 +152,7 @@ vec3 seaSlope(vec3 d) {
   vec3 northL = cross(d, eastL);
   vec3 g = vec3(0.0);
   float rough = 0.0;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 6 + uDyn; i++) {
     vec3 K = uWaveK[i];
     float lambda = 6.2831853 / length(K);
     float seen = 1.0 - smoothstep(lambda * 0.12, lambda * 0.5, px);
@@ -215,7 +220,7 @@ void main() {
   if (uCracks > 0.5) {
     float lines = 0.0;
     float f = uDetailFreq * 2.0;
-    for (int k = 0; k < 6; k++) {
+    for (int k = 0; k < 6 + uDyn; k++) {
       float n = gNoise(d * f + float(k) * 9.1);
       lines = max(lines, smoothstep(0.965, 0.995, 1.0 - abs(2.0 * n - 1.0)) * (1.0 - float(k) * 0.1));
       f *= 2.3;
@@ -500,7 +505,8 @@ export default function Terrain({
       if (!here) _c.copy(_ship).applyMatrix4(ground.inverse)
     }
     const altitude = near ? _c.length() - 1 : Infinity
-    const active = near && altitude < 0.05
+    // (and only once its shader is compiled: terrainWarm)
+    const active = near && altitude < 0.05 && terrainWarm.state === 'ready'
     patch.visible = active
     if (!active) {
       if (earth) {
@@ -597,5 +603,5 @@ export default function Terrain({
     groundHole.uHoleCos.value = Math.cos(reach * 0.9)
   })
 
-  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} visible={false} renderOrder={1} />
+  return <mesh ref={mesh} geometry={geometry} material={material} frustumCulled={false} visible={false} renderOrder={1} userData={{ noWarm: true, terrain: true }} />
 }

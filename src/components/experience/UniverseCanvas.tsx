@@ -28,12 +28,13 @@ import Starfield from './Starfield'
 import LocalGroup, { LOCAL_GROUP_VIEW, NEIGHBOURS } from './LocalGroup'
 import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
-import { lens } from './lens'
+import { lens, SHADERS_READY_EVENT } from './lens'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import SpaceStation, { stationShotPose } from './SpaceStation'
 import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
 import { dive, divePose } from './galaxyDive'
+import { WARM_EVENT } from './warmup'
 import { journeyMotion } from './viewMode'
 import Pilot, { GroundCarry, pilotObjects } from './Pilot'
 import PhotoCapture from './PhotoCapture'
@@ -42,7 +43,7 @@ import FocusCull from './FocusCull'
 import { drainTextures, textureLoader } from './textures'
 import { getShipPass } from './shipLayer'
 import { LowResLayer, PerfMeter } from './PerfMeter'
-import { pilot } from './pilotState'
+import { lowView, pilot } from './pilotState'
 import {
   PLANETS,
   SYSTEM_OFFSET,
@@ -54,7 +55,7 @@ import { shot } from './shots'
 import { OPENING_SECONDS, SEQUENCE_EVENT, opening, resetOrbit, sequence, viewMode } from './viewMode'
 import { latLonToSphere } from './SolarSystem'
 import { pickBodies } from './PlanetPicker'
-import { ringState } from './groundState'
+import { ringState, terrainWarm } from './groundState'
 
 /* ============================================================
    CINEMATIC SOLAR SYSTEM JOURNEY
@@ -2203,6 +2204,8 @@ function WarmUp() {
   useEffect(() => () => warmTarget.dispose(), [warmTarget])
   // warm-ups still waiting on their shaders (the scene is held back)
   const holds = useRef(0)
+  // and those whose shaders are still compiling (the loading screen waits)
+  const compiling = useRef(0)
   useFrame(() => {
     drainTextures()
     let pixels = 0
@@ -2217,7 +2220,8 @@ function WarmUp() {
   const warm = useCallback(() => {
       const hidden: THREE.Object3D[] = []
       scene.traverse((object) => {
-        if (!object.visible) {
+        // (not the ground patch: compiled on its own, later, TerrainWarm)
+        if (!object.visible && !object.userData.noWarm) {
           hidden.push(object)
           object.visible = true
         }
@@ -2253,7 +2257,16 @@ function WarmUp() {
           if (late) holdBackUntilReady(gl, scene, materials)
           if (holds.current === 0) scene.visible = true
         }
-        whenReady(gl, materials).then(() => release(false))
+        compiling.current += 1
+        whenReady(gl, materials).then(() => {
+          release(false)
+          // (all of the loading's shaders done: the loading screen may lift)
+          compiling.current -= 1
+          if (compiling.current === 0 && !lens.shadersReady) {
+            lens.shadersReady = true
+            window.dispatchEvent(new Event(SHADERS_READY_EVENT))
+          }
+        })
         window.setTimeout(() => release(true), 2500)
       }
 
@@ -2299,6 +2312,64 @@ function WarmUp() {
     return () => window.clearTimeout(again)
   }, [active, loaded, total, warm])
 
+  // and whenever something later asks (warmup.ts: the moons' maps)
+  useEffect(() => {
+    let timer = 0
+    const onWarm = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(warm, 250)
+    }
+    window.addEventListener(WARM_EVENT, onWarm)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener(WARM_EVENT, onWarm)
+    }
+  }, [warm])
+
+  return null
+}
+
+/* The ground patch's shader (Terrain.tsx, groundState's terrainWarm),
+   compiled off the loading's path, when it is about to be needed: as you
+   fly, reach for the Himalayas (requestTerrain) or open them. Until it is
+   ready the ground patch stays hidden, never a frozen frame. */
+function TerrainWarm() {
+  const gl = useThree((state) => state.gl)
+  const scene = useThree((state) => state.scene)
+  const camera = useThree((state) => state.camera)
+  const target = useMemo(() => new THREE.WebGLRenderTarget(1, 1), [])
+  useEffect(() => () => target.dispose(), [target])
+  useFrame(() => {
+    if (terrainWarm.state !== 'idle' || !lens.revealed) return
+    if (!(terrainWarm.wanted || pilot.active || lowView.body >= 0)) return
+    terrainWarm.state = 'compiling'
+    const patches: THREE.Object3D[] = []
+    scene.traverse((object) => {
+      if (object.userData.terrain) patches.push(object)
+    })
+    if (!patches.length) {
+      terrainWarm.state = 'ready'
+      return
+    }
+    // compiled as drawn: into an offscreen buffer (as WarmUp explains)
+    const was = patches.map((patch) => patch.visible)
+    patches.forEach((patch) => {
+      patch.visible = true
+    })
+    const previous = gl.getRenderTarget()
+    gl.setRenderTarget(target)
+    const pending = patches.map((patch) => gl.compileAsync(patch, camera, scene))
+    gl.setRenderTarget(previous)
+    patches.forEach((patch, i) => {
+      patch.visible = was[i]
+    })
+    const done = () => {
+      terrainWarm.state = 'ready'
+    }
+    Promise.all(pending).then(done, done)
+    // (whatever happens, never left waiting for good)
+    window.setTimeout(done, 20000)
+  })
   return null
 }
 
@@ -3012,6 +3083,7 @@ function Scene({
       <CinematicCamera progressRef={progressRef} />
 
       <WarmUp />
+      <TerrainWarm />
 
       <StarStreaks />
       <DepthStars />

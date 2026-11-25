@@ -9,7 +9,12 @@ export const lens = {
   chapter: 0,
   /* true once the loading screen starts to lift: the opening sweep waits for it */
   revealed: false,
+  /* true once the loading's shaders have all compiled (UniverseCanvas's
+     WarmUp): the loading screen waits for it, a few seconds at most, so
+     their compiling never stalls the first moments on screen */
+  shadersReady: false,
 }
+export const SHADERS_READY_EVENT = 'urniverse-shaders-ready'
 
 /* Run a load once the opening is on screen and the first frames are
    drawn (maps only needed close up: the loading screen need not wait

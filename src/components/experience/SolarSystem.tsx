@@ -43,6 +43,7 @@ import { cloudDeck, GROUND, groundHole, ringState } from './groundState'
 import { cloudVolume } from './clouds'
 import { LOW_RES_GLSL, lowRes, lowResUniforms } from './lowRes'
 import { earthMoon } from './earthMoon'
+import { requestWarm } from './warmup'
 import { aimCloudPatch, CLOUD_PATCH_GLSL, cloudPatchUniforms } from './cloudPatch'
 import {
   cloudEclipse,
@@ -1039,10 +1040,17 @@ uniform float uTime;
 varying vec3 vNormal;
 varying vec3 vWorldPosition;
 varying vec3 vLocalPosition;
+#ifndef U_DYN
+#define U_DYN
+/* always 0 (never set): added to a loop count so that the Direct3D shader
+   compiler behind WebGL on Windows cannot unroll the loop; unrolled, it
+   took seconds and stalled the page while the shaders compiled */
+uniform int uDyn;
+#endif
 
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y), mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
-float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5; i++) { v += noise(p) * a; p = p * 2.02 + vec3(1.7, 9.2, 3.1); a *= 0.5; } return v; }
+float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5 + uDyn; i++) { v += noise(p) * a; p = p * 2.02 + vec3(1.7, 9.2, 3.1); a *= 0.5; } return v; }
 vec3 hash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
 
 /* the sunspot groups, in the two active belts: where each spot stands on
@@ -1070,9 +1078,9 @@ vec3 cells(vec3 p, float t) {
   float d1 = 8.0;
   float d2 = 8.0;
   float id = 0.0;
-  for (int z = -1; z <= 1; z++) {
-    for (int y = -1; y <= 1; y++) {
-      for (int x = -1; x <= 1; x++) {
+  for (int z = -1; z <= 1 + uDyn; z++) {
+    for (int y = -1; y <= 1 + uDyn; y++) {
+      for (int x = -1; x <= 1 + uDyn; x++) {
         vec3 g = vec3(float(x), float(y), float(z));
         vec3 o = hash33(i + g);
         o = 0.5 + 0.42 * sin(t + 6.2831 * o);
@@ -1138,7 +1146,7 @@ void main() {
   float umbra = 0.0;
   float faculae = 0.0;
   float streaks = 1.0;
-  for (int i = 0; i < SPOT_COUNT; i++) {
+  for (int i = 0; i < SPOT_COUNT + uDyn; i++) {
     vec3 c = SPOTS[i].xyz;
     float r = SPOTS[i].w;
     float d = length(p - c);
@@ -3834,21 +3842,24 @@ function MoonSystem({
   // loading screen's progress mid-render)
   const [moonMaps, setMoonMaps] = useState<(THREE.Texture | null)[]>([])
   useEffect(() => {
-    let maps: (THREE.Texture | null)[] = []
-    // specks in the opening: their maps after the opening is up
-    const stop = whenOpened(() => {
-      const loader = new BitmapTextureLoader()
-      maps = system.moons.map((moon) => {
-        if (!moon.map) return null
-        const texture = loader.load(moon.map)
-        texture.colorSpace = THREE.SRGBColorSpace
-        texture.wrapS = THREE.RepeatWrapping
-        return texture
-      })
-      setMoonMaps(maps)
-    }, 3500)
+    // loaded with everything else (332 KB for the four), so their shaders
+    // compile behind the loading screen: after it, all four at once
+    // stalled the opening for some 650 ms, and on first sight one by one
+    // they stalled the glides
+    const loader = new BitmapTextureLoader()
+    const maps = system.moons.map((moon) => {
+      if (!moon.map) return null
+      const texture = loader.load(moon.map)
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.wrapS = THREE.RepeatWrapping
+      return texture
+    })
+    setMoonMaps(maps)
+    // (their materials rebuild with the maps: compiled now, not when each
+    // moon first comes into view)
+    const warmTimer = window.setTimeout(requestWarm, 200)
     return () => {
-      stop()
+      window.clearTimeout(warmTimer)
       maps.forEach((texture) => texture?.dispose())
     }
   }, [system])

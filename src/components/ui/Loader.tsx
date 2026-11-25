@@ -3,7 +3,7 @@
 import { useProgress } from '@react-three/drei'
 import { useEffect, useState } from 'react'
 
-import { lens } from '../experience/lens'
+import { lens, SHADERS_READY_EVENT } from '../experience/lens'
 
 /* Full-screen loader that tracks every texture three.js loads.
    It finishes when nothing is loading, with a safety timeout so a slow
@@ -12,6 +12,8 @@ import { lens } from '../experience/lens'
 const RING = 2 * Math.PI * 46 // circumference of the r=46 progress ring
 const MAX_WAIT_MS = 12000
 const EMPTY_GRACE_MS = 1500 // nothing queued after this long = nothing to load
+/* once loaded, how long it may wait on the shaders still compiling */
+const SHADER_WAIT_MS = 6000
 
 export default function Loader() {
   const { active, loaded, total } = useProgress()
@@ -21,6 +23,17 @@ export default function Loader() {
 
   const percent = total > 0 ? Math.round((loaded / total) * 100) : 0
 
+  /* the shaders, compiling as the files finish (WarmUp): the screen lifts
+     once they are done, not over a page that stalls while they finish */
+  const [shadersReady, setShadersReady] = useState(lens.shadersReady)
+  useEffect(() => {
+    const onReady = () => setShadersReady(true)
+    window.addEventListener(SHADERS_READY_EVENT, onReady)
+    if (lens.shadersReady) setShadersReady(true)
+    return () => window.removeEventListener(SHADERS_READY_EVENT, onReady)
+  }, [])
+  const [loadedAt, setLoadedAt] = useState(0)
+
   useEffect(() => {
     if (done) return
 
@@ -28,11 +41,15 @@ export default function Loader() {
     const nothingToLoad =
       !active && total === 0 && Date.now() - startedAt > EMPTY_GRACE_MS
 
-    // small hold so the first frames can render behind the loader
-    const finish = finishedLoading || nothingToLoad
+    // small hold so the first frames can render behind the loader; and
+    // the shaders done (or a few seconds' wait for them at most)
+    const files = finishedLoading || nothingToLoad
+    if (files && !loadedAt) setLoadedAt(Date.now())
+    const shaderWait = loadedAt ? Math.max(0, SHADER_WAIT_MS - (Date.now() - loadedAt)) : SHADER_WAIT_MS
+    const finish = files && (shadersReady || shaderWait === 0)
     const timer = window.setTimeout(
       () => setDone(true),
-      finish ? 350 : Math.max(0, MAX_WAIT_MS - (Date.now() - startedAt)),
+      finish ? 350 : files ? shaderWait : Math.max(0, MAX_WAIT_MS - (Date.now() - startedAt)),
     )
     // re-check the "nothing queued" case after the grace period
     const recheck =
@@ -44,7 +61,7 @@ export default function Loader() {
       window.clearTimeout(timer)
       window.clearTimeout(recheck)
     }
-  }, [active, loaded, total, done, startedAt])
+  }, [active, loaded, total, done, startedAt, shadersReady, loadedAt])
 
   useEffect(() => {
     if (!done) return
