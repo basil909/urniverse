@@ -52,8 +52,10 @@ export default function CountUp({
     const start = performance.now() + delay * 1000
     const tick = (now: number) => {
       const t = Math.min(1, Math.max(0, (now - start) / (duration * 1000)))
-      const eased = 1 - Math.pow(2, -10 * t) // fast, then settling
-      const current = t >= 1 ? target : target * eased
+      // fast, then settling: on the true figure well before the end (an
+      // exponential ease crept along short of it, "139,448" for 139,820)
+      const eased = 1 - Math.pow(1 - t, 5)
+      const current = t >= 0.9 ? target : target * eased
       setShown(`${before}${format(current, decimals, grouped)}${after}`)
       if (t < 1) frame.current = requestAnimationFrame(tick)
     }

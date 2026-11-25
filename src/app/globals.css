@@ -3775,6 +3775,7 @@ html.is-photo .flight-controls { opacity: 0; pointer-events: none; }
 
 /* ---- picking a world in the wide views ---- */
 .planet-picker { position: absolute; inset: 0; pointer-events: none; }
+.planet-pick.is-crowded::after { display: none; }
 .planet-pick {
   position: absolute;
   left: 0;

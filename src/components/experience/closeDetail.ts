@@ -1,6 +1,11 @@
 /* Close-up detail below the surface maps' resolution (see SolarSystem.tsx):
    fine relief and tone that appear only once each scale spans pixels. */
 export const CLOSE_DETAIL_GLSL = /* glsl */ `
+#ifndef U_DYN
+#define U_DYN
+/* always 0 (never set): a loop bound Direct3D cannot unroll (groundState.ts) */
+uniform int uDyn;
+#endif
 float cdHash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float cdNoise(vec3 p) {
   vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -15,7 +20,8 @@ vec3 closeDetail(vec3 p, float rugged, float stretch) {
   vec3 q = p * vec3(1.0, stretch, 1.0);
   float h = 0.0; float tone = 0.0; float shown = 0.0;
   float f = 300.0;
-  for (int i = 0; i < 4; i++) {
+  // (a loop kept as a loop: unrolled, sixteen copies of the noise)
+  for (int i = 0; i < 4 + uDyn; i++) {
     float a = 1.0 - smoothstep(0.22, 0.9, px * f);
     if (a > 0.002) {
       vec3 c = q * f + float(i) * 31.7;

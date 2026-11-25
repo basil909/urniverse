@@ -219,8 +219,12 @@ const starFragmentShader = /* glsl */ `
 
 const glowVertexShader = /* glsl */ `
   varying vec2 vPos;
+  varying vec3 vWorld;
+  varying vec3 vUp;
   void main() {
     vPos = position.xy;
+    vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+    vUp = normalize(mat3(modelMatrix) * vec3(0.0, 0.0, 1.0));
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `
@@ -229,6 +233,8 @@ const glowFragmentShader = /* glsl */ `
   uniform float uStrength;
   uniform float uRadius;
   varying vec2 vPos;
+  varying vec3 vWorld;
+  varying vec3 vUp;
 
   float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
   float noise(vec2 p) {
@@ -286,6 +292,13 @@ const glowFragmentShader = /* glsl */ `
     float present = step(0.72, hash(cell + 41.0));
     float knots = knot * present * pow(0.5 + 0.5 * wave, 6.0) * smoothstep(4.0, 8.0, r) * edge;
     light += vec3(1.0, 0.5, 0.66) * knots * 0.28;
+
+    /* the sheet stands for the whole disc's light; seen at a slant from
+       down inside the disc it would lie under the view as a flat beige
+       floor (the bright core spread across it). There it gives way to the
+       stars themselves: faded where it is seen nearly edge on */
+    float facing = abs(dot(normalize(cameraPosition - vWorld), normalize(vUp)));
+    light *= smoothstep(0.08, 0.5, facing);
 
     gl_FragColor = vec4(light * uStrength, 1.0);
   }
@@ -657,6 +670,7 @@ export default function Galaxy({
   const dustMaterial = useRef<THREE.PointsMaterial>(null)
   const clusterMaterial = useRef<THREE.PointsMaterial>(null)
   const coreMaterial = useRef<THREE.SpriteMaterial>(null)
+  const haloMaterial = useRef<THREE.SpriteMaterial>(null)
   useEffect(() => () => glowMaterial.dispose(), [glowMaterial])
 
   /* ==========================================================
@@ -763,7 +777,11 @@ export default function Galaxy({
     // way to the stars and the nebulae
     const height = Math.abs(galaxy.current.worldToLocal(_cameraLocal.copy(camera.position)).y)
     const above = THREE.MathUtils.smoothstep(height, 0.6, 5)
-    glowStrength.current = 0.6 * fade * THREE.MathUtils.lerp(0.25, 1, above)
+    glowStrength.current = 0.6 * fade * above
+    // Sagittarius A*'s halo: from close by (the dive's end), a ball with
+    // an edge filling the view; it thins to a faint warmth there
+    const fromCentre = _cameraLocal.length()
+    if (haloMaterial.current) haloMaterial.current.opacity = 0.25 * THREE.MathUtils.lerp(0.22, 1, THREE.MathUtils.smoothstep(fromCentre, 0.6, 2.5))
     glowMaterial.uniforms.uStrength.value = glowStrength.current
     starMaterial.uniforms.uFade.value = fade
     if (dustMaterial.current) dustMaterial.current.opacity = 0.42 * fade
@@ -900,7 +918,7 @@ export default function Galaxy({
         {softDot && (
           <>
             <sprite scale={[0.22, 0.22, 1]} renderOrder={-1}>
-              <spriteMaterial map={softDot} color="#ffb070" opacity={0.25} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
+              <spriteMaterial ref={haloMaterial} map={softDot} color="#ffb070" opacity={0.25} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
             </sprite>
             <sprite scale={[0.05, 0.05, 1]} renderOrder={-1}>
               <spriteMaterial map={softDot} color="#fff4e6" opacity={0.8} transparent depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />

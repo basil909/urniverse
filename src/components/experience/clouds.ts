@@ -110,7 +110,13 @@ float cloudShade(vec3 p, vec3 sun) {
   t0 = max(t0, 0.0);
   float stride = (t1 - t0) / float(uShadeSteps);
   float depth = 0.0;
+  // (in the ground's shader, a loop Direct3D keeps as a loop: unrolled,
+  // five copies of the cloud lookup took a second and more to compile)
+#ifdef CLOUD_LOD0
+  for (int i = 0; i < 5 + uDyn; i++) {
+#else
   for (int i = 0; i < 5; i++) {
+#endif
     if (i >= uShadeSteps) break;
     depth += cloudDensity(p + sun * (t0 + stride * (float(i) + 0.5)), 0.4);
   }

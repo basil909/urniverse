@@ -973,7 +973,7 @@ const RELIEF: ({ url: string; strength: number } | undefined)[] = [
   { url: '/textures/relief/mercury-height.webp', strength: 3.2 },
   undefined,
   undefined,
-  { url: '/textures/relief/mars-height.webp', strength: 4.0 },
+  { url: '/textures/relief/mars-height.webp', strength: 2.6 },
 ]
 
 /* Planet surface maps by orbit index (Earth uses EARTH_LOCAL_TEXTURES) */
@@ -1507,15 +1507,16 @@ vec3 neptuneWeather(vec3 base, vec2 uv) {
 #endif
 
 #if PLANET == 3
-/* Mars: a regional dust storm drifting slowly across the surface,
-   ochre and soft-edged, veiling the dark markings beneath it */
+/* Mars: a small regional dust storm drifting slowly across the surface,
+   ochre billows over the markings beneath (kept small and thin: broad and
+   thick, it read as a blurred patch on the planet) */
 vec3 marsDust(vec3 base, vec2 uv, vec3 p) {
   vec2 d = uv - vec2(fract(0.36 + uTime * 0.0012), 0.43);
   d.x = (fract(d.x + 0.5) - 0.5) * 1.86;
-  float region = 1.0 - smoothstep(0.05, 0.16, length(d * vec2(1.0, 1.6)));
-  float billows = smoothstep(0.42, 0.7, fbm(p * 7.0 + vec3(uTime * 0.012, 0.0, uTime * 0.008)));
-  float dust = region * (0.45 + 0.55 * billows);
-  return mix(base, vec3(0.86, 0.62, 0.42), dust * 0.7);
+  float region = 1.0 - smoothstep(0.03, 0.09, length(d * vec2(1.0, 1.6)));
+  float billows = smoothstep(0.5, 0.72, fbm(p * 11.0 + vec3(uTime * 0.012, 0.0, uTime * 0.008)));
+  float dust = region * billows;
+  return mix(base, vec3(0.86, 0.62, 0.42), dust * 0.45);
 }
 #endif
 
@@ -1664,6 +1665,15 @@ void main() {
     surface = flowingClouds(mapUv, gx, gy);
 #else
     surface = textureGrad(uMap, mapUv, gx, gy).rgb;
+#endif
+#if PLANET == 0 || PLANET == 3
+    /* the rocky worlds' craters and markings crisp (an unsharp mask:
+       the map, less a softer copy of itself, added back) rather than the
+       slightly soft look of a filtered map seen large */
+    {
+      vec3 soft = textureGrad(uMap, mapUv, gx * 3.0, gy * 3.0).rgb;
+      surface = max(surface + (surface - soft) * 0.7, vec3(0.0));
+    }
 #endif
 #if PLANET_TYPE == 2 || PLANET_TYPE == 3
     if (swirl > 0.0) {

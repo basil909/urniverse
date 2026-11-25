@@ -177,6 +177,7 @@ ${GROUND_GLSL}
 ${CLOSE_DETAIL_GLSL}
 ${GROUND_DETAIL_GLSL}
 ${SURFACE_PATCH_GLSL}
+#define CLOUD_LOD0
 ${CLOUD_GLSL}
 ${MOON_SHADOW_GLSL}
 uniform sampler2D uSnow; uniform float uHasSnow;
@@ -188,18 +189,29 @@ uniform sampler2D uSnow; uniform float uHasSnow;
 float snowHere(vec2 uv, vec3 d, float slope, vec3 base) {
   float cover = texture2D(uSnow, uv).g;
   if (cover < 0.01) return 0.0;
-  float known;
-  float e = gElevation(uv, known);
-  // the ground's heights some 6 km round about
+  // the ground's height here, and some 6 km round about (read in a loop:
+  // written out, the shader carried five copies of the lookup)
   float cosLat = max(cos((uv.y - 0.5) * 3.14159265), 0.05);
   vec2 off = vec2(1e-3 / (6.28318531 * cosLat), 1e-3 / 3.14159265);
-  float k;
-  float e1 = gElevation(uv + vec2(off.x, 0.0), k);
-  float e2 = gElevation(uv - vec2(off.x, 0.0), k);
-  float e3 = gElevation(uv + vec2(0.0, off.y), k);
-  float e4 = gElevation(uv - vec2(0.0, off.y), k);
-  float around = (e + e1 + e2 + e3 + e4) * 0.2;
-  float spread = max(max(max(e, e1), max(e2, max(e3, e4))) - min(min(e, e1), min(e2, min(e3, e4))), 300.0) * 0.5;
+  float known = 0.0;
+  float e = 0.0;
+  float sum = 0.0;
+  float hi = -1e9;
+  float lo = 1e9;
+  for (int k = 0; k < 5 + uDyn; k++) {
+    vec2 o = k == 1 ? vec2(off.x, 0.0) : k == 2 ? vec2(-off.x, 0.0) : k == 3 ? vec2(0.0, off.y) : k == 4 ? vec2(0.0, -off.y) : vec2(0.0);
+    float kk;
+    float ek = gElevation(uv + o, kk);
+    if (k == 0) {
+      e = ek;
+      known = kk;
+    }
+    sum += ek;
+    hi = max(hi, ek);
+    lo = min(lo, ek);
+  }
+  float around = sum * 0.2;
+  float spread = max(hi - lo, 300.0) * 0.5;
   float line = around + spread * (1.0 - 2.0 * cover);
   float above = known > 0.5 ? (e - line) / spread : cover * 2.0 - 1.0;
   float drifts = gNoise(d * 2100.0) * 0.65 + gNoise(d * 9000.0) * 0.35 - 0.5;

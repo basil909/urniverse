@@ -110,14 +110,13 @@ vec4 gdNoise(vec3 x, float period) {
   vec3 w = x - i;
   vec3 u = w * w * w * (w * (w * 6.0 - 15.0) + 10.0);
   vec3 du = 30.0 * w * w * (w * (w - 2.0) + 1.0);
-  float a = gdHash(i, period);
-  float b = gdHash(i + vec3(1.0, 0.0, 0.0), period);
-  float c = gdHash(i + vec3(0.0, 1.0, 0.0), period);
-  float d = gdHash(i + vec3(1.0, 1.0, 0.0), period);
-  float e = gdHash(i + vec3(0.0, 0.0, 1.0), period);
-  float f = gdHash(i + vec3(1.0, 0.0, 1.0), period);
-  float g = gdHash(i + vec3(0.0, 1.0, 1.0), period);
-  float h = gdHash(i + vec3(1.0, 1.0, 1.0), period);
+  /* the cell's eight corners, hashed in a loop the compiler keeps as a
+     loop (written out, every noise call carried eight copies of the hash,
+     and the shader took seconds to compile) */
+  float hs[8];
+  for (int k = 0; k < 8 + uDyn; k++) hs[k] = gdHash(i + vec3(float(k & 1), float((k >> 1) & 1), float((k >> 2) & 1)), period);
+  float a = hs[0]; float b = hs[1]; float c = hs[2]; float d = hs[3];
+  float e = hs[4]; float f = hs[5]; float g = hs[6]; float h = hs[7];
   float k1 = b - a; float k2 = c - a; float k3 = e - a;
   float k4 = a - b - c + d; float k5 = a - c - e + g; float k6 = a - b - e + f;
   float k7 = -a + b + c - d + e - f - g + h;
@@ -137,6 +136,14 @@ vec4 gdAt(vec3 pm, float lambda, float seed) {
 
 struct GroundBits { vec3 grad; vec3 albedo; float shade; };
 
+/* the noise samples groundDetail takes, by wavelength (m) and seed: taken
+   in loops, one copy of the noise for each loop, rather than written out
+   one by one (each a copy of its own: the bulk of the compile) */
+const float GD_PATCH_L[5] = float[5](128.0, 16.0, 64.0, 32.0, 128.0);
+const float GD_PATCH_S[5] = float[5](3.0, 7.0, 5.0, 9.0, 11.0);
+const float GD_FINE_L[6] = float[6](0.5, 0.0625, 2.0, 0.25, 0.0625, 8.0);
+const float GD_FINE_S[6] = float[6](23.0, 29.0, 61.0, 67.0, 71.0, 73.0);
+
 /* pm: metres (anchored); up: the ground's up; px: metres a pixel;
    sunL: towards the Sun; near: 1 close in, 0 far off; on Earth, from the
    imagery's colour: veg (green: grass and scrub) and sandy (bare, bright
@@ -149,12 +156,15 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float
   // where the ground is rough, sandy, dusty (patches tens of metres across)
   // (warped, from four scales: patches that meander, with no trace of the
   // noise's square lattice)
-  vec3 warp = vec3(gdAt(pm, 256.0, 51.0).x, gdAt(pm, 256.0, 57.0).x, gdAt(pm, 256.0, 63.0).x) - 0.5;
+  vec3 warp = vec3(0.0);
+  for (int k = 0; k < 3 + uDyn; k++) warp[k] = gdAt(pm, 256.0, 51.0 + 6.0 * float(k)).x - 0.5;
   vec3 pw = pm + warp * 90.0;
-  vec4 m1 = gdAt(pw, 128.0, 3.0);
-  vec4 m2 = gdAt(pw, 16.0, 7.0);
-  float patchy = m1.x * 0.45 + gdAt(pw, 64.0, 5.0).x * 0.3 + gdAt(pw, 32.0, 9.0).x * 0.15 + m2.x * 0.1;
-  float rough = mix(0.45, 1.3, smoothstep(0.3, 0.7, gdAt(pm, 128.0, 11.0).x));
+  // the patches (warped), and how rough the ground is here
+  float np[5];
+  for (int k = 0; k < 5 + uDyn; k++) np[k] = gdAt(k < 4 ? pw : pm, GD_PATCH_L[k], GD_PATCH_S[k]).x;
+  vec4 m2 = vec4(np[1]);
+  float patchy = np[0] * 0.45 + np[2] * 0.3 + np[3] * 0.15 + np[1] * 0.1;
+  float rough = mix(0.45, 1.3, smoothstep(0.3, 0.7, np[4]));
   // (soft-edged, and lying thinner or thicker from place to place)
   float rippled = max(uLookRipples, sandy);
   float sand = rippled > 0.0 ? smoothstep(0.54, 0.72, patchy + (m2.x - 0.5) * 0.1) * max(step(0.001, uLookRipples), sandy) : 0.0;
@@ -280,20 +290,25 @@ GroundBits groundDetail(vec3 pm, vec3 up, float px, vec3 sunL, float near, float
     }
   }
   // ---- colour: sand and dust patches, and a fine mottle
-  vec4 fine = gdAt(pm, 0.5, 23.0);
-  vec4 grain = gdAt(pm, 0.0625, 29.0);
+  // mottling, and on Earth's green ground grass: clumps, tufts, blades
+  vec4 nf[6];
+  for (int k = 0; k < 6; k++) nf[k] = vec4(0.5, 0.0, 0.0, 0.0);
+  int fineCount = veg > 0.0 ? 6 : 2;
+  for (int k = 0; k < fineCount + uDyn; k++) nf[k] = gdAt(pm, GD_FINE_L[k], GD_FINE_S[k]);
+  vec4 fine = nf[0];
+  vec4 grain = nf[1];
   float mottle = (fine.x - 0.5) * 0.14 * (1.0 - smoothstep(0.08, 0.3, px)) + (grain.x - 0.5) * 0.1 * (1.0 - smoothstep(0.012, 0.04, px));
   vec3 patchColour = mix(vec3(1.0), uLookSand, sand) * mix(vec3(1.0), uLookDust, dust * 0.6);
   g.albedo *= patchColour * (1.0 + mottle) * (1.0 + (m2.x - 0.5) * 0.18);
   // grass and scrub: clumps and tufts, light and dark, some of it dry
   if (veg > 0.0) {
-    vec4 clump = gdAt(pm, 2.0, 61.0);
-    vec4 tuft = gdAt(pm, 0.25, 67.0);
-    vec4 blade = gdAt(pm, 0.0625, 71.0);
+    vec4 clump = nf[2];
+    vec4 tuft = nf[3];
+    vec4 blade = nf[4];
     float seenT = 1.0 - smoothstep(0.05, 0.18, px);
     float seenB = 1.0 - smoothstep(0.012, 0.045, px);
     float shade = (clump.x - 0.5) * 0.5 + (tuft.x - 0.5) * 0.6 * seenT + (blade.x - 0.5) * 0.5 * seenB;
-    float dry = smoothstep(0.55, 0.8, gdAt(pm, 8.0, 73.0).x);
+    float dry = smoothstep(0.55, 0.8, nf[5].x);
     vec3 grass = mix(vec3(1.0), vec3(1.25, 1.12, 0.62), dry * 0.7) * (1.0 + shade);
     g.albedo *= mix(vec3(1.0), grass, veg);
     g.grad += (tuft.yzw * 0.25 * 0.08 * seenT + blade.yzw * 0.0625 * 0.12 * seenB) * veg;

@@ -33,12 +33,19 @@ export const CLOUD_PATCH_GLSL = /* glsl */ `
 uniform sampler2D uCloudPatch; uniform vec4 uCloudPatchRect;
 /* yesterday's clouds at a map UV: the global map, with the sharp patch
    over it where it has them (fading in over its edges) */
+/* (CLOUD_LOD0: read at full detail, as needed inside a loop the
+   compiler keeps as a loop: the ground's cloud shadows, Terrain.tsx) */
+#ifdef CLOUD_LOD0
+#define CLOUD_READ(m, at) textureLod(m, at, 0.0)
+#else
+#define CLOUD_READ(m, at) texture2D(m, at)
+#endif
 float cloudFromMaps(sampler2D map, vec2 uv) {
-  float c = texture2D(map, uv).g;
+  float c = CLOUD_READ(map, uv).g;
   if (uCloudPatchRect.z <= 0.0) return c;
   vec2 local = vec2(fract(uv.x - uCloudPatchRect.x) / uCloudPatchRect.z, (uv.y - uCloudPatchRect.y) / uCloudPatchRect.w);
   if (local.x > 1.0 || local.y < 0.0 || local.y > 1.0) return c;
-  vec4 p = texture2D(uCloudPatch, local);
+  vec4 p = CLOUD_READ(uCloudPatch, local);
   vec2 edge = min(local, 1.0 - local);
   float fade = smoothstep(0.0, 0.08, min(edge.x, edge.y));
   return c * (1.0 - p.b * fade) + p.g * fade;
