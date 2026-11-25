@@ -1094,22 +1094,38 @@ vec3 cells(vec3 p, float t) {
   return vec3(sqrt(vec2(d1, d2)), id);
 }
 
-/* granules: domed cells, dark lanes between (about 0.6 on average:
-   what a layer too fine to see contributes) */
-const float GRAIN_MEAN = 0.6;
+/* granules: each a dome of rising gas, brightest where it wells up in the
+   middle and dimming towards its rim, parted from the next by a narrow,
+   dark lane of sinking gas. The cell walls are bent by noise, so no edge
+   is straight (straight walls read as paving or a honeycomb), the lanes
+   widen and narrow, and now and then a large granule has a dark heart,
+   about to split in two (an "exploding" granule). About 0.41 on average:
+   what the layer gives where it is too fine to see. */
+const float GRAIN_MEAN = 0.41;
 float granules(vec3 p, float t) {
-  vec3 c = cells(p, t);
-  float lane = smoothstep(0.02, 0.38, c.y - c.x);
-  float dome = 1.0 - 0.45 * smoothstep(0.1, 0.9, c.x);
-  return (0.2 + 0.8 * lane) * dome * (0.72 + 0.4 * c.z);
+  vec3 bend = vec3(noise(p * 1.3 + 3.1), noise(p * 1.3 + 7.7), noise(p * 1.3 + 11.3)) - 0.5;
+  vec3 c = cells(p + bend * 0.38, t);
+  // 0 in the middle of a granule, 1 on its lane
+  float rim = 2.0 * c.x / max(c.x + c.y, 1e-4);
+  float lane = smoothstep(0.0, 0.12 + 0.14 * noise(p * 0.7 + 5.0), c.y - c.x);
+  float dome = 1.0 - 0.6 * pow(rim, 1.6);
+  dome *= 1.0 - 0.45 * step(0.9, c.z) * (1.0 - smoothstep(0.0, 0.5, rim));
+  return (0.12 + 0.88 * lane) * dome * (0.8 + 0.3 * c.z);
 }
 
-/* a layer of cells, scale of them to the radius, faded in once a cell spans a
-   few pixels (px: radii per pixel) */
-float layer(vec3 p, float scale, float t, float px) {
-  float seen = 1.0 - smoothstep(0.1, 0.35, px * scale);
-  if (seen <= 0.0) return GRAIN_MEAN;
-  return mix(GRAIN_MEAN, granules(p * scale, t), seen);
+/* how much of a pattern this fine (scale: to the radius) can be seen from
+   here: none until each cell spans a few pixels (px: radii per pixel) */
+float resolved(float scale, float px) {
+  return 1.0 - smoothstep(0.1, 0.35, px * scale);
+}
+
+/* the colour of the photosphere's light at a given brightness (1: the
+   middle of the disc): white-gold at its brightest, through yellow and
+   orange to a deep red-orange where it is dimmest, at the limb and in the
+   lanes, as in photographs of the Sun through a filter */
+vec3 heat(float l) {
+  l = max(l, 0.0);
+  return vec3(1.1 * pow(l, 0.55), 0.92 * pow(l, 1.9), 0.62 * pow(l, 4.0));
 }
 
 void main() {
@@ -1123,15 +1139,16 @@ void main() {
   /* the slow flow: everything drifts a little */
   vec3 q = p + 0.025 * (vec3(fbm(p * 3.0 + vec3(t * 0.01)), fbm(p * 3.0 + vec3(7.1, -t * 0.008, 0.0)), fbm(p * 3.0 + vec3(3.7, 1.3, t * 0.009))) - 0.5);
 
-  /* granulation, coarse to fine: each finer layer takes over as it
-     resolves (from afar a coarser texture stands for the real cells) */
-  float grain = layer(q, 110.0, t * 0.3, px);
-  float g2 = layer(q, 700.0, t * 0.6, px);
-  float g3 = layer(q, 2600.0, t * 0.9, px);
-  float fine2 = 1.0 - smoothstep(0.1, 0.35, px * 700.0);
-  float fine3 = 1.0 - smoothstep(0.1, 0.35, px * 2600.0);
-  grain = mix(grain, g2, fine2 * 0.8);
-  grain = mix(grain, g3 * 0.6 + g2 * 0.4, fine3 * 0.5);
+  /* granulation: the real granules (a 700th of the radius) once they
+     resolve; from further out, where they are too fine to see, a coarser
+     layer of the same cells stands for them; close in, a little finer
+     texture within each granule */
+  float seen = resolved(700.0, px);
+  float coarse = resolved(130.0, px) * (1.0 - seen);
+  float grain = GRAIN_MEAN;
+  if (coarse > 0.0) grain = mix(grain, granules(q * 130.0 + 41.0, t * 0.3), coarse * 0.85);
+  if (seen > 0.0) grain = mix(grain, granules(q * 700.0, t * 0.6), seen);
+  grain *= 1.0 + (noise(q * 3000.0 + vec3(0.0, t * 0.05, 0.0)) - 0.5) * 0.2 * resolved(3000.0, px);
 
   /* the supergranule network: faint bright rims round cells ~40 times
      larger, clearer towards the limb */
@@ -1167,19 +1184,24 @@ void main() {
 
   /* brightness: the granulation's contrast, the mottling, the faculae
      and network (both brighter towards the limb) */
-  float bright = (0.44 + 0.74 * grain) * (0.86 + 0.28 * mottle);
-  bright += faculae * (0.06 + 0.5 * (1.0 - mu));
-  bright += network * 0.08 * (1.0 - mu);
+  float bright = (0.72 + 0.685 * grain) * (0.88 + 0.24 * mottle);
+  bright += faculae * (0.04 + 0.4 * (1.0 - mu));
+  bright += network * 0.07 * (1.0 - mu);
 
-  /* limb darkening, per colour: the edge reddens */
-  vec3 darkening = vec3(0.45, 0.66, 0.9);
-  vec3 limb = 1.0 - darkening * (1.0 - pow(mu, 0.8));
-  vec3 base = vec3(1.0, 0.71, 0.38);
-  vec3 color = base * limb * bright * 0.98;
+  /* limb darkening (the Sun's own, in visible light: some 30% at the
+     very edge), a little steeper in the last sliver, where the edge is
+     sharp */
+  float m1 = 1.0 - mu;
+  float limb = 1.0 - 0.47 * m1 - 0.23 * m1 * m1;
+  limb *= mix(0.72, 1.0, smoothstep(0.0, 0.08, mu));
 
-  /* the spots: a streaked penumbra, a dark, warm umbra */
-  color *= mix(1.0, 0.55 * streaks, penumbra);
-  color *= mix(vec3(1.0), vec3(0.28, 0.17, 0.12), umbra);
+  /* the spots: a streaked penumbra, a dark umbra */
+  bright *= mix(1.0, 0.62 * streaks, penumbra);
+  bright *= mix(1.0, 0.16, umbra);
+
+  /* brightness to colour: the dimmer, the redder */
+  vec3 color = heat(bright * limb);
+  color *= mix(1.0, 0.4, umbra);
 
   gl_FragColor = vec4(color, 1.0);
 }`
