@@ -13,7 +13,13 @@ import { ON_WHEELS } from './flightShip'
    (the ship one unit long, nose at -z, the belly 0.145 below centre):
    - landing gear, down on final approach (the real one at about 90 m,
      14 seconds before touchdown) and up again after take-off: the nose
-     gear under the cockpit, the mains under the wing roots, 6.9 m apart;
+     gear under the cockpit, the mains under the wing roots, 6.9 m apart.
+     The doors open first and the legs swing down and lock (with a small
+     bounce); each leg a shock strut with a polished piston, a brace, an
+     axle, twin tyres with tread and spoked hubs. At touchdown the mains
+     take the weight on their struts and spin up, the nose comes down a
+     moment later; the wheels turn with the ground speed, and after
+     take-off spin down, fold away, and the doors close behind them;
    - the drag chute, out at touchdown in air (12 m across, on lines some
      27 m long), let go at about 110 km/h;
    - the speed brake: the rudder splits and opens like a clamshell on the
@@ -25,11 +31,24 @@ import { ON_WHEELS } from './flightShip'
 ============================================================ */
 
 /* nose and main gear: where each leg hinges (under the belly), its
-   wheels' radius and their spacing either side */
+   wheels' radius, width and their spacing either side, the strut's
+   radius and how far it compresses (travel) */
 const GEAR = [
-  { at: [0, -0.142, -0.32], wheel: 0.011, spread: 0.007 },
-  { at: [0.093, -0.128, 0.21], wheel: 0.015, spread: 0.011 },
-  { at: [-0.093, -0.128, 0.21], wheel: 0.015, spread: 0.011 },
+  { at: [0, -0.142, -0.32], wheel: 0.011, width: 0.0068, spread: 0.007, strut: 0.0042, travel: 0.009 },
+  { at: [0.093, -0.128, 0.21], wheel: 0.015, width: 0.009, spread: 0.011, strut: 0.0055, travel: 0.012 },
+  { at: [-0.093, -0.128, 0.21], wheel: 0.015, width: 0.009, spread: 0.011, strut: 0.0055, travel: 0.012 },
+] as const
+/* how far the struts are pressed in, standing (0..1 of their travel) */
+const STATIC = 0.5
+
+/* the gear doors, flush with the belly: each hinged along one long edge
+   (x), across (width, towards the middle), from z0 to z1, at y. The mains
+   have one door each, hinged outboard; the nose gear two, side by side. */
+const DOORS = [
+  { hinge: 0.11, width: 0.034, z0: 0.172, z1: 0.252, y: -0.1288, side: 1 },
+  { hinge: -0.11, width: 0.034, z0: 0.172, z1: 0.252, y: -0.1288, side: -1 },
+  { hinge: 0.0135, width: 0.0133, z0: -0.346, z1: -0.29, y: -0.1432, side: 1 },
+  { hinge: -0.0135, width: 0.0133, z0: -0.346, z1: -0.29, y: -0.1432, side: -1 },
 ] as const
 
 /* the attitude thrusters: where, which way they blow, and what fires
@@ -64,7 +83,7 @@ const smooth = THREE.MathUtils.smoothstep
 
 /* a thin plate as a box whose corners are given: 8 points, faces coloured
    by which way they face (white above, the black tiles below) */
-function plate(corners: THREE.Vector3[], colorBelow = TILE) {
+function plate(corners: THREE.Vector3[], colorBelow = TILE, colorAbove = WHITE) {
   const geometry = new THREE.BoxGeometry(1, 1, 1).toNonIndexed()
   const position = geometry.getAttribute('position')
   // a unit box's corners (+-0.5) mapped to the given ones
@@ -76,7 +95,7 @@ function plate(corners: THREE.Vector3[], colorBelow = TILE) {
   const normal = geometry.getAttribute('normal')
   const colors = new Float32Array(position.count * 3)
   for (let i = 0; i < position.count; i += 1) {
-    const c = normal.getY(i) < -0.3 ? colorBelow : WHITE
+    const c = normal.getY(i) < -0.3 ? colorBelow : colorAbove
     colors.set([c.r, c.g, c.b], i * 3)
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
@@ -93,9 +112,57 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
     panel.polygonOffsetUnits = -4
     panel.side = THREE.DoubleSide
     const metal = new THREE.MeshStandardMaterial({ color: '#a3a9b0', roughness: 0.35, metalness: 0.7 })
-    const tyre = new THREE.MeshStandardMaterial({ color: '#17181b', roughness: 0.9 })
-    const strut = new THREE.CylinderGeometry(1, 1, 1, 10)
-    const wheel = new THREE.CylinderGeometry(1, 1, 1, 20).rotateZ(Math.PI / 2)
+    // the struts' pistons: polished
+    const chrome = new THREE.MeshStandardMaterial({ color: '#dfe3e8', roughness: 0.16, metalness: 0.92 })
+    const strut = new THREE.CylinderGeometry(1, 1, 1, 12)
+    // a tyre: its tread in alternating bands (so it is seen to turn), the
+    // sidewalls a little lighter; axis along x
+    const wheel = new THREE.CylinderGeometry(1, 1, 1, 28, 1).rotateZ(Math.PI / 2).toNonIndexed()
+    {
+      const position = wheel.getAttribute('position')
+      const colors = new Float32Array(position.count * 3)
+      for (let t = 0; t < position.count; t += 3) {
+        let cy = 0
+        let cz = 0
+        let cx = 0
+        for (let k = 0; k < 3; k += 1) {
+          cx += position.getX(t + k)
+          cy += position.getY(t + k)
+          cz += position.getZ(t + k)
+        }
+        const side = Math.abs(cx / 3) > 0.49
+        const band = Math.floor(((Math.atan2(cz, cy) / Math.PI + 1) * 28) / 2) % 2
+        const shade = side ? 0.075 : band ? 0.05 : 0.028
+        for (let k = 0; k < 3; k += 1) colors.set([shade, shade, shade * 1.05], (t + k) * 3)
+      }
+      wheel.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+      wheel.computeVertexNormals()
+    }
+    const tyre = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 })
+    // a hub: a disc facing along x, its spokes in light and dark sectors
+    const hub = new THREE.CircleGeometry(1, 10).toNonIndexed().rotateY(Math.PI / 2)
+    {
+      const position = hub.getAttribute('position')
+      const colors = new Float32Array(position.count * 3)
+      for (let t = 0; t < position.count; t += 3) {
+        const shade = (t / 3) % 2 === 0 ? 0.75 : 0.32
+        for (let k = 0; k < 3; k += 1) colors.set([shade, shade, shade], (t + k) * 3)
+      }
+      hub.setAttribute('color', new THREE.BufferAttribute(colors, 3))
+    }
+    const hubMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.75, side: THREE.DoubleSide })
+    // the doors (black tiles outside, bare structure inside), each hinged
+    // at its long edge (local x 0), and the dark wells behind them
+    const doors = DOORS.map((door) => {
+      const x0 = Math.min(0, -door.side * door.width)
+      const x1 = Math.max(0, -door.side * door.width)
+      const corners = [0, 1, 2, 3, 4, 5, 6, 7].map(
+        (k) => new THREE.Vector3(k & 1 ? x1 : x0, k & 2 ? 0.001 : -0.001, k & 4 ? door.z1 : door.z0),
+      )
+      return plate(corners, TILE, new THREE.Color('#34373c'))
+    })
+    const well = new THREE.MeshBasicMaterial({ color: '#030304', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 })
+    const wellGeometry = new THREE.PlaneGeometry(1, 1).rotateX(Math.PI / 2)
     // the elevons, each hinged at its leading edge (local z 0 at the hinge)
     const elevons = [1, -1].map((side) => {
       const v = (x: number, y: number, z: number) => new THREE.Vector3(x * side, y, z)
@@ -156,26 +223,44 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
       color: '#dfe7f5', transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     })
     return {
-      panel, metal, tyre, strut, wheel, elevons, rudders, rudderAxis, canopy, chuteMaterial, LINES, lines, lineMaterial, puff, puffMaterial,
+      panel, metal, chrome, tyre, strut, wheel, hub, hubMaterial, doors, well, wellGeometry,
+      elevons, rudders, rudderAxis, canopy, chuteMaterial, LINES, lines, lineMaterial, puff, puffMaterial,
     }
   }, [material])
   useEffect(
     () => () => {
       const p = parts
-      ;[p.panel, p.metal, p.tyre, p.chuteMaterial, p.lineMaterial, p.puffMaterial].forEach((m) => m.dispose())
-      ;[p.strut, p.wheel, p.canopy, p.lines, p.puff, ...p.rudders, ...p.elevons.map((e) => e.geometry)].forEach((g) => g.dispose())
+      ;[p.panel, p.metal, p.chrome, p.tyre, p.hubMaterial, p.well, p.chuteMaterial, p.lineMaterial, p.puffMaterial].forEach((m) => m.dispose())
+      ;[p.strut, p.wheel, p.hub, p.wellGeometry, p.canopy, p.lines, p.puff, ...p.doors, ...p.rudders, ...p.elevons.map((e) => e.geometry)].forEach((g) => g.dispose())
     },
     [parts],
   )
 
   const legs = useRef<(THREE.Group | null)[]>([])
+  // each leg's sliding part (piston, axle, wheels), its wheels, the doors and wells
+  const slides = useRef<(THREE.Group | null)[]>([])
+  const wheels = useRef<(THREE.Group | null)[]>([])
+  const doorRefs = useRef<(THREE.Group | null)[]>([])
+  const wellRefs = useRef<(THREE.Mesh | null)[]>([])
   const elevonRefs = useRef<(THREE.Group | null)[]>([])
   const rudderRefs = useRef<(THREE.Group | null)[]>([])
   const chute = useRef<THREE.Group>(null)
   const canopyRef = useRef<THREE.Mesh>(null)
   const puffs = useRef<(THREE.Mesh | null)[]>([])
   const state = useRef({
-    gear: 0,
+    // the doors and the legs, 0 (closed, up) .. 1 (open, down); the legs'
+    // lock (and the time since); each strut's compression and its rate;
+    // each leg's wheels: their angle and how fast they turn; time rolling
+    doors: 0,
+    legs: 0,
+    locked: false,
+    lockTime: 0,
+    press: GEAR.map(() => 0),
+    pressRate: GEAR.map(() => 0),
+    spin: GEAR.map(() => 0),
+    spinRate: GEAR.map(() => 0),
+    rolling: 0,
+    gearLand: '',
     brake: 0,
     elevon: [0, 0],
     chute: 'stowed' as 'stowed' | 'out' | 'gone',
@@ -196,13 +281,80 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
     // ---- the gear: down on final approach (below ~120 m), up after take-off
     const gearDown =
       land === 'rolling' || land === 'landed' || (land === 'landing' && height < 0.12) || (land === 'lifting' && height < 0.08)
-    s.gear = THREE.MathUtils.clamp(s.gear + (gearDown ? 1 : -1) * dt / 1.6, 0, 1)
-    const swing = smooth(s.gear, 0, 1)
+    // down: the doors open, then the legs swing out; up: the legs fold
+    // away, then the doors close behind them
+    if (gearDown) {
+      s.doors = Math.min(1, s.doors + dt / 0.55)
+      if (s.doors > 0.7) s.legs = Math.min(1, s.legs + dt / 1.25)
+    } else {
+      s.legs = Math.max(0, s.legs - dt / 1.25)
+      if (s.legs < 0.03) s.doors = Math.max(0, s.doors - dt / 0.55)
+    }
+    // locking down: a small bounce as the legs reach their stops
+    if (s.legs >= 1 && !s.locked) {
+      s.locked = true
+      s.lockTime = 0
+    } else if (s.legs < 1) s.locked = false
+    s.lockTime += dt
+    const bounce = s.locked ? 0.08 * Math.sin(s.lockTime * 21) * Math.exp(-s.lockTime * 6) : 0
+    const swing = smooth(s.legs, 0, 1)
     legs.current.forEach((leg) => {
       if (!leg) return
-      leg.visible = s.gear > 0.01
+      leg.visible = s.legs > 0.01
       // folded forward into the belly when up
-      leg.rotation.x = (1 - swing) * Math.PI * 0.5
+      leg.rotation.x = (1 - swing) * Math.PI * 0.5 + bounce
+    })
+    const doorAngle = smooth(s.doors, 0, 1) * 1.62
+    doorRefs.current.forEach((door, i) => {
+      if (!door) return
+      door.visible = s.doors > 0.005
+      door.rotation.z = DOORS[i].side * doorAngle
+    })
+    wellRefs.current.forEach((well) => {
+      if (well) well.visible = s.doors > 0.005
+    })
+
+    // ---- the struts and wheels: the mains take the weight at touchdown
+    // (pressed in hard, rebounding, settling), the nose a moment later as
+    // it comes down; lightening as the take-off roll gathers speed, and
+    // stretched out once off the ground
+    if (land !== s.gearLand) {
+      if (land === 'rolling' && s.gearLand === 'landing') {
+        s.pressRate[1] = s.pressRate[2] = 9
+        s.rolling = 0
+      }
+      s.gearLand = land
+    }
+    s.rolling += dt
+    const onGround = land === 'rolling' || land === 'landed' || (land === 'lifting' && height < 0.004)
+    const kms = pilot.kms
+    GEAR.forEach((leg, i) => {
+      const nose = i === 0
+      let want = 0
+      if (onGround && s.legs >= 1) {
+        if (land === 'lifting') want = STATIC * (1 - smooth(kms, nose ? 0.04 : 0.055, nose ? 0.07 : 0.085))
+        else if (land === 'landed' || !nose) want = STATIC
+        else want = s.rolling > 0.9 ? STATIC : 0
+      }
+      // the nose wheel meets the ground: a smaller knock
+      if (nose && land === 'rolling' && s.rolling > 0.9 && s.rolling - dt <= 0.9) s.pressRate[0] = 6
+      // a spring and damper
+      const accel = 140 * (want - s.press[i]) - 13 * s.pressRate[i]
+      s.pressRate[i] += accel * dt
+      s.press[i] = THREE.MathUtils.clamp(s.press[i] + s.pressRate[i] * dt, 0, 1)
+      const slide = slides.current[i]
+      if (slide) slide.position.y = leg.travel * (s.press[i] - STATIC)
+      // the wheels: turning with the ground speed while on it (shown no
+      // faster than reads: past that a tyre's tread only flickers), then
+      // spinning down
+      const touching = want > 0.01 || (land === 'landed' && s.legs >= 1)
+      if (touching) s.spinRate[i] = (kms * 1000) / (leg.wheel * 37.24)
+      else s.spinRate[i] *= Math.exp(-dt * 0.9)
+      s.spin[i] += Math.min(s.spinRate[i], 24) * dt
+      for (const k of [0, 1]) {
+        const w = wheels.current[i * 2 + k]
+        if (w) w.rotation.x = -s.spin[i]
+      }
     })
 
     // ---- the speed brake: open on the approach, wide on the roll-out,
@@ -306,7 +458,15 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
     <group>
       {/* landing gear */}
       {GEAR.map((leg, i) => {
+        // pivot to axle, standing (the strut pressed in by STATIC)
         const length = -(GROUND + leg.wheel) + leg.at[1]
+        const upper = length * 0.62
+        // the brace: from part way down the strut to the belly, forward
+        // of a main leg, behind the nose leg
+        const from = new THREE.Vector3(0, -length * 0.46, 0)
+        const to = new THREE.Vector3(0, 0.002, i === 0 ? 0.034 : -0.05)
+        const brace = to.clone().sub(from)
+        const braceTurn = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), brace.clone().normalize())
         return (
           <group
             key={`leg${i}`}
@@ -315,19 +475,82 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
               legs.current[i] = g
             }}
           >
-            <mesh geometry={parts.strut} material={parts.metal} position={[0, -length / 2, 0]} scale={[0.0045, length, 0.0045]} />
-            {[1, -1].map((side) => (
+            {/* the shock strut's cylinder */}
+            <mesh geometry={parts.strut} material={parts.metal} position={[0, -upper / 2, 0]} scale={[leg.strut, upper, leg.strut]} />
+            <mesh
+              geometry={parts.strut}
+              material={parts.metal}
+              position={from.clone().addScaledVector(brace, 0.5)}
+              quaternion={braceTurn}
+              scale={[leg.strut * 0.4, brace.length(), leg.strut * 0.4]}
+            />
+            {/* what slides: the piston, the axle, the wheels */}
+            <group
+              ref={(g) => {
+                slides.current[i] = g
+              }}
+            >
               <mesh
-                key={side}
-                geometry={parts.wheel}
-                material={parts.tyre}
-                position={[side * leg.spread, -length, 0]}
-                scale={[0.009, leg.wheel, leg.wheel]}
+                geometry={parts.strut}
+                material={parts.chrome}
+                position={[0, -(upper * 0.85 + length) / 2, 0]}
+                scale={[leg.strut * 0.62, length - upper * 0.85, leg.strut * 0.62]}
               />
-            ))}
+              <mesh
+                geometry={parts.strut}
+                material={parts.metal}
+                position={[0, -length, 0]}
+                rotation={[0, 0, Math.PI / 2]}
+                scale={[leg.strut * 0.45, leg.spread * 2 + leg.width * 0.6, leg.strut * 0.45]}
+              />
+              {[1, -1].map((side, k) => (
+                <group
+                  key={side}
+                  position={[side * leg.spread, -length, 0]}
+                  ref={(g) => {
+                    wheels.current[i * 2 + k] = g
+                  }}
+                >
+                  <mesh geometry={parts.wheel} material={parts.tyre} scale={[leg.width, leg.wheel, leg.wheel]} />
+                  <mesh
+                    geometry={parts.hub}
+                    material={parts.hubMaterial}
+                    position={[side * (leg.width / 2 + 0.0003), 0, 0]}
+                    scale={[1, leg.wheel * 0.62, leg.wheel * 0.62]}
+                  />
+                </group>
+              ))}
+            </group>
           </group>
         )
       })}
+
+      {/* the gear doors, and the dark wells they open on */}
+      {DOORS.map((door, i) => (
+        <group
+          key={`door${i}`}
+          position={[door.hinge, door.y, 0]}
+          visible={false}
+          ref={(g) => {
+            doorRefs.current[i] = g
+          }}
+        >
+          <mesh geometry={parts.doors[i]} material={parts.panel} />
+        </group>
+      ))}
+      {DOORS.map((door, i) => (
+        <mesh
+          key={`well${i}`}
+          geometry={parts.wellGeometry}
+          material={parts.well}
+          position={[door.hinge - (door.side * door.width) / 2, door.y + 0.0012, (door.z0 + door.z1) / 2]}
+          scale={[door.width * 0.94, 1, (door.z1 - door.z0) * 0.94]}
+          visible={false}
+          ref={(m) => {
+            wellRefs.current[i] = m
+          }}
+        />
+      ))}
 
       {/* elevons */}
       {parts.elevons.map((elevon, i) => (

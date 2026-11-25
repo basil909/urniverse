@@ -52,6 +52,7 @@ import { placeCamera } from './flightCamera'
 import CometEncke from './CometEncke'
 import { AsteroidField, TrojanBodies } from './AsteroidField'
 import ShuttleParts from './ShuttleParts'
+import LandingDust from './LandingDust'
 
 /* ============================================================
    FLIGHT MODE
@@ -2763,6 +2764,7 @@ export default function Pilot() {
           </group>
           <AirStreaks state={streaks.current} />
           <SpaceDust state={dust.current} />
+          <LandingDust jetRef={ship} />
           <SurfaceLife jetRef={ship} />
           <RingChunks jetRef={ship} />
           <AsteroidField jetRef={ship} />
