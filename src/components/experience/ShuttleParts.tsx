@@ -114,6 +114,8 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
     const metal = new THREE.MeshStandardMaterial({ color: '#a3a9b0', roughness: 0.35, metalness: 0.7 })
     // the struts' pistons: polished
     const chrome = new THREE.MeshStandardMaterial({ color: '#dfe3e8', roughness: 0.16, metalness: 0.92 })
+    // hydraulic cylinders and lines: dark, oily
+    const hose = new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.55, metalness: 0.4 })
     const strut = new THREE.CylinderGeometry(1, 1, 1, 12)
     // a tyre: its tread in alternating bands (so it is seen to turn), the
     // sidewalls a little lighter; axis along x
@@ -161,6 +163,8 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
       )
       return plate(corners, TILE, new THREE.Color('#34373c'))
     })
+    // a blade antenna's shape, and a small box for fittings
+    const box = new THREE.BoxGeometry(1, 1, 1)
     const well = new THREE.MeshBasicMaterial({ color: '#030304', polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 })
     const wellGeometry = new THREE.PlaneGeometry(1, 1).rotateX(Math.PI / 2)
     // the elevons, each hinged at its leading edge (local z 0 at the hinge)
@@ -223,15 +227,15 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
       color: '#dfe7f5', transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     })
     return {
-      panel, metal, chrome, tyre, strut, wheel, hub, hubMaterial, doors, well, wellGeometry,
+      panel, metal, chrome, hose, tyre, strut, wheel, hub, hubMaterial, doors, well, wellGeometry, box,
       elevons, rudders, rudderAxis, canopy, chuteMaterial, LINES, lines, lineMaterial, puff, puffMaterial,
     }
   }, [material])
   useEffect(
     () => () => {
       const p = parts
-      ;[p.panel, p.metal, p.chrome, p.tyre, p.hubMaterial, p.well, p.chuteMaterial, p.lineMaterial, p.puffMaterial].forEach((m) => m.dispose())
-      ;[p.strut, p.wheel, p.hub, p.wellGeometry, p.canopy, p.lines, p.puff, ...p.doors, ...p.rudders, ...p.elevons.map((e) => e.geometry)].forEach((g) => g.dispose())
+      ;[p.panel, p.metal, p.chrome, p.hose, p.tyre, p.hubMaterial, p.well, p.chuteMaterial, p.lineMaterial, p.puffMaterial].forEach((m) => m.dispose())
+      ;[p.strut, p.wheel, p.hub, p.wellGeometry, p.box, p.canopy, p.lines, p.puff, ...p.doors, ...p.rudders, ...p.elevons.map((e) => e.geometry)].forEach((g) => g.dispose())
     },
     [parts],
   )
@@ -467,6 +471,31 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
         const to = new THREE.Vector3(0, 0.002, i === 0 ? 0.034 : -0.05)
         const brace = to.clone().sub(from)
         const braceTurn = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), brace.clone().normalize())
+        // a rod between two points: its middle, its turn, its length
+        const rod = (a: THREE.Vector3, b: THREE.Vector3) => {
+          const along = b.clone().sub(a)
+          return {
+            position: a.clone().addScaledVector(along, 0.5),
+            quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), along.clone().normalize()),
+            length: along.length(),
+          }
+        }
+        // the retraction actuator: a cylinder from the belly (behind a main
+        // leg, ahead of the nose leg) to a third of the way down the strut,
+        // its polished rod at the strut's end
+        const anchor = new THREE.Vector3(0, 0.002, i === 0 ? -0.03 : 0.045)
+        const grip = new THREE.Vector3(0, -length * 0.3, 0)
+        const mid = anchor.clone().lerp(grip, 0.58)
+        const ram = rod(anchor, mid)
+        const ramRod = rod(mid, grip)
+        // the torque link: a V on the strut's front, from the cylinder to
+        // the piston (the lower arm moves with the piston)
+        const front = -leg.strut * 1.25
+        const knee = new THREE.Vector3(0, -(upper + length) * 0.5, front * 1.9)
+        const arm1 = rod(new THREE.Vector3(0, -upper * 0.92, front), knee)
+        const arm2 = rod(knee, new THREE.Vector3(0, -length * 0.93, front))
+        // the brake lines, down the strut's side
+        const lines = [1, -1].map((side) => rod(new THREE.Vector3(side * leg.strut * 1.15, 0, leg.strut * 0.5), new THREE.Vector3(side * leg.strut * 1.15, -length * 0.95, leg.strut * 0.5)))
         return (
           <group
             key={`leg${i}`}
@@ -476,7 +505,17 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
             }}
           >
             {/* the shock strut's cylinder */}
-            <mesh geometry={parts.strut} material={parts.metal} position={[0, -upper / 2, 0]} scale={[leg.strut, upper, leg.strut]} />
+            <mesh geometry={parts.strut} material={parts.metal} position={[0, -upper / 2, 0]} scale={[leg.strut * 1.15, upper, leg.strut * 1.15]} />
+            {/* its collar, where the piston comes out */}
+            <mesh geometry={parts.strut} material={parts.metal} position={[0, -upper, 0]} scale={[leg.strut * 1.4, leg.strut * 1.2, leg.strut * 1.4]} />
+            {/* the retraction actuator and its rod */}
+            <mesh geometry={parts.strut} material={parts.hose} position={ram.position} quaternion={ram.quaternion} scale={[leg.strut * 0.55, ram.length, leg.strut * 0.55]} />
+            <mesh geometry={parts.strut} material={parts.chrome} position={ramRod.position} quaternion={ramRod.quaternion} scale={[leg.strut * 0.3, ramRod.length, leg.strut * 0.3]} />
+            {/* the torque link's upper arm, and the brake lines */}
+            <mesh geometry={parts.strut} material={parts.metal} position={arm1.position} quaternion={arm1.quaternion} scale={[leg.strut * 0.32, arm1.length, leg.strut * 0.32]} />
+            {lines.map((line, k) => (
+              <mesh key={`line${k}`} geometry={parts.strut} material={parts.hose} position={line.position} quaternion={line.quaternion} scale={[leg.strut * 0.16, line.length, leg.strut * 0.16]} />
+            ))}
             <mesh
               geometry={parts.strut}
               material={parts.metal}
@@ -490,6 +529,8 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
                 slides.current[i] = g
               }}
             >
+              {/* the torque link's lower arm, moving with the piston */}
+              <mesh geometry={parts.strut} material={parts.metal} position={arm2.position} quaternion={arm2.quaternion} scale={[leg.strut * 0.32, arm2.length, leg.strut * 0.32]} />
               <mesh
                 geometry={parts.strut}
                 material={parts.chrome}
@@ -550,6 +591,18 @@ export default function ShuttleParts({ material }: { material: THREE.Material })
             wellRefs.current[i] = m
           }}
         />
+      ))}
+
+      {/* a blade antenna on top, behind the cockpit */}
+      <mesh geometry={parts.box} material={parts.metal} position={[0, 0.0015, -0.288]} scale={[0.0011, 0.0075, 0.011]} />
+      {/* handrails by the crew hatch, on standoffs */}
+      {[-0.0525, -0.0875].map((y) => (
+        <group key={`rail${y}`}>
+          <mesh geometry={parts.strut} material={parts.metal} position={[-0.0752, y, -0.36]} rotation={[Math.PI / 2, 0, 0]} scale={[0.00055, 0.034, 0.00055]} />
+          {[-0.375, -0.345].map((z) => (
+            <mesh key={z} geometry={parts.strut} material={parts.metal} position={[-0.0738, y, z]} rotation={[0, 0, Math.PI / 2]} scale={[0.00045, 0.003, 0.00045]} />
+          ))}
+        </group>
       ))}
 
       {/* elevons */}

@@ -29,6 +29,12 @@ const FRAGMENT_HEAD = /* glsl */ `
 varying vec3 vShipP;
 varying vec3 vShipN;
 float shipHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float shipNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(shipHash(i), shipHash(i + vec2(1.0, 0.0)), f.x), mix(shipHash(i + vec2(0.0, 1.0)), shipHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 /* a grid's lines (1 on a line), never thinner than a pixel, faded out
    where the cells are too small to draw */
 float shipLines(vec2 uv, float width) {
@@ -123,12 +129,15 @@ const COLOR = /* glsl */ `
     if (tile || mask) {
       vec2 cell = sheet / 0.0055;
       vec2 id = floor(cell);
-      float shade = 0.62 + 0.75 * shipHash(id) + 0.25 * shipHash(floor(cell / 7.0) + 3.1);
-      // older tiles, browner and paler, in patches
+      float shade = 0.5 + 0.95 * shipHash(id) + 0.3 * shipHash(floor(cell / 7.0) + 3.1);
+      // older tiles, browner and paler, in patches; and here and there a
+      // newer one, replaced after a flight, a clearly lighter grey
       vec3 tint = mix(vec3(1.0), vec3(1.35, 1.2, 1.0), step(0.93, shipHash(id + 17.0)));
+      tint = mix(tint, vec3(2.1, 2.1, 2.2), step(0.965, shipHash(id + 41.0)));
       float grout = shipLines(cell, 0.06);
       // streaks along the flow, from the heat of re-entry
       float streak = 0.88 + 0.28 * shipHash(vec2(floor(p.x * 140.0), 3.0)) * smoothstep(-0.2, 0.3, p.z);
+      streak *= 0.8 + 0.4 * shipNoise(vec2(p.x * 110.0, p.z * 5.0));
       vec3 black = vec3(0.012, 0.0125, 0.014) * shade * tint * streak;
       diffuseColor.rgb = mix(black, vec3(0.03, 0.03, 0.028), grout);
       shipRough = 0.92;
@@ -148,6 +157,45 @@ const COLOR = /* glsl */ `
       // weathered towards the tail and along the top, faintly brown
       float grime = smoothstep(-0.1, 0.5, p.z) * 0.12 + smoothstep(0.6, 0.9, shipHash(floor(p.xz * vec2(60.0, 9.0)))) * 0.05;
       diffuseColor.rgb *= mix(vec3(1.0), vec3(0.86, 0.82, 0.76), grime);
+      /* weathering: stains trailing aft from the seams (the flow ran nose
+         to tail), scuffs and smudges, and the blankets yellowed unevenly
+         by the sun (fine detail faded where it is smaller than a pixel) */
+      float stained = smoothstep(0.55, 0.95, shipHash(vec2(qid.x, floor(qid.y / 3.0)) + 9.0));
+      float trail = exp(-fract(quilt.y) * 3.2) * stained;
+      float fine = 1.0 - smoothstep(0.3, 1.0, fwidth(sheet.x * 140.0));
+      float smudge = smoothstep(0.62, 0.92, shipNoise(sheet * 140.0)) * fine;
+      float scuff = smoothstep(0.8, 0.97, shipNoise(vec2(sheet.x * 600.0, sheet.y * 90.0))) * (1.0 - smoothstep(0.3, 1.0, fwidth(sheet.x * 600.0)));
+      float yellowed = smoothstep(0.45, 0.85, shipNoise(sheet * 14.0 + 5.0));
+      diffuseColor.rgb *= 1.0 - 0.24 * trail - 0.16 * smudge - 0.18 * scuff;
+      diffuseColor.rgb *= mix(vec3(1.0), vec3(0.9, 0.85, 0.74), yellowed);
+      // the wings' upper panels, and the fin's
+      bool wingTop = abs(p.x) > 0.12 && p.y < -0.07 && n.y > 0.5;
+      bool fin = abs(p.x) < 0.03 && p.y > 0.015 && p.z > 0.28;
+      if (wingTop || fin) {
+        vec2 grid = wingTop ? vec2(p.x / 0.05, p.z / 0.06) : vec2(p.z / 0.028, p.y / 0.03);
+        float panels = shipLines(grid, 0.018);
+        diffuseColor.rgb *= 1.0 - 0.32 * panels;
+        shipBump -= panels * 0.7;
+      }
+      // the fin's leading edge: dark, as the orbiter's
+      if (fin && n.z < -0.45) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.05, 0.052), smoothstep(-0.45, -0.7, n.z));
+      // the crew hatch on the left side, round, with its small window
+      if (p.x < -0.03 && n.x < -0.6) {
+        float r = length(vec2(p.z + 0.36, p.y + 0.07));
+        float ring = shipLine(r - 0.0125, 0.0007);
+        diffuseColor.rgb *= 1.0 - 0.7 * ring;
+        shipBump -= ring * 1.4;
+        if (r < 0.0042) {
+          diffuseColor.rgb = vec3(0.012, 0.014, 0.018);
+          shipRough = 0.1;
+        }
+        // its handle
+        float handle = (1.0 - step(0.0018, abs(p.y + 0.0775))) * (1.0 - step(0.004, abs(p.z + 0.36)));
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.25), handle);
+      }
+      // the star trackers' doors, ahead of the payload bay
+      if (n.y > 0.6 && p.y > -0.03 && p.z > -0.285 && p.z < -0.265 && abs(p.x) > 0.012 && abs(p.x) < 0.026)
+        diffuseColor.rgb = vec3(0.05, 0.05, 0.055);
       // the payload bay doors: centre seam, hinge lines, section joints
       if (p.z > -0.25 && p.z < 0.285 && p.y > -0.045) {
         float seam = shipLine(p.x, 0.0007);
@@ -166,12 +214,25 @@ const COLOR = /* glsl */ `
         mark = shipMark(vec2((p.x + 0.2475) / 0.085, (0.1925 - p.z) / 0.045), vec4(0.0, 0.0, 950.0, 500.0));
         vec4 usa = shipMark(vec2((p.x + 0.2575) / 0.105, (0.3125 - p.z) / 0.047), vec4(0.0, 520.0, 600.0, 270.0));
         mark = mix(mark, usa, usa.a);
+      }
+      if (abs(p.x) > 0.12 && n.y > 0.5 && p.y > -0.125) {
+        // small stencils on both wings' upper surfaces, by the roots
+        float ax = abs(p.x);
+        vec4 step1 = shipMark(vec2((p.x - sign(p.x) * 0.135 + 0.0175) / 0.035, (0.335 - p.z) / 0.008), vec4(620.0, 530.0, 390.0, 80.0));
+        vec4 step2 = shipMark(vec2((p.x - sign(p.x) * 0.135 + 0.0175) / 0.035, (0.245 - p.z) / 0.008), vec4(620.0, 530.0, 390.0, 80.0));
+        mark = mix(mark, step1, step1.a * step(ax, 0.16));
+        mark = mix(mark, step2, step2.a * step(ax, 0.16));
       } else if (abs(n.x) > 0.6 && p.y > -0.1 && p.y < -0.05 && abs(p.x) > 0.06) {
         float y = (p.y + 0.091) / 0.032;
         mark = shipMark(vec2((p.z + 0.215) / 0.061, y), vec4(0.0, 0.0, 950.0, 500.0));
         float across = p.x < 0.0 ? (p.z + 0.14) / 0.177 : (0.037 - p.z) / 0.177;
         vec4 words = shipMark(vec2(across, (p.y + 0.088) / 0.026), vec4(0.0, 800.0, 1024.0, 150.0));
         mark = mix(mark, words, words.a);
+      }
+      // "RESCUE", under the hatch
+      if (p.x < -0.03 && n.x < -0.6) {
+        vec4 rescue = shipMark(vec2((p.z + 0.375) / 0.03, (p.y + 0.094) / 0.0062), vec4(620.0, 640.0, 390.0, 80.0));
+        mark = mix(mark, rescue, rescue.a);
       }
       // (painted on, so the blankets' quilting and grime still show)
       diffuseColor.rgb = mix(diffuseColor.rgb, mark.rgb * (0.55 + 0.45 * shade), mark.a);
@@ -203,7 +264,9 @@ const COLOR = /* glsl */ `
     float nearAft = (1.0 - smoothstep(0.0, 0.016, max(abs(p.z - 0.46) - 0.024, 0.0) + max(abs(p.y + 0.014) - 0.02, 0.0))) * step(0.04, abs(p.x)) * step(0.45, abs(n.x));
     float streaky = 0.45 + 0.55 * shipHash(vec2(floor(p.y * 900.0), floor(p.z * 60.0)));
     float baseSoot = smoothstep(0.455, 0.49, p.z) * smoothstep(0.2, 0.6, n.z);
-    float soot = max(max(nearFwd, nearAft) * streaky, baseSoot * 0.8);
+    // (and trailing back from the nose thrusters along the flow)
+    float trailFwd = step(0.45, abs(n.x)) * (1.0 - smoothstep(0.0, 0.008, abs(p.y + 0.0855) - 0.02)) * step(-0.432, p.z) * (1.0 - smoothstep(-0.432, -0.36, p.z));
+    float soot = max(max(nearFwd, nearAft) * streaky, max(baseSoot * 0.8, trailFwd * streaky * 0.7));
     diffuseColor.rgb *= 1.0 - 0.6 * soot;
 
     // the reinforced carbon-carbon: the nose cap, the wings' leading edges
@@ -287,6 +350,13 @@ function drawMarks() {
   g.fillText('USA', 300, 520 + 135, 590)
   g.font = '600 128px Helvetica, Arial, sans-serif'
   g.fillText('United States', 512, 800 + 75, 1010)
+  // small stencils: "NO STEP" (black), "RESCUE" (black on a yellow band)
+  g.font = 'bold 66px Helvetica, Arial, sans-serif'
+  g.fillText('NO STEP', 620 + 195, 530 + 42, 380)
+  g.fillStyle = '#e3b62a'
+  g.fillRect(620, 640, 390, 80)
+  g.fillStyle = '#121212'
+  g.fillText('RESCUE', 620 + 195, 640 + 42, 370)
   const texture = new THREE.CanvasTexture(canvas)
   texture.flipY = false
   texture.colorSpace = THREE.SRGBColorSpace
@@ -316,6 +386,6 @@ export function detailShuttle(material: THREE.MeshStandardMaterial, bells: THREE
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = shipMetal;')
       .replace('#include <normal_fragment_maps>', BUMP)
   }
-  material.customProgramCacheKey = () => 'shuttle-skin-3'
+  material.customProgramCacheKey = () => 'shuttle-skin-4'
   material.needsUpdate = true
 }
