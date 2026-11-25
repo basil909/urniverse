@@ -134,6 +134,12 @@ export const pilot = {
   walkHeight: 0,
   /** on foot: how far from the ship, metres */
   walkFromShip: 0,
+  /** on foot: through your own eyes, or watching yourself from behind (V) */
+  walkView: 'first' as 'first' | 'third',
+  /** on foot: the thumb stick (touch), -1..1 across (right +) and ahead (+) */
+  walkStick: { x: 0, y: 0 },
+  /** on foot: by the crew hatch, near enough to climb aboard (E) */
+  nearHatch: false,
   jump: { height: 0, seconds: 0, faster: 1, count: 0 },
   /** asked to plant a flag beside the ship */
   flagRequest: false,

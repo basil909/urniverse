@@ -126,7 +126,11 @@ const COLOR = /* glsl */ `
     // the black tiles: the belly, the lower sides, and round the windows
     bool mask = p.z > -0.44 && p.z < -0.33 && p.y > -0.075 && abs(p.x) < 0.07 && n.y > -0.2
       && (p.z < -0.395 || p.y < -0.035 || abs(p.x) > 0.045);
-    if (tile || mask) {
+    // (the pods' rear faces: their corners were coloured tile or blanket
+    // one by one, by which way each faced, and blended into brown blotches;
+    // all blanket here, the soot round the engines darkening them evenly)
+    bool podRear = p.z > 0.43 && n.z > 0.55 && abs(p.x) > 0.045 && p.y > -0.075;
+    if ((tile || mask) && !podRear) {
       vec2 cell = sheet / 0.0055;
       vec2 id = floor(cell);
       float shade = 0.5 + 0.95 * shipHash(id) + 0.3 * shipHash(floor(cell / 7.0) + 3.1);
@@ -145,6 +149,7 @@ const COLOR = /* glsl */ `
       shipBump = -grout * 0.6;
     } else {
       // the white blankets: quilted, a little uneven
+      if (podRear) diffuseColor.rgb = vec3(0.78, 0.8, 0.82);
       vec2 quilt = sheet / vec2(0.026, 0.03);
       vec2 qid = floor(quilt);
       vec2 q = fract(quilt) - 0.5;
@@ -386,6 +391,6 @@ export function detailShuttle(material: THREE.MeshStandardMaterial, bells: THREE
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = shipMetal;')
       .replace('#include <normal_fragment_maps>', BUMP)
   }
-  material.customProgramCacheKey = () => 'shuttle-skin-4'
+  material.customProgramCacheKey = () => 'shuttle-skin-5'
   material.needsUpdate = true
 }

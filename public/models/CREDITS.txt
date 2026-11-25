@@ -16,3 +16,9 @@ this use. Shown at their true sizes in flight mode.
 The International Space Station is not a file: it is built in code
 (src/components/experience/issModel.ts) from its real layout and
 dimensions.
+
+astronaut.glb
+"Astronaut" by Quaternius (quaternius.com), from the Ultimate Modular
+Men pack, via Poly Pizza (poly.pizza/m/3hC2i0CTuO), downloaded
+2026-11-26. Public domain (CC0). The figure you see yourself as on foot
+(V), with its own Idle, Walk and Run animations.

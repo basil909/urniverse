@@ -336,6 +336,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   const [walking, setWalking] = useState(false)
   const [walkFrom, setWalkFrom] = useState(0)
   const [walkHeight, setWalkHeight] = useState(0)
+  const [nearHatch, setNearHatch] = useState(false)
+  const [walkView, setWalkView] = useState<'first' | 'third'>('first')
   const entryGlow = useRef<HTMLDivElement>(null)
   const goToOpen = useRef(false)
   const controlsOpen = useRef(false)
@@ -448,9 +450,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       if (black && !lastBlack) showToast('Plasma all round the ship\nthe radio goes quiet: blackout')
       lastBlack = black
       lastEntry = pilot.entry
+      // back aboard: the held mouse is let go
+      if (!pilot.walking && document.pointerLockElement) document.exitPointerLock()
       setWalking(pilot.walking)
       setWalkFrom(pilot.walkFromShip)
       setWalkHeight(pilot.walkHeight)
+      setNearHatch(pilot.walking && pilot.nearHatch)
+      setWalkView(pilot.walkView)
       // a jump: how high, how long
       if (pilot.jump.count !== lastJump) {
         lastJump = pilot.jump.count
@@ -693,6 +699,13 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       // typing in the Go to search: letters are letters, not controls
       if ((event.target as HTMLElement | null)?.tagName === 'INPUT' && event.key !== 'Escape') return
       if (event.key === 'Escape') {
+        // on foot with the mouse held for looking: Esc lets it go first
+        // (the browser's own Esc may already have; then it does nothing more)
+        if (document.pointerLockElement) {
+          document.exitPointerLock()
+          return
+        }
+        if (performance.now() - lockLostAt < 300) return
         if (goToOpen.current) setGoTo(false)
         else if (controlsOpen.current) setControls(false)
         else if (pilot.walking) pilot.walking = false
@@ -751,6 +764,14 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         toastTimer = window.setTimeout(() => setToast(''), 1600)
         return
       }
+      if (event.key.toLowerCase() === 'v' && !event.repeat && pilot.walking) {
+        // on foot: your own eyes, or watching yourself from behind
+        pilot.walkView = pilot.walkView === 'first' ? 'third' : 'first'
+        setToast(pilot.walkView === 'third' ? 'Watching yourself' : 'Through your own eyes')
+        window.clearTimeout(toastTimer)
+        toastTimer = window.setTimeout(() => setToast(''), 1600)
+        return
+      }
       if (event.key.toLowerCase() === 'v' && !event.repeat) {
         const order = ['chase', 'flyby', 'orbit'] as const
         pilot.cameraMode = order[(order.indexOf(pilot.cameraMode) + 1) % order.length]
@@ -795,8 +816,11 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     const onMove = (event: PointerEvent) => {
       if (goToOpen.current) return
       if (pilot.walking) {
-        // on foot: a drag looks around
-        if (dragFrom) {
+        // on foot: the mouse, held, looks around; or a drag does
+        if (document.pointerLockElement) {
+          pilot.look.dx += event.movementX
+          pilot.look.dy += event.movementY
+        } else if (dragFrom) {
           pilot.look.dx += event.clientX - dragFrom.x
           pilot.look.dy += event.clientY - dragFrom.y
           dragFrom = { x: event.clientX, y: event.clientY }
@@ -826,9 +850,19 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
     }
     const onDown = (event: PointerEvent) => {
-      if ((event.target as Element).closest('button, .flight-goto, .landed-card')) return
-      if (pilot.walking) dragFrom = { x: event.clientX, y: event.clientY }
-      else if (event.pointerType === 'mouse') pilot.keys.add('w') // hold to fly
+      if ((event.target as Element).closest('button, .flight-goto, .landed-card, .walk-stick')) return
+      if (pilot.walking) {
+        dragFrom = { x: event.clientX, y: event.clientY }
+        // a click holds the mouse for looking round (Esc lets it go)
+        if (event.pointerType === 'mouse' && !document.pointerLockElement) {
+          try {
+            const asked = document.documentElement.requestPointerLock?.() as unknown as Promise<void> | undefined
+            asked?.catch?.(() => {})
+          } catch {
+            // (a drag still looks)
+          }
+        }
+      } else if (event.pointerType === 'mouse') pilot.keys.add('w') // hold to fly
       else dragFrom = { x: event.clientX, y: event.clientY }
     }
     const onUp = (event: PointerEvent) => {
@@ -842,6 +876,12 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       }
     }
     const onBlur = () => resetPilotInput()
+    // when the held mouse is let go (Esc, or leaving on foot)
+    let lockLostAt = -1e9
+    const onLockChange = () => {
+      if (!document.pointerLockElement) lockLostAt = performance.now()
+    }
+    document.addEventListener('pointerlockchange', onLockChange)
     // the pointer leaving the window lets go of the stick
     const onLeave = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse') return
@@ -885,6 +925,8 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       window.removeEventListener('pointercancel', onUp)
       window.removeEventListener('blur', onBlur)
       window.removeEventListener('wheel', onWheel)
+      document.removeEventListener('pointerlockchange', onLockChange)
+      if (document.pointerLockElement) document.exitPointerLock()
       resetPilotInput()
     }
   }, [onLand])
@@ -937,7 +979,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
                               `${walkFrom < 1000 ? `${Math.round(walkFrom)} m` : `${(walkFrom / 1000).toFixed(1)} km`} from the Shuttle`,
                               walkHeight > 0.05 ? `${walkHeight >= 10 ? Math.round(walkHeight).toLocaleString('en-GB') : walkHeight.toFixed(1)} m up` : '',
                             ],
-                            key: '',
+                            key: nearHatch && !touch ? 'E to board' : '',
                           }
                       : landState === 'landed'
                         ? { phase: `Landed on ${nearest}`, figures: [site], key: 'hold W to take off' }
@@ -1107,7 +1149,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           : 'Steer with the mouse · W or click to speed up, S to slow · G go to · L land · H all controls'}
       </p>
 
-      {touch && (
+      {touch && !walking && (
         <button
           type="button"
           className="flight-thrust"
@@ -1117,13 +1159,16 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           onPointerLeave={() => (pilot.touchThrust = false)}
         >
           <Icon name="thrust" />
-          {walking ? 'Walk' : 'Thrust'}
+          Thrust
         </button>
       )}
+      {/* on foot, touch: a thumb stick to walk (a drag elsewhere looks),
+          Jump, your view, and Board by the hatch */}
+      {touch && walking && <WalkStick />}
       {touch && walking && (
         <button
           type="button"
-          className="flight-touch-land"
+          className="flight-thrust"
           onClick={() => {
             pilot.keys.add('jump')
             window.setTimeout(() => pilot.keys.delete('jump'), 150)
@@ -1131,6 +1176,17 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         >
           <Icon name="land" className="is-flipped" />
           Jump
+        </button>
+      )}
+      {touch && walking && (
+        <button type="button" className="flight-touch-land" onClick={() => (pilot.walkView = pilot.walkView === 'first' ? 'third' : 'first')}>
+          {walkView === 'first' ? 'See yourself' : 'Your eyes'}
+        </button>
+      )}
+      {touch && walking && nearHatch && (
+        <button type="button" className="flight-touch-land walk-board" onClick={() => (pilot.walking = false)}>
+          <Icon name="arrow" className="is-back" />
+          Board
         </button>
       )}
       {/* touch: landing, when a world is near enough (L on a keyboard) */}
@@ -1318,6 +1374,53 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
           )}
         </nav>
       )}
+    </div>
+  )
+}
+
+
+/* on foot, touch: a thumb stick. Pressed anywhere in its ring, the knob
+   follows the thumb (to the ring's edge); its offset walks you, ahead and
+   to the side, and letting go stops you. */
+function WalkStick() {
+  const knob = useRef<HTMLSpanElement>(null)
+  const centre = useRef<{ x: number; y: number } | null>(null)
+  const RANGE = 42
+  const move = (event: React.PointerEvent) => {
+    if (!centre.current) return
+    let dx = event.clientX - centre.current.x
+    let dy = event.clientY - centre.current.y
+    const d = Math.hypot(dx, dy)
+    if (d > RANGE) {
+      dx *= RANGE / d
+      dy *= RANGE / d
+    }
+    pilot.walkStick.x = dx / RANGE
+    pilot.walkStick.y = -dy / RANGE
+    if (knob.current) knob.current.style.transform = `translate(${dx}px, ${dy}px)`
+  }
+  const end = () => {
+    centre.current = null
+    pilot.walkStick.x = 0
+    pilot.walkStick.y = 0
+    if (knob.current) knob.current.style.transform = ''
+  }
+  useEffect(() => end, [])
+  return (
+    <div
+      className="walk-stick"
+      role="presentation"
+      onPointerDown={(event) => {
+        const box = event.currentTarget.getBoundingClientRect()
+        centre.current = { x: box.left + box.width / 2, y: box.top + box.height / 2 }
+        event.currentTarget.setPointerCapture(event.pointerId)
+        move(event)
+      }}
+      onPointerMove={move}
+      onPointerUp={end}
+      onPointerCancel={end}
+    >
+      <span ref={knob} className="walk-stick-knob" />
     </div>
   )
 }

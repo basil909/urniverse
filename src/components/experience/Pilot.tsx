@@ -53,6 +53,7 @@ import CometEncke from './CometEncke'
 import { AsteroidField, TrojanBodies } from './AsteroidField'
 import ShuttleParts from './ShuttleParts'
 import LandingDust from './LandingDust'
+import Astronaut from './Astronaut'
 
 /* ============================================================
    FLIGHT MODE
@@ -2452,7 +2453,12 @@ export default function Pilot() {
     }
     if (pilot.walking && !standing) pilot.walking = false
     if (pilot.walking) {
-      stepWalk(walker.current, camera, keys, nearestIndex, delta)
+      stepWalk(walker.current, camera, keys, nearestIndex, delta, jet)
+      // by the hatch: E climbs back aboard
+      if (keys.has('e') && pilot.nearHatch) {
+        keys.delete('e')
+        pilot.walking = false
+      }
       _local.copy(jet.position).applyMatrix4(ground.inverse).normalize()
       pilot.walkFromShip = _local.angleTo(walker.current.dir) * ground.worldRadius * KM_PER_UNIT * 1000
     }
@@ -2765,6 +2771,7 @@ export default function Pilot() {
           <AirStreaks state={streaks.current} />
           <SpaceDust state={dust.current} />
           <LandingDust jetRef={ship} />
+          <Astronaut jetRef={ship} />
           <SurfaceLife jetRef={ship} />
           <RingChunks jetRef={ship} />
           <AsteroidField jetRef={ship} />

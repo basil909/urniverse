@@ -4785,3 +4785,39 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
   .flight-hud.is-sheet-open .flight-markers { opacity: 0; pointer-events: none; }
   .flight-readout, .flight-thrust, .flight-markers { transition: opacity 0.25s; }
 }
+
+/* on foot, touch: the thumb stick (bottom left, above the buttons row),
+   and Board above the view button when by the hatch */
+.walk-stick {
+  position: absolute;
+  left: var(--pad);
+  bottom: 84px;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  pointer-events: auto;
+  touch-action: none;
+  border: 1px solid var(--surface-edge);
+  background: var(--surface);
+  backdrop-filter: var(--surface-blur);
+  -webkit-backdrop-filter: var(--surface-blur);
+  box-shadow: var(--surface-light);
+}
+.walk-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  transition: transform 0.12s var(--ease);
+}
+.walk-stick:active .walk-stick-knob { transition: none; }
+.flight-touch-land.walk-board { bottom: 166px; }
+@media (max-width: 640px) {
+  .walk-stick { bottom: 92px; }
+  .flight-touch-land.walk-board { bottom: 220px; }
+}

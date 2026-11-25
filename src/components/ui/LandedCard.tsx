@@ -132,11 +132,14 @@ export default function LandedCard({ touch }: { touch: boolean }) {
         <p className="landed-eyebrow">On foot · {surface.name}</p>
         <p className="landed-walk-keys">
           {touch ? (
-            <>Hold Walk to go · drag to look · Jump</>
+            <>The stick walks · drag to look · Jump · board by the hatch</>
           ) : (
             <>
-              <kbd>W</kbd> walk <kbd>A</kbd>
-              <kbd>D</kbd> turn · drag to look · <kbd>Space</kbd> jump · <kbd>Shift</kbd> hurry
+              <kbd>W</kbd>
+              <kbd>A</kbd>
+              <kbd>S</kbd>
+              <kbd>D</kbd> move · click to look round · <kbd>Space</kbd> jump · <kbd>Shift</kbd> run · <kbd>V</kbd> see yourself ·{' '}
+              <kbd>E</kbd> board, by the hatch
             </>
           )}
         </p>
