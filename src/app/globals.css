@@ -4773,3 +4773,15 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 @media (max-width: 760px) {
   .dive-readout { justify-items: start; margin: 0; }
 }
+
+/* a phone, the Go to list or the controls open: they fill the lower
+   screen, and the readout, Thrust and the markers no longer show through
+   them (the sheets are glass) */
+@media (max-width: 640px) {
+  .flight-hud.is-sheet-open .flight-readout,
+  .flight-hud.is-sheet-open .flight-thrust,
+  .flight-hud.is-sheet-open .flight-touch-land,
+  .flight-hud.is-sheet-open .flight-hint,
+  .flight-hud.is-sheet-open .flight-markers { opacity: 0; pointer-events: none; }
+  .flight-readout, .flight-thrust, .flight-markers { transition: opacity 0.25s; }
+}

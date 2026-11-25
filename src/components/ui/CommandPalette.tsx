@@ -118,7 +118,8 @@ export default function CommandPalette({
               <input
                 autoFocus
                 type="search"
-                placeholder="Search chapters, worlds, panels, actions…"
+                // (a phone: the long hint ran out of room, cut mid-word)
+                placeholder={window.innerWidth < 520 ? 'Search everything…' : 'Search chapters, worlds, panels, actions…'}
                 aria-label="Search everything"
                 aria-controls="palette-list"
                 value={query}

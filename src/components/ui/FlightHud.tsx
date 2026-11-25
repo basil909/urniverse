@@ -984,7 +984,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
   }, [credit])
 
   return (
-    <div className={`flight-hud ${landState === 'landed' ? 'is-landed' : ''} ${photo ? 'is-photo' : ''}`}>
+    <div className={`flight-hud ${landState === 'landed' ? 'is-landed' : ''} ${photo ? 'is-photo' : ''} ${goTo || controls ? 'is-sheet-open' : ''}`}>
       {toast && <p className="flight-toast">{toast}</p>}
       <div ref={haze} className="flight-haze" aria-hidden="true" />
       <div ref={mist} className="flight-mist" aria-hidden="true" />
@@ -1209,7 +1209,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
             <input
               type="search"
               autoFocus
-              placeholder="Search planets, moons, craft, stars…"
+              placeholder={window.innerWidth < 520 ? 'Search worlds and craft…' : 'Search planets, moons, craft, stars…'}
               aria-label="Search places to warp to"
               value={query}
               onChange={(event) => {

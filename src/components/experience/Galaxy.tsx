@@ -34,6 +34,7 @@ const ARM_COUNT = 4
 import { ARM_WIND, BAR_ANGLE, BAR_COS, BAR_HALF, BAR_SIN, GALAXY_RADIUS, SUN_ANGLE, SUN_RADIUS } from './galaxyLayout'
 import { dive, galaxyFrame } from './galaxyDive'
 import Nebulae from './Nebulae'
+import { overCopy } from './copyZone'
 export { GALAXY_RADIUS, SUN_ANGLE, SUN_RADIUS }
 
 // Far backdrop, upper right of the intro view, so it never sits behind the Sun
@@ -671,6 +672,7 @@ export default function Galaxy({
   const clusterMaterial = useRef<THREE.PointsMaterial>(null)
   const coreMaterial = useRef<THREE.SpriteMaterial>(null)
   const haloMaterial = useRef<THREE.SpriteMaterial>(null)
+  const markerChecked = useRef({ at: 0, clear: 1 })
   useEffect(() => () => glowMaterial.dispose(), [glowMaterial])
 
   /* ==========================================================
@@ -794,7 +796,16 @@ export default function Galaxy({
     if (marker.current && progressRef) {
       const progress = progressRef.current ?? 0
       const local = progress - GALAXY_CHAPTER
-      const target = (local >= 0.18 && local < 0.93 ? 1 : 0) * (shot.index >= 2 && shot.index <= 5 ? 0 : 1) * (dive.active ? 0 : 1)
+      // (and on a phone, not over the chapter's words below: checked a
+      // few times a second)
+      const now = performance.now()
+      if (now - markerChecked.current.at > 300) {
+        const label = marker.current.getBoundingClientRect()
+        const over = label.height > 0 && overCopy(label.left + label.width / 2, label.top + label.height / 2, label.width / 2, label.height / 2, 12)
+        markerChecked.current = { at: now, clear: over ? 0 : 1 }
+      }
+      const clear = markerChecked.current.clear
+      const target = (local >= 0.18 && local < 0.93 ? 1 : 0) * (shot.index >= 2 && shot.index <= 5 ? 0 : 1) * (dive.active ? 0 : 1) * clear
       markerOpacity.current +=
         (target - markerOpacity.current) * (1 - Math.exp(-delta * 4))
       marker.current.style.opacity = markerOpacity.current.toFixed(3)
