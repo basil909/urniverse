@@ -45,6 +45,9 @@ float shipLine(float x, float width) {
 float shipRough = 0.6;
 float shipMetal = 0.05;
 float shipBump = 0.0;
+/* the bells: the three main engines and the pods' two (axis x, y, radius,
+   the mouth's z), set from the model as it is built */
+uniform vec4 uBells[5];
 `
 
 const COLOR = /* glsl */ `
@@ -63,10 +66,48 @@ const COLOR = /* glsl */ `
     shipRough = 0.08;
     shipMetal = 0.0;
   } else if (metal) {
-    // the main engines' bells: worn metal, darker at the throat
-    shipRough = 0.38;
-    shipMetal = 0.75;
-    diffuseColor.rgb *= 0.85 + 0.25 * smoothstep(0.42, 0.5, p.z);
+    /* the engines' bells: deep, flared, of a thousand brazed cooling
+       tubes running their length. Which bell: the nearest axis. */
+    vec4 bell = uBells[0];
+    float nearest = 1e9;
+    for (int k = 0; k < 5; k++) {
+      float d = length(p.xy - uBells[k].xy) / max(uBells[k].z, 1e-4);
+      if (d < nearest) { nearest = d; bell = uBells[k]; }
+    }
+    vec2 rel = p.xy - bell.xy;
+    float around = atan(rel.y, rel.x) * 60.0;
+    // the tubes, as fine ribs (gone where they are finer than a pixel)
+    float rib = (0.5 + 0.5 * cos(around * 6.2832 / 3.1416)) * (1.0 - smoothstep(0.35, 0.9, fwidth(around)));
+    // how deep into the bell: 0 at the mouth, 1 towards the throat
+    float depth = clamp((bell.w - p.z) / (bell.z * 2.6), 0.0, 1.0);
+    // (only the bell itself: the engine's other metal, round the pods and
+    // the plumbing, stays plain worn metal)
+    bool inBell = nearest < 1.12 && p.z > bell.w - bell.z * 2.8 && p.z < bell.w + 0.002;
+    if (!inBell) {
+      // (matte enough not to blaze in the sun or mirror the sky's blue)
+      shipRough = 0.55;
+      shipMetal = 0.4;
+      diffuseColor.rgb *= 0.85 + 0.25 * smoothstep(0.42, 0.5, p.z);
+    } else if (!gl_FrontFacing) {
+      /* inside (the wall seen from within, through the open mouth): soot
+         at the mouth, then metal tinted by the heat, bronze and gold,
+         turning blue towards the throat */
+      vec3 heat = mix(vec3(0.2, 0.12, 0.05), vec3(0.06, 0.075, 0.15), smoothstep(0.5, 0.95, depth));
+      heat = mix(vec3(0.022, 0.02, 0.019), heat, smoothstep(0.06, 0.4, depth));
+      diffuseColor.rgb = heat * (0.7 + 0.3 * rib);
+      shipRough = mix(0.92, 0.6, smoothstep(0.1, 0.6, depth));
+      shipMetal = mix(0.1, 0.5, smoothstep(0.1, 0.6, depth));
+      shipBump = rib * 0.6;
+    } else {
+      /* outside: worn metal, the tubes in relief, a bronze and blue heat
+         tint towards the throat, and soot round the lip */
+      vec3 tint = mix(vec3(1.0), vec3(1.08, 0.92, 0.74), smoothstep(0.35, 0.8, depth));
+      tint = mix(tint, vec3(0.8, 0.86, 1.08), smoothstep(0.8, 1.0, depth));
+      diffuseColor.rgb *= tint * (0.82 + 0.18 * rib) * mix(0.45, 1.0, smoothstep(0.0, 0.07, depth));
+      shipRough = 0.5;
+      shipMetal = 0.6;
+      shipBump = rib * 0.8;
+    }
   } else {
     // the black tiles: the belly, the lower sides, and round the windows
     bool mask = p.z > -0.44 && p.z < -0.33 && p.y > -0.075 && abs(p.x) < 0.07 && n.y > -0.2
@@ -129,6 +170,15 @@ const COLOR = /* glsl */ `
       shipBump -= port * 1.5;
     }
 
+    // soot: round the thrusters' ports (streaky), and on the base round
+    // the engines, where their exhaust has blackened it
+    float nearFwd = (1.0 - smoothstep(0.0, 0.016, max(abs(p.z + 0.45) - 0.02, 0.0) + max(abs(p.y + 0.0855) - 0.022, 0.0))) * step(0.45, abs(n.x));
+    float nearAft = (1.0 - smoothstep(0.0, 0.016, max(abs(p.z - 0.46) - 0.024, 0.0) + max(abs(p.y + 0.014) - 0.02, 0.0))) * step(0.04, abs(p.x)) * step(0.45, abs(n.x));
+    float streaky = 0.45 + 0.55 * shipHash(vec2(floor(p.y * 900.0), floor(p.z * 60.0)));
+    float baseSoot = smoothstep(0.455, 0.49, p.z) * smoothstep(0.2, 0.6, n.z);
+    float soot = max(max(nearFwd, nearAft) * streaky, baseSoot * 0.8);
+    diffuseColor.rgb *= 1.0 - 0.6 * soot;
+
     // the reinforced carbon-carbon: the nose cap, the wings' leading edges
     float noseCap = smoothstep(-0.468, -0.478, p.z);
     float leading = step(0.105, abs(p.x)) * smoothstep(-0.45, -0.75, n.z) * step(p.y, -0.07);
@@ -161,9 +211,13 @@ const BUMP = /* glsl */ `
 }
 `
 
-/** give the built Shuttle's material its surface (once) */
-export function detailShuttle(material: THREE.MeshStandardMaterial) {
+/** give the built Shuttle's material its surface (once); bells: each
+    engine's axis x, y, radius and mouth z, in the model's units */
+export function detailShuttle(material: THREE.MeshStandardMaterial, bells: THREE.Vector4[] = []) {
+  const far = new THREE.Vector4(9, 9, 0.01, 0)
+  const bellList = Array.from({ length: 5 }, (_, i) => bells[i] ?? far)
   material.onBeforeCompile = (shader) => {
+    shader.uniforms.uBells = { value: bellList }
     shader.vertexShader = VERTEX_HEAD + shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
@@ -176,6 +230,6 @@ export function detailShuttle(material: THREE.MeshStandardMaterial) {
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = shipMetal;')
       .replace('#include <normal_fragment_maps>', BUMP)
   }
-  material.customProgramCacheKey = () => 'shuttle-skin-1'
+  material.customProgramCacheKey = () => 'shuttle-skin-2'
   material.needsUpdate = true
 }

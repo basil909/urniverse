@@ -1197,6 +1197,8 @@ function useShuttle() {
         }
         // the cockpit windows
         const WINDOW_MATERIALS = new Set(['lambert5SG', 'anisotropic1SG', 'initialShadingGr'])
+        // the dish and ring that close each engine's bell across its mouth
+        const ENGINE_CAPS = new Set(['lambert9SG', 'lambert4SG'])
         const glass = new THREE.Color('#07090d')
         const engineGroup = (object: THREE.Object3D) => {
           let o: THREE.Object3D | null = object
@@ -1224,10 +1226,18 @@ function useShuttle() {
             continue
           }
           const isWindow = materials.some((m) => WINDOW_MATERIALS.has(m.name))
+          const engine = engineGroup(mesh)
+          // the engines' bells are closed across the mouth by a flat dish
+          // and ring (they read as cans): left out, so the bell is open and
+          // its inside shows (shuttleSurface.ts shades it)
+          if (engine && materials.some((m) => ENGINE_CAPS.has(m.name))) continue
           // only what every part shares (position, normal), so they merge into one
           const geometry = await bakePart(mesh.geometry, mesh.matrixWorld, breathe, bodyBounds)
           if (cancelled) return
-          const engine = engineGroup(mesh)
+          // (one wing's top in NASA's file faces down, a mirrored copy
+          // never turned back: it took the belly's black tiles)
+          if (!isWindow && !engine) await unmirror(geometry, breathe)
+          if (cancelled) return
           const normal = geometry.getAttribute('normal')
           const colors = new Float32Array(normal.count * 3)
           for (let i = 0; i < normal.count; i += 1) {
@@ -1256,8 +1266,19 @@ function useShuttle() {
         await centreAndScale(merged, center, 1 / length, breathe, bodyBounds)
         if (cancelled) return
         const skin = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.12, side: THREE.DoubleSide })
-        // tiles, blankets, seams, carbon-carbon (shuttleSurface.ts)
-        detailShuttle(skin)
+        // the bells (the three main engines and the two pods' engines, the
+        // largest engine groups): each one's axis, radius and mouth, so the
+        // skin can shade them inside and out
+        const bells = [...engineBoxes.values()]
+          .map((box) => ({ box, size: box.getSize(new THREE.Vector3()) }))
+          .sort((a, b) => b.size.length() - a.size.length())
+          .slice(0, 5)
+          .map(({ box, size }) => {
+            const c = box.getCenter(new THREE.Vector3())
+            return new THREE.Vector4((c.x - center.x) / length, (c.y - center.y) / length, Math.min(size.x, size.y) / 2 / length, (box.max.z - center.z) / length)
+          })
+        // tiles, blankets, seams, carbon-carbon, the bells (shuttleSurface.ts)
+        detailShuttle(skin, bells)
         const body = new THREE.Mesh(merged, skin)
         // its own shadows (the fin on the pods, the wings on the body),
         // and the silhouette its shadow on the ground is drawn from
@@ -1363,6 +1384,58 @@ function useShuttle() {
     }
   }, [])
   return { model, failed }
+}
+
+/* A part made of two mirrored halves, one of which faces the wrong way (its
+   faces turned inward, as when a mirrored copy is never turned back): the
+   halves either side of the part's middle, where it is broad, are
+   compared by how many of their faces look up, and if one half is nearly
+   all up and the other nearly all down, the downward half is turned round
+   (its normals reversed and its corners reordered, so it lights and takes
+   its colour as the other). A part that is not like this is left alone. */
+async function unmirror(geometry: THREE.BufferGeometry, breathe: () => Promise<void>) {
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute
+  const normal = geometry.getAttribute('normal') as THREE.BufferAttribute | undefined
+  if (!normal || position.count < 300) return
+  geometry.computeBoundingBox()
+  const box = geometry.boundingBox!
+  const middle = (box.min.x + box.max.x) / 2
+  const half = (box.max.x - box.min.x) / 2
+  if (half <= 0) return
+  // faces looking up and down, on the left (0) and right (1), out where the part is broad
+  const up = [0, 0]
+  const down = [0, 0]
+  for (let t = 0; t + 2 < position.count; t += 3) {
+    if (t % 30000 === 0) await breathe()
+    const x = (position.getX(t) + position.getX(t + 1) + position.getX(t + 2)) / 3 - middle
+    if (Math.abs(x) < half * 0.4) continue
+    const ny = normal.getY(t) + normal.getY(t + 1) + normal.getY(t + 2)
+    const side = x < 0 ? 0 : 1
+    if (ny > 0.9) up[side] += 1
+    else if (ny < -0.9) down[side] += 1
+  }
+  const share = (side: number) => up[side] / Math.max(up[side] + down[side], 1)
+  const counted = (side: number) => up[side] + down[side] >= 30
+  if (!counted(0) || !counted(1)) return
+  let wrong = -1
+  if (share(0) > 0.8 && share(1) < 0.2) wrong = 1
+  else if (share(1) > 0.8 && share(0) < 0.2) wrong = 0
+  if (wrong < 0) return
+  for (let t = 0; t + 2 < position.count; t += 3) {
+    if (t % 30000 === 0) await breathe()
+    const x = (position.getX(t) + position.getX(t + 1) + position.getX(t + 2)) / 3 - middle
+    if ((x < 0 ? 0 : 1) !== wrong || Math.abs(x) < half * 0.02) continue
+    // the corners' order reversed (the second and third swapped)...
+    for (const attribute of [position, normal]) {
+      const a = attribute.getX(t + 1), b = attribute.getY(t + 1), c = attribute.getZ(t + 1)
+      attribute.setXYZ(t + 1, attribute.getX(t + 2), attribute.getY(t + 2), attribute.getZ(t + 2))
+      attribute.setXYZ(t + 2, a, b, c)
+    }
+    // ...and the normals turned round
+    for (let k = 0; k < 3; k += 1) normal.setXYZ(t + k, -normal.getX(t + k), -normal.getY(t + k), -normal.getZ(t + k))
+  }
+  position.needsUpdate = true
+  normal.needsUpdate = true
 }
 
 /* A part's positions and normals, moved into place (as applyMatrix4 would),
@@ -1651,7 +1724,10 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
     look.main.uniforms.uVacuum.value = vacuum
     look.main.uniforms.uLength.value = length
     look.main.uniforms.uTime.value = time
-    look.throat.uniforms.uThrust.value = 0.15 + t * 0.85
+    // (dark with the engines off: the bells are open, and a throat glowing
+    // on the ground would show through their mouths)
+    const shutDown = pilot.landState === 'landed' || pilot.landState === 'rolling'
+    look.throat.uniforms.uThrust.value = shutDown ? 0 : Math.min(1, t * 20) * (0.15 + t * 0.85)
     look.booster.uniforms.uThrust.value = 1
     look.booster.uniforms.uTime.value = time
     look.booster.uniforms.uLength.value = 8
