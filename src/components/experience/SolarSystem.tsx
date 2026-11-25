@@ -1145,7 +1145,7 @@ float resolved(float scale, float px) {
    yellow-white star warming to orange at its edge */
 vec3 fire(float l, float core) {
   l = max(l, 0.0);
-  return vec3(mix(1.25, 1.36, core) * pow(l, 0.9), 0.9 * pow(l, mix(2.2, 1.05, core)), 0.6 * pow(l, mix(5.0, 2.2, core)));
+  return vec3(mix(1.25, 1.36, core) * pow(l, 0.9), 0.9 * pow(l, mix(2.2, 1.05, core)), mix(0.6, 0.55, core) * pow(l, mix(5.0, 2.6, core)));
 }
 
 void main() {
@@ -1248,10 +1248,10 @@ void main() {
     if (w <= 0.0) continue;
     // the coarse layer's lanes are soft (crisp lanes this small read as a
     // tiled crackle): its mean is a little higher
-    float g = granules(q * (k == 0 ? 95.0 : 700.0) + (k == 0 ? 41.0 : 0.0), t * (k == 0 ? 0.3 : 0.6), k == 0 ? 0.4 : 1.0)
-      / (k == 0 ? 0.465 : GRAIN_MEAN);
+    float g = granules(q * (k == 0 ? 95.0 : 700.0) + (k == 0 ? 41.0 : 0.0), t * (k == 0 ? 0.3 : 0.6), k == 0 ? 0.65 : 1.0)
+      / (k == 0 ? 0.441 : GRAIN_MEAN);
     // crisp and high in contrast on the quiet Sun, soft round the activity
-    float contrast = k == 0 ? mix(0.2, 0.55, quiet) : 0.55;
+    float contrast = k == 0 ? mix(0.3, 0.65, quiet) : 0.55;
     l *= mix(1.0, 1.0 - contrast + contrast * g, w);
   }
 
@@ -1317,14 +1317,17 @@ void main() {
   /* the limb: brightness falls away smoothly over the whole disc (as the
      Sun's own does, to some 30% at the very edge), with a faint glow of
      hot gas just at the rim and the very edge soft */
-  float m1 = 1.0 - mu;
-  l *= 0.5 + 1.45 * (1.0 - 0.47 * m1 - 0.23 * m1 * m1);
-  l += 0.12 * pow(m1, 6.0);
+  /* (by how far from the middle of the disc it lies as seen, rho: by the
+     viewing angle alone, nearly all the change came in the outer tenth
+     and read as an orange ring round a pale middle) */
+  float rho = sqrt(max(1.0 - mu * mu, 0.0));
+  l *= 1.0 + 2.3 * (1.0 - pow(rho, 1.6));
+  l += 0.06 * pow(1.0 - mu, 6.0);
   l *= mix(0.6, 1.0, smoothstep(0.0, 0.06, mu));
   // white-hot only in knots, never in whole sheets
   l = l > 0.9 ? 0.9 + (l - 0.9) * 0.3 : l;
 
-  gl_FragColor = vec4(fire(l, smoothstep(0.0, 1.0, mu)), 1.0);
+  gl_FragColor = vec4(fire(l, 1.0 - pow(rho, 1.25)), 1.0);
 }`
 
 
@@ -2518,7 +2521,7 @@ void main() {
    close each line of sight passes to the limb.
 ============================================================ */
 
-const SUN_RIM_SHELL = 1.3
+const SUN_RIM_SHELL = 2.2
 
 const SUN_RIM_VERTEX = /* glsl */ `
 varying vec3 vWorldPosition;
@@ -2573,12 +2576,17 @@ void main() {
   // cloudy, never even, with a few brighter streamers
   float cloud = noise(vec3(ring * 2.5, h * 5.0 + uTime * 0.01)) * 0.6 + noise(vec3(ring * 7.0, h * 12.0 - uTime * 0.02)) * 0.4;
   corona *= 0.35 + 1.3 * cloud;
-  for (int k = 0; k < 5; k++) {
+  // the outer corona: a cloudy haze, thinning outwards, fading before the
+  // shell's edge
+  float outer = 1.0 - smoothstep(0.6, 1.15, h);
+  corona += exp(-h / 0.35) * 0.09 * (0.25 + 1.5 * cloud) * outer;
+  // and a few wispy streamers reaching out through it, widening
+  for (int k = 0; k < 6; k++) {
     float towards = hash(vec3(float(k) * 3.7, 1.0, 2.0)) * 6.28318;
     float apart = acos(clamp(dot(ring, vec2(cos(towards), sin(towards))), -1.0, 1.0));
-    float wide = 0.05 + 0.3 * h;
-    corona += exp(-apart * apart / (wide * wide)) * exp(-h / 0.25) * smoothstep(0.0, 0.03, h) * 0.12 * (0.6 + 0.8 * cloud)
-      * (1.0 - smoothstep(0.12, 0.28, h));
+    float wide = 0.035 + 0.16 * h;
+    float wisp = 0.6 + 0.8 * noise(vec3(ring * 20.0, h * 6.0 - uTime * 0.02));
+    corona += exp(-apart * apart / (wide * wide)) * exp(-h / 0.55) * smoothstep(0.0, 0.04, h) * 0.16 * wisp * (0.6 + 0.8 * cloud) * outer;
   }
 
   vec3 color = vec3(1.0, 0.36, 0.1) * chromo * 1.2 + vec3(1.0, 0.5, 0.16) * (corona + flames * 0.8);
