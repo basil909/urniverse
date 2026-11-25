@@ -1166,11 +1166,11 @@ void main() {
      neighbourhood where the magnetic network gathers. */
   float region = fbm(q * 3.6 + 11.0);
   float activity = smoothstep(0.58, 0.78, region);
-  float nearActive = smoothstep(0.44, 0.7, region);
+  float nearActive = smoothstep(0.48, 0.72, region);
   for (int i = 0; i < SPOT_COUNT + uDyn; i++) {
     float d = length(p - SPOTS[i].xyz);
     activity = max(activity, 1.0 - smoothstep(0.02, 0.07 + SPOTS[i].w * 5.0, d));
-    nearActive = max(nearActive, 1.0 - smoothstep(0.06, 0.26, d));
+    nearActive = max(nearActive, 1.0 - smoothstep(0.06, 0.22, d));
   }
   float ragged = noise(q * 8.0 + vec3(0.0, t * 0.006, 0.0)) * 0.65 + noise(q * 17.0) * 0.35;
   activity = clamp(activity * (0.4 + 1.3 * ragged), 0.0, 1.0);
@@ -1205,16 +1205,16 @@ void main() {
   float broken = smoothstep(0.35, 0.65, noise(q * 40.0 + 3.0));
   /* calm zones between the active regions lie quieter still */
   float calm = smoothstep(0.5, 0.72, noise(q * 2.8 + 40.0)) * (1.0 - smoothstep(0.0, 0.3, activity));
-  float quiet = (1.0 - nearActive) * 0.8 + calm * 0.2;
+  float quiet = (1.0 - nearActive) * 0.85 + calm * 0.15;
   /* small clumps glowing like embers, most of them near the activity */
   float ember = fbm(q * 30.0 + bend * 2.0 + vec3(0.0, 0.0, t * 0.01));
   float embers = smoothstep(0.48, 0.72, ember);
-  float l = 0.12 + 0.22 * mottle
-    + net * broken * (0.14 + 0.16 * mottle) * (1.0 - 0.82 * quiet)
-    + embers * (0.16 + 0.3 * mottle) * (1.0 - 0.85 * quiet);
+  float l = 0.15 + 0.22 * mottle
+    + net * broken * (0.14 + 0.16 * mottle) * (1.0 - 0.95 * quiet)
+    + embers * (0.16 + 0.3 * mottle) * (1.0 - 0.95 * quiet);
   if (fineSeen > 0.0) {
     float fineBroken = smoothstep(0.3, 0.7, noise(q * 150.0 + 8.0));
-    l += nets[2] * fineBroken * 0.08 * fineSeen * (1.0 - 0.7 * quiet);
+    l += nets[2] * fineBroken * 0.08 * fineSeen * (1.0 - 0.9 * quiet);
   }
 
   /* the active regions blaze: bright, clumped plage, threaded with
@@ -1222,19 +1222,24 @@ void main() {
   float plage = fbm(q * 14.0 + vec3(t * 0.01, 0.0, 0.0));
   float strands = thread(q * 26.0 + (plage - 0.5) * 2.0 + vec3(0.0, t * 0.02, 0.0), 6.0);
   float knots = pow(noise(q * 40.0 - vec3(t * 0.015)) * 0.65 + noise(q * 83.0) * 0.35, 2.0);
-  l += activity * (0.1 + 0.36 * plage + 0.32 * strands + 0.8 * knots * activity);
+  /* (kept apart from the rest: it takes only part of the brightening
+     towards the middle of the disc, and dims round the spots, so it
+     never blows out and the spots stand out in it) */
+  float glow = activity * (0.1 + 0.36 * plage + 0.32 * strands + 0.8 * knots * activity);
   /* the heart of each active region burns hottest, with a clear falloff:
      somewhere for the eye to go */
-  l += pow(activity, 3.0) * (0.22 + 0.2 * plage);
+  glow += pow(activity, 3.0) * (0.16 + 0.14 * plage);
 
   /* dark filaments: long, thin and snaking, lying across the quiet
      surface between the active regions */
-  float where = smoothstep(0.55, 0.7, noise(q * 3.0 + 23.0));
-  vec3 along = q * vec3(5.0, 14.0, 5.0) + (mottle - 0.5) * 1.5 + 31.0;
+  /* (short: broken into pieces; bent, so no two run side by side; thin
+     and faint, so they never read as cracks) */
+  float where = smoothstep(0.55, 0.7, noise(q * 3.0 + 23.0)) * smoothstep(0.38, 0.62, noise(q * 11.0 + 2.0));
+  vec3 along = q * vec3(6.0, 10.0, 6.0) + bend * 1.2 + (mottle - 0.5) * 1.5 + 31.0;
   float ridge = 1.0 - abs(2.0 * noise(along) - 1.0);
-  float filament = pow(ridge, 22.0);
+  float filament = pow(ridge, 30.0);
   float shade = ridge * ridge * ridge;
-  l *= 1.0 - (0.5 * filament + 0.2 * shade) * where * (1.0 - activity);
+  l *= 1.0 - (0.32 * filament + 0.12 * shade) * where * (1.0 - activity);
 
   /* granulation over the whole surface, softly: bright cells parted by
      dark lanes (a coarser stand-in for the real granules, which are
@@ -1262,6 +1267,7 @@ void main() {
   float umbra = 0.0;
   float streaks = 1.0;
   float loops = 0.0;
+  float moat = 1.0;
   for (int i = 0; i < SPOT_COUNT + uDyn; i++) {
     vec3 c = SPOTS[i].xyz;
     float r = SPOTS[i].w * 2.0;
@@ -1271,6 +1277,8 @@ void main() {
     vec3 side = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
     vec3 up = cross(side, c);
     vec3 off = p - c;
+    // the plage dims just round each spot, so the spot stands out in it
+    moat = min(moat, mix(0.45, 1.0, smoothstep(r * 0.9, r * 3.2, d)));
     if (d < r * 1.3) {
       float angle = atan(dot(off, up), dot(off, side));
       float wobble = 1.0 + 0.22 * (noise(vec3(cos(angle), sin(angle), float(i)) * 3.0) - 0.5);
@@ -1310,9 +1318,9 @@ void main() {
       umbra = max(umbra, (1.0 - smoothstep(0.35, 0.55, dc)) * step(0.4, h.z));
     }
   }
-  l *= mix(1.0, 0.42 * streaks, penumbra);
-  l *= mix(1.0, 0.12, umbra);
-  l += loops * 0.4;
+  float spots = mix(1.0, 0.42 * streaks, penumbra) * mix(1.0, 0.12, umbra);
+  l *= spots;
+  glow = glow * spots * moat + loops * 0.4;
 
   /* the limb: brightness falls away smoothly over the whole disc (as the
      Sun's own does, to some 30% at the very edge), with a faint glow of
@@ -1321,11 +1329,12 @@ void main() {
      viewing angle alone, nearly all the change came in the outer tenth
      and read as an orange ring round a pale middle) */
   float rho = sqrt(max(1.0 - mu * mu, 0.0));
-  l *= 1.0 + 2.3 * (1.0 - pow(rho, 1.6));
+  float lift = 1.0 + 2.3 * (1.0 - pow(rho, 1.6));
+  l = l * lift + glow * (1.0 + 0.45 * (lift - 1.0));
   l += 0.06 * pow(1.0 - mu, 6.0);
   l *= mix(0.6, 1.0, smoothstep(0.0, 0.06, mu));
   // white-hot only in knots, never in whole sheets
-  l = l > 0.9 ? 0.9 + (l - 0.9) * 0.3 : l;
+  l = l > 0.85 ? 0.85 + (l - 0.85) * 0.25 : l;
 
   gl_FragColor = vec4(fire(l, 1.0 - pow(rho, 1.25)), 1.0);
 }`
@@ -2493,14 +2502,14 @@ void main() {
   glow += fringe * 0.9;
   /* cloudy, never even: the glow thicker in some places than others */
   float cloud = noise2(at * 1.2 + vec2(t * 0.6, 0.0)) * 0.6 + noise2(at * 3.1 - vec2(0.0, t)) * 0.4;
-  glow *= 0.4 + 1.2 * cloud;
+  glow *= 0.55 + 0.9 * smoothstep(0.2, 0.8, cloud);
   /* and a few brighter streamers, reaching out and widening */
   for (int k = 0; k < 5; k++) {
     float fk = float(k);
     float towards = hash1(fk * 3.7 + 1.0) * 6.28318;
     float apart = acos(clamp(dot(dir, vec2(cos(towards), sin(towards))), -1.0, 1.0));
-    float wide = 0.05 + 0.14 * above;
-    glow += exp(-apart * apart / (wide * wide)) * exp(-above * 1.1) * smoothstep(0.0, 0.08, above) * (0.12 + 0.12 * hash1(fk * 5.1)) * (0.6 + 0.8 * cloud)
+    float wide = 0.04 + 0.1 * above;
+    glow += exp(-apart * apart / (wide * wide)) * exp(-above * 1.1) * smoothstep(0.0, 0.08, above) * (0.25 + 0.2 * hash1(fk * 5.1)) * (0.6 + 0.8 * cloud)
       * (1.0 - smoothstep(uHalf * 0.4, uHalf * 0.9, r));
   }
 
@@ -2579,14 +2588,15 @@ void main() {
   // the outer corona: a cloudy haze, thinning outwards, fading before the
   // shell's edge
   float outer = 1.0 - smoothstep(0.6, 1.15, h);
-  corona += exp(-h / 0.35) * 0.09 * (0.25 + 1.5 * cloud) * outer;
+  float patchy = smoothstep(0.2, 0.8, cloud);
+  corona += exp(-h / 0.35) * 0.1 * (0.35 + 1.3 * patchy) * outer;
   // and a few wispy streamers reaching out through it, widening
   for (int k = 0; k < 6; k++) {
     float towards = hash(vec3(float(k) * 3.7, 1.0, 2.0)) * 6.28318;
     float apart = acos(clamp(dot(ring, vec2(cos(towards), sin(towards))), -1.0, 1.0));
-    float wide = 0.035 + 0.16 * h;
+    float wide = 0.03 + 0.12 * h;
     float wisp = 0.6 + 0.8 * noise(vec3(ring * 20.0, h * 6.0 - uTime * 0.02));
-    corona += exp(-apart * apart / (wide * wide)) * exp(-h / 0.55) * smoothstep(0.0, 0.04, h) * 0.16 * wisp * (0.6 + 0.8 * cloud) * outer;
+    corona += exp(-apart * apart / (wide * wide)) * exp(-h / 0.55) * smoothstep(0.0, 0.04, h) * 0.3 * wisp * (0.6 + 0.8 * cloud) * outer;
   }
 
   vec3 color = vec3(1.0, 0.36, 0.1) * chromo * 1.2 + vec3(1.0, 0.5, 0.16) * (corona + flames * 0.8);
