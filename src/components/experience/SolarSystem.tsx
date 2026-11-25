@@ -4623,6 +4623,10 @@ void main() {
   float miss = sqrt(max(dot(oc, oc) - b * b, 0.0));
   float soft = max(-b * uSunAng, fwidth(miss));
   float shade = b >= 0.0 ? 1.0 : smoothstep(uRadius - soft, uRadius + soft, miss);
+  /* in the shadow the ring dims rather than vanishing (a little light from
+     the planet's own glow and the scattered sunlight): gone entirely, the
+     shaded stretch read as a ring left unfinished */
+  shade = mix(0.3, 1.0, shade);
   vec3 color = uColor * glow * face * shade * uLight;
   /* from among them (a few radii out) the faint rings all but vanish, as
      from Juno: up close their thin glow read as a flat, hard-edged slab */
