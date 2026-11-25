@@ -1133,6 +1133,12 @@ float granules(vec3 p, float t, float lanes) {
   return mix(1.0, 0.12 + 0.88 * lane, lanes) * dome * (0.8 + 0.3 * c.z);
 }
 
+/* the granulation's layers: the coarse stand-in, the real granules, and
+   the stand-in's larger cells (scale, offset, how fast they churn) */
+const float GRAIN_SCALES[3] = float[](95.0, 700.0, 64.0);
+const float GRAIN_SHIFTS[3] = float[](41.0, 0.0, 77.0);
+const float GRAIN_RATES[3] = float[](0.3, 0.6, 0.25);
+
 /* how much of a pattern this fine (scale: to the radius) can be seen from
    here: none until each cell spans a few pixels (px: radii per pixel) */
 float resolved(float scale, float px) {
@@ -1247,16 +1253,18 @@ void main() {
   float seen = resolved(700.0, px);
   // (fine, so it reads as a grain: let it show down to small cells)
   float coarse = (1.0 - smoothstep(0.18, 0.5, px * 95.0)) * (1.0 - seen);
-  /* and close in, the real granules (both in one loop: one copy) */
-  for (int k = 0; k < 2 + uDyn; k++) {
-    float w = k == 0 ? coarse : seen;
+  /* in some regions the cells run larger */
+  float bigCells = smoothstep(0.42, 0.58, noise(q * 2.6 + 90.0));
+  /* and close in, the real granules (all in one loop: one copy) */
+  for (int k = 0; k < 3 + uDyn; k++) {
+    float w = k == 0 ? coarse * (1.0 - bigCells) : (k == 1 ? seen : coarse * bigCells);
     if (w <= 0.0) continue;
-    // the coarse layer's lanes are soft (crisp lanes this small read as a
-    // tiled crackle): its mean is a little higher
-    float g = granules(q * (k == 0 ? 95.0 : 700.0) + (k == 0 ? 41.0 : 0.0), t * (k == 0 ? 0.3 : 0.6), k == 0 ? 0.65 : 1.0)
-      / (k == 0 ? 0.441 : GRAIN_MEAN);
+    // the coarse layers' lanes are soft (crisp lanes this small read as a
+    // tiled crackle): their mean is a little higher
+    float g = granules(q * GRAIN_SCALES[k] + GRAIN_SHIFTS[k], t * GRAIN_RATES[k], k == 1 ? 1.0 : 0.65)
+      / (k == 1 ? GRAIN_MEAN : 0.441);
     // crisp and high in contrast on the quiet Sun, soft round the activity
-    float contrast = k == 0 ? mix(0.3, 0.65, quiet) : 0.55;
+    float contrast = k == 1 ? 0.55 : mix(0.3, 0.65, quiet);
     l *= mix(1.0, 1.0 - contrast + contrast * g, w);
   }
 
@@ -1295,15 +1303,18 @@ void main() {
       float turn = hash33(vec3(float(i), 1.0, 9.0)).x * 6.2832;
       vec2 o0 = vec2(dot(off, side), dot(off, up)) / r;
       for (int k = 0; k < 3 + uDyn; k++) {
-        // each arc turned a little from the last, its feet apart
-        float tk = turn + (float(k) - 1.0) * 0.45;
-        vec2 o = vec2(cos(tk) * o0.x - sin(tk) * o0.y, sin(tk) * o0.x + cos(tk) * o0.y) + vec2(0.4 * (float(k) - 1.0), 0.5);
+        /* each arc its own: turned, shifted, sized and cut short at
+           random, and never quite round (regular, they read as ripples) */
+        vec3 hk = hash33(vec3(float(i) * 1.7, float(k) * 5.3, 2.0));
+        float tk = turn + (hk.x - 0.5) * 1.4;
+        vec2 o = vec2(cos(tk) * o0.x - sin(tk) * o0.y, sin(tk) * o0.x + cos(tk) * o0.y) + vec2((hk.y - 0.5) * 1.6, 0.3 + 0.6 * hk.z);
         float dist = length(o);
+        float ang = atan(o.y, o.x);
         float top = o.y / max(dist, 1e-4);
-        float span = 2.3 + 1.0 * float(k);
-        float arc = exp(-pow((dist - span) / (0.05 + 0.015 * span), 2.0)) * smoothstep(-0.2, 0.25, top);
-        float strand = 0.6 + 0.4 * sin(atan(o.y, o.x) * 9.0 + float(k) * 2.1 + float(i) + t * 0.05);
-        loops += arc * strand * (1.0 - 0.22 * float(k));
+        float span = (1.8 + 1.3 * float(k)) * (0.8 + 0.4 * hk.z) * (1.0 + 0.12 * sin(ang * 2.0 + hk.x * 6.0));
+        float arc = exp(-pow((dist - span) / (0.09 + 0.025 * span), 2.0)) * smoothstep(-0.1 + 0.4 * hk.y, 0.4 + 0.3 * hk.y, top);
+        float strand = 0.6 + 0.4 * sin(ang * 9.0 + float(k) * 2.1 + float(i) + t * 0.05);
+        loops += arc * strand * (0.7 - 0.15 * float(k));
       }
     }
     if (d > r * 4.5) continue;
@@ -1320,7 +1331,7 @@ void main() {
   }
   float spots = mix(1.0, 0.42 * streaks, penumbra) * mix(1.0, 0.12, umbra);
   l *= spots;
-  glow = glow * spots * moat + loops * 0.4;
+  glow = glow * spots * moat + loops * 0.3;
 
   /* the limb: brightness falls away smoothly over the whole disc (as the
      Sun's own does, to some 30% at the very edge), with a faint glow of
@@ -2504,12 +2515,14 @@ void main() {
   float cloud = noise2(at * 1.2 + vec2(t * 0.6, 0.0)) * 0.6 + noise2(at * 3.1 - vec2(0.0, t)) * 0.4;
   glow *= 0.55 + 0.9 * smoothstep(0.2, 0.8, cloud);
   /* and a few brighter streamers, reaching out and widening */
-  for (int k = 0; k < 5; k++) {
+  // (spread round the Sun, each its own length and strength: bunched on
+  // one side they read as a lens flare)
+  for (int k = 0; k < 9; k++) {
     float fk = float(k);
-    float towards = hash1(fk * 3.7 + 1.0) * 6.28318;
+    float towards = (fk + 0.8 * hash1(fk * 3.7 + 1.0)) / 9.0 * 6.28318;
     float apart = acos(clamp(dot(dir, vec2(cos(towards), sin(towards))), -1.0, 1.0));
     float wide = 0.04 + 0.1 * above;
-    glow += exp(-apart * apart / (wide * wide)) * exp(-above * 1.1) * smoothstep(0.0, 0.08, above) * (0.25 + 0.2 * hash1(fk * 5.1)) * (0.6 + 0.8 * cloud)
+    glow += exp(-apart * apart / (wide * wide)) * exp(-above * (0.7 + 1.4 * hash1(fk * 2.3))) * smoothstep(0.0, 0.08, above) * (0.1 + 0.3 * hash1(fk * 5.1)) * (0.6 + 0.8 * cloud)
       * (1.0 - smoothstep(uHalf * 0.4, uHalf * 0.9, r));
   }
 
@@ -2591,12 +2604,15 @@ void main() {
   float patchy = smoothstep(0.2, 0.8, cloud);
   corona += exp(-h / 0.35) * 0.1 * (0.35 + 1.3 * patchy) * outer;
   // and a few wispy streamers reaching out through it, widening
-  for (int k = 0; k < 6; k++) {
-    float towards = hash(vec3(float(k) * 3.7, 1.0, 2.0)) * 6.28318;
+  // (spread round the Sun, each its own length and strength)
+  for (int k = 0; k < 9; k++) {
+    float towards = (float(k) + 0.8 * hash(vec3(float(k) * 3.7, 1.0, 2.0))) / 9.0 * 6.28318;
+    float reach = 0.25 + 0.5 * hash(vec3(float(k), 7.0, 3.0));
+    float strength = 0.1 + 0.3 * hash(vec3(float(k), 4.0, 1.0));
     float apart = acos(clamp(dot(ring, vec2(cos(towards), sin(towards))), -1.0, 1.0));
     float wide = 0.03 + 0.12 * h;
     float wisp = 0.6 + 0.8 * noise(vec3(ring * 20.0, h * 6.0 - uTime * 0.02));
-    corona += exp(-apart * apart / (wide * wide)) * exp(-h / 0.55) * smoothstep(0.0, 0.04, h) * 0.3 * wisp * (0.6 + 0.8 * cloud) * outer;
+    corona += exp(-apart * apart / (wide * wide)) * exp(-h / reach) * smoothstep(0.0, 0.04, h) * strength * wisp * (0.6 + 0.8 * cloud) * outer;
   }
 
   vec3 color = vec3(1.0, 0.36, 0.1) * chromo * 1.2 + vec3(1.0, 0.5, 0.16) * (corona + flames * 0.8);
