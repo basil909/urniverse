@@ -1022,19 +1022,16 @@ void main() {
 const SUN_FRAGMENT_SHADER = /* glsl */ `
 
 /* ============================================================
-   THE PHOTOSPHERE
-   - granulation: bright, domed cells of rising gas parted by dark lanes
-     of sinking gas (cellular noise, the cells wandering as they churn),
-     at the scales the eye can resolve from where it is: the real
-     granules (~1,000 km, a 700th of the radius) and finer cells close
-     in; from further out a coarser texture stands for them; the
-     supergranule network (~30,000 km) round them all
-   - limb darkening, per colour (blue fades faster), so the centre is a
-     white gold and the edge a deep orange-red, as in photographs
-   - sunspot groups in the two activity belts (some 5 to 35 degrees north
-     and south): dark umbrae in streaked penumbrae, bright faculae round
-     them that show best towards the limb
-   - a slow flow under it all, so the surface is never still
+   THE SUN, AS IT BURNS
+   As the Solar Dynamics Observatory sees it in the far ultraviolet, where
+   the Sun's restless outer layers glow: a dark, red-brown surface laced
+   with a bright network (the rims of supergranules, cells of rising gas
+   some 30,000 km across), blazing active regions over the sunspot groups,
+   threaded with glowing strands and loops of gas held up by magnetism,
+   long dark filaments snaking between them, and an edge that brightens
+   (in this light the limb glows, where the eye looks through the most
+   hot gas). Close in, the granules show under it all.
+   - a slow flow under everything, so the surface is never still
 ============================================================ */
 
 uniform float uTime;
@@ -1050,13 +1047,21 @@ uniform int uDyn;
 #endif
 
 float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-float noise(vec3 p) { vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y), mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
+/* the cell's eight corners hashed in a loop the compiler keeps as a loop
+   (written out, each of the many noise calls carried eight copies of the
+   hash, and the shader was slow to compile) */
+float noise(vec3 p) {
+  vec3 i = floor(p); vec3 f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float h[8];
+  for (int k = 0; k < 8 + uDyn; k++) h[k] = hash(i + vec3(float(k & 1), float((k >> 1) & 1), float((k >> 2) & 1)));
+  return mix(mix(mix(h[0], h[1], f.x), mix(h[2], h[3], f.x), f.y), mix(mix(h[4], h[5], f.x), mix(h[6], h[7], f.x), f.y), f.z);
+}
 float fbm(vec3 p) { float v = 0.0; float a = 0.5; for (int i = 0; i < 5 + uDyn; i++) { v += noise(p) * a; p = p * 2.02 + vec3(1.7, 9.2, 3.1); a *= 0.5; } return v; }
 vec3 hash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.xxy + p.yxx) * p.zyx); }
 
-/* the sunspot groups, in the two active belts: where each spot stands on
-   the Sun (a direction) and its penumbra's radius (radii); leaders and
-   followers, as real groups lie, roughly east-west */
+/* the active regions, over the sunspot groups in the two activity belts
+   (some 5 to 35 degrees north and south): where each stands on the Sun
+   (a direction) and how large its spots are (radii) */
 const int SPOT_COUNT = 10;
 const vec4 SPOTS[10] = vec4[](
   vec4(0.9228, 0.2419, 0.2998, 0.034),
@@ -1094,18 +1099,23 @@ vec3 cells(vec3 p, float t) {
   return vec3(sqrt(vec2(d1, d2)), id);
 }
 
-/* granules: each a dome of rising gas, brightest where it wells up in the
-   middle and dimming towards its rim, parted from the next by a narrow,
-   dark lane of sinking gas. The cell walls are bent by noise, so no edge
-   is straight (straight walls read as paving or a honeycomb), the lanes
-   widen and narrow, and now and then a large granule has a dark heart,
-   about to split in two (an "exploding" granule). About 0.41 on average:
-   what the layer gives where it is too fine to see. */
+/* the bright network: 1 on the rims of the cells, fading over width */
+float network(vec3 p, float t, float width) {
+  vec3 c = cells(p, t);
+  return (1.0 - smoothstep(0.0, width, c.y - c.x)) * (0.6 + 0.6 * c.z);
+}
+
+/* a thread of noise: 1 along thin, wandering lines, 0 between */
+float thread(vec3 p, float sharp) {
+  return pow(1.0 - abs(2.0 * noise(p) - 1.0), sharp);
+}
+
+/* granules (close in): domes of rising gas parted by narrow, dark lanes,
+   their walls bent by noise; about 0.41 on average */
 const float GRAIN_MEAN = 0.41;
 float granules(vec3 p, float t) {
   vec3 bend = vec3(noise(p * 1.3 + 3.1), noise(p * 1.3 + 7.7), noise(p * 1.3 + 11.3)) - 0.5;
   vec3 c = cells(p + bend * 0.38, t);
-  // 0 in the middle of a granule, 1 on its lane
   float rim = 2.0 * c.x / max(c.x + c.y, 1e-4);
   float lane = smoothstep(0.0, 0.12 + 0.14 * noise(p * 0.7 + 5.0), c.y - c.x);
   float dome = 1.0 - 0.6 * pow(rim, 1.6);
@@ -1119,13 +1129,11 @@ float resolved(float scale, float px) {
   return 1.0 - smoothstep(0.1, 0.35, px * scale);
 }
 
-/* the colour of the photosphere's light at a given brightness (1: the
-   middle of the disc): white-gold at its brightest, through yellow and
-   orange to a deep red-orange where it is dimmest, at the limb and in the
-   lanes, as in photographs of the Sun through a filter */
-vec3 heat(float l) {
+/* the colour of the glow at a given brightness: a dark red-brown where it
+   is faint, through orange and gold to white-hot in the brightest knots */
+vec3 fire(float l) {
   l = max(l, 0.0);
-  return vec3(1.1 * pow(l, 0.55), 0.92 * pow(l, 1.9), 0.62 * pow(l, 4.0));
+  return vec3(1.25 * pow(l, 0.9), 0.9 * pow(l, 2.2), 0.6 * pow(l, 5.0));
 }
 
 void main() {
@@ -1136,74 +1144,64 @@ void main() {
   float px = length(fwidth(p));
   float t = uTime;
 
-  /* the slow flow: everything drifts a little */
-  vec3 q = p + 0.025 * (vec3(fbm(p * 3.0 + vec3(t * 0.01)), fbm(p * 3.0 + vec3(7.1, -t * 0.008, 0.0)), fbm(p * 3.0 + vec3(3.7, 1.3, t * 0.009))) - 0.5);
+  /* the slow flow: everything drifts and twists a little */
+  vec3 q = p + 0.05 * (vec3(fbm(p * 3.0 + vec3(t * 0.01)), fbm(p * 3.0 + vec3(7.1, -t * 0.008, 0.0)), fbm(p * 3.0 + vec3(3.7, 1.3, t * 0.009))) - 0.5);
 
-  /* granulation: the real granules (a 700th of the radius) once they
-     resolve; from further out, where they are too fine to see, a coarser
-     layer of the same cells stands for them; close in, a little finer
-     texture within each granule */
-  float seen = resolved(700.0, px);
-  float coarse = resolved(130.0, px) * (1.0 - seen);
-  float grain = GRAIN_MEAN;
-  if (coarse > 0.0) grain = mix(grain, granules(q * 130.0 + 41.0, t * 0.3), coarse * 0.85);
-  if (seen > 0.0) grain = mix(grain, granules(q * 700.0, t * 0.6), seen);
-  grain *= 1.0 + (noise(q * 3000.0 + vec3(0.0, t * 0.05, 0.0)) - 0.5) * 0.2 * resolved(3000.0, px);
-
-  /* the supergranule network: faint bright rims round cells ~40 times
-     larger, clearer towards the limb */
-  vec3 sg = cells(q * 26.0, t * 0.015);
-  float network = 1.0 - smoothstep(0.0, 0.1, sg.y - sg.x);
-
-  /* large, slow brightness variations */
-  float mottle = fbm(q * 5.0 + vec3(0.0, t * 0.004, 0.0));
-
-  /* the sunspots: a dark umbra in a lighter penumbra, its edge ragged
-     and its gas in fine radial streaks; bright faculae round each group */
-  float penumbra = 0.0;
-  float umbra = 0.0;
-  float faculae = 0.0;
-  float streaks = 1.0;
+  /* the active regions: round each sunspot group, and a few more that
+     have no spots to show; ragged, never round */
+  float activity = smoothstep(0.58, 0.78, fbm(q * 3.6 + 11.0));
   for (int i = 0; i < SPOT_COUNT + uDyn; i++) {
-    vec3 c = SPOTS[i].xyz;
-    float r = SPOTS[i].w;
-    float d = length(p - c);
-    if (d > r * 3.0) continue;
-    vec3 side = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
-    vec3 up = cross(side, c);
-    vec3 off = p - c;
-    float angle = atan(dot(off, up), dot(off, side));
-    float ragged = 1.0 + 0.18 * (noise(vec3(cos(angle), sin(angle), float(i)) * 3.0) - 0.5);
-    float pen = 1.0 - smoothstep(0.82, 1.0, d / (r * ragged));
-    float umb = 1.0 - smoothstep(0.34, 0.46, d / (r * ragged));
-    float fil = 0.7 + 0.3 * noise(vec3(cos(angle) * 40.0, sin(angle) * 40.0, d / r * 3.0 + float(i)));
-    if (pen > penumbra) { penumbra = pen; streaks = fil; }
-    umbra = max(umbra, umb);
-    faculae = max(faculae, (1.0 - smoothstep(1.1, 2.8, d / r)) * (1.0 - pen) * (0.6 + 0.4 * noise(p * 300.0)));
+    float d = length(p - SPOTS[i].xyz);
+    activity = max(activity, 1.0 - smoothstep(0.02, 0.07 + SPOTS[i].w * 5.0, d));
+  }
+  float ragged = noise(q * 8.0 + vec3(0.0, t * 0.006, 0.0)) * 0.65 + noise(q * 17.0) * 0.35;
+  activity = clamp(activity * (0.4 + 1.3 * ragged), 0.0, 1.0);
+
+  /* the quiet surface: dark, mottled, laced with the bright network of
+     the supergranules and, where it resolves, a finer one */
+  float mottle = fbm(q * 6.0 + vec3(t * 0.004));
+  /* the network's cells bent hard out of shape and its rims broken, so
+     it crackles rather than tiles */
+  vec3 bend = vec3(noise(q * 9.0), noise(q * 9.0 + 5.2), noise(q * 9.0 + 9.7)) - 0.5;
+  float net = network(q * 24.0 + bend * 1.6, t * 0.02, 0.2);
+  float broken = smoothstep(0.35, 0.65, noise(q * 40.0 + 3.0));
+  /* and everywhere, small clumps glowing like embers */
+  float ember = fbm(q * 30.0 + bend * 2.0 + vec3(0.0, 0.0, t * 0.01));
+  float embers = smoothstep(0.48, 0.72, ember);
+  float l = 0.1 + 0.16 * mottle + net * broken * (0.14 + 0.16 * mottle) + embers * (0.16 + 0.3 * mottle);
+  float fineSeen = resolved(90.0, px);
+  if (fineSeen > 0.0) {
+    vec3 fineBend = vec3(noise(q * 45.0), noise(q * 45.0 + 5.2), noise(q * 45.0 + 9.7)) - 0.5;
+    float fineBroken = smoothstep(0.3, 0.7, noise(q * 150.0 + 8.0));
+    l += network(q * 90.0 + fineBend * 1.8 + 7.0, t * 0.05, 0.18) * fineBroken * 0.08 * fineSeen;
   }
 
-  /* brightness: the granulation's contrast, the mottling, the faculae
-     and network (both brighter towards the limb) */
-  float bright = (0.72 + 0.685 * grain) * (0.88 + 0.24 * mottle);
-  bright += faculae * (0.04 + 0.4 * (1.0 - mu));
-  bright += network * 0.07 * (1.0 - mu);
+  /* the active regions blaze: bright, clumped plage, threaded with
+     strands and loops of glowing gas, white-hot only in their cores */
+  float plage = fbm(q * 14.0 + vec3(t * 0.01, 0.0, 0.0));
+  float strands = thread(q * 26.0 + (plage - 0.5) * 2.0 + vec3(0.0, t * 0.02, 0.0), 6.0);
+  float knots = pow(noise(q * 40.0 - vec3(t * 0.015)) * 0.65 + noise(q * 83.0) * 0.35, 2.0);
+  l += activity * (0.12 + 0.45 * plage + 0.4 * strands + 1.0 * knots * activity);
 
-  /* limb darkening (the Sun's own, in visible light: some 30% at the
-     very edge), a little steeper in the last sliver, where the edge is
-     sharp */
-  float m1 = 1.0 - mu;
-  float limb = 1.0 - 0.47 * m1 - 0.23 * m1 * m1;
-  limb *= mix(0.72, 1.0, smoothstep(0.0, 0.08, mu));
+  /* dark filaments: long, thin and snaking, lying across the quiet
+     surface between the active regions */
+  float where = smoothstep(0.55, 0.7, noise(q * 3.0 + 23.0));
+  float filament = thread(q * vec3(5.0, 14.0, 5.0) + (mottle - 0.5) * 1.5 + 31.0, 10.0);
+  l *= 1.0 - 0.75 * filament * where * (1.0 - activity);
 
-  /* the spots: a streaked penumbra, a dark umbra */
-  bright *= mix(1.0, 0.62 * streaks, penumbra);
-  bright *= mix(1.0, 0.16, umbra);
+  /* close in, the granules under it all */
+  float seen = resolved(700.0, px);
+  if (seen > 0.0) l *= mix(1.0, 0.45 + 0.55 * granules(q * 700.0, t * 0.6) / GRAIN_MEAN, seen);
 
-  /* brightness to colour: the dimmer, the redder */
-  vec3 color = heat(bright * limb);
-  color *= mix(1.0, 0.4, umbra);
+  /* the limb glows (here the eye looks through the most hot gas), and
+     the very edge is soft */
+  float edge = pow(1.0 - mu, 3.0);
+  l = l * (1.0 + 0.6 * edge) + 0.3 * edge * (1.0 - mu);
+  l *= mix(0.6, 1.0, smoothstep(0.0, 0.06, mu));
+  // white-hot only in knots, never in whole sheets
+  l = l > 0.9 ? 0.9 + (l - 0.9) * 0.4 : l;
 
-  gl_FragColor = vec4(color, 1.0);
+  gl_FragColor = vec4(fire(l), 1.0);
 }`
 
 
@@ -2360,10 +2358,20 @@ void main() {
   /* eased to nothing over the outer half, so no edge shows */
   glow *= 1.0 - smoothstep(uHalf * 0.4, uHalf, r);
 
-  /* hydrogen-alpha red, as prominences look at the solar limb */
-  vec3 plasma = vec3(1.0, 0.3, 0.16) * prominences(r, a) * 1.5;
+  /* the ragged, flickering fringe of hot gas over the limb: tongues of
+     flame, taller in places, never a smooth edge */
+  vec2 dir = c / max(length(c), 1e-4);
+  vec2 at = c * uHalf;
+  float tongues = noise2(dir * 9.0 + vec2(t * 2.0, 0.0)) * 0.55 + noise2(at * 7.0 - vec2(0.0, t * 6.0)) * 0.3 + noise2(at * 19.0 + vec2(t * 9.0)) * 0.15;
+  float fringe = exp(-above / (0.025 + 0.11 * tongues * tongues)) * (0.5 + 0.7 * tongues);
+  glow += fringe * 0.9;
 
-  gl_FragColor = vec4((vec3(1.0, 0.68, 0.34) * glow + plasma) * uOpacity, 1.0);
+  /* the glowing gas of the prominences */
+  vec3 plasma = vec3(1.0, 0.42, 0.12) * prominences(r, a) * 1.5;
+
+  /* hotter and more golden just over the limb, a deep orange further out */
+  vec3 hue = mix(vec3(1.0, 0.36, 0.08), vec3(1.0, 0.66, 0.26), exp(-above * 9.0));
+  gl_FragColor = vec4((hue * glow + plasma) * uOpacity, 1.0);
 }`
 
 /* ============================================================
@@ -2424,8 +2432,11 @@ void main() {
   // the inner corona: a glow over a few tenths of the radius, in streamers
   float streamers = 0.55 + 0.45 * noise(vec3(ring * 7.0, uTime * 0.01)) + 0.25 * noise(vec3(ring * 23.0, 2.0));
   float corona = exp(-h / 0.03) * 0.4 + exp(-h / (0.1 * streamers)) * 0.14 * streamers;
+  // tongues of flame over the limb, flickering
+  float tongues = noise(vec3(ring * 30.0, h * 30.0 - uTime * 0.3)) * 0.6 + noise(vec3(ring * 90.0, h * 80.0 - uTime * 0.5)) * 0.4;
+  float flames = exp(-h / (0.01 + 0.05 * tongues * tongues)) * (0.3 + 0.9 * tongues);
 
-  vec3 color = vec3(1.0, 0.32, 0.22) * chromo * 1.2 + vec3(1.0, 0.82, 0.6) * corona;
+  vec3 color = vec3(1.0, 0.36, 0.1) * chromo * 1.2 + vec3(1.0, 0.5, 0.16) * (corona + flames * 0.8);
   gl_FragColor = vec4(color * close, 1.0);
 }`
 
