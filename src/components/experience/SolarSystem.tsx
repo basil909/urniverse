@@ -1130,10 +1130,12 @@ float resolved(float scale, float px) {
 }
 
 /* the colour of the glow at a given brightness: a dark red-brown where it
-   is faint, through orange and gold to white-hot in the brightest knots */
-vec3 fire(float l) {
+   is faint, through orange and gold to white-hot in the brightest knots;
+   yellower towards the middle of the disc (core 1), so the Sun reads as a
+   yellow-white star warming to orange at its edge */
+vec3 fire(float l, float core) {
   l = max(l, 0.0);
-  return vec3(1.25 * pow(l, 0.9), 0.9 * pow(l, 2.2), 0.6 * pow(l, 5.0));
+  return vec3(1.25 * pow(l, 0.9), 0.9 * pow(l, mix(2.2, 1.05, core)), 0.6 * pow(l, mix(5.0, 2.2, core)));
 }
 
 void main() {
@@ -1163,12 +1165,21 @@ void main() {
   /* the network's cells bent hard out of shape and its rims broken, so
      it crackles rather than tiles */
   vec3 bend = vec3(noise(q * 9.0), noise(q * 9.0 + 5.2), noise(q * 9.0 + 9.7)) - 0.5;
-  float net = network(q * 24.0 + bend * 1.6, t * 0.02, 0.2);
+  /* no two places alike: in some the cells are nearly twice as large */
+  float large = smoothstep(0.42, 0.58, noise(q * 2.2 + 61.0));
+  float net = 0.0;
+  if (large < 1.0) net += network(q * 24.0 + bend * 1.6, t * 0.02, 0.2) * (1.0 - large);
+  if (large > 0.0) net += network(q * 13.0 + bend * 1.1 + 19.0, t * 0.015, 0.13) * large;
   float broken = smoothstep(0.35, 0.65, noise(q * 40.0 + 3.0));
-  /* and everywhere, small clumps glowing like embers */
+  /* and calm zones between the active regions, where the surface lies
+     quieter and smoother */
+  float calm = smoothstep(0.5, 0.72, noise(q * 2.8 + 40.0)) * (1.0 - smoothstep(0.0, 0.3, activity));
+  /* and everywhere else, small clumps glowing like embers */
   float ember = fbm(q * 30.0 + bend * 2.0 + vec3(0.0, 0.0, t * 0.01));
   float embers = smoothstep(0.48, 0.72, ember);
-  float l = 0.1 + 0.16 * mottle + net * broken * (0.14 + 0.16 * mottle) + embers * (0.16 + 0.3 * mottle);
+  float l = 0.1 + 0.16 * mottle
+    + net * broken * (0.14 + 0.16 * mottle) * (1.0 - 0.65 * calm)
+    + embers * (0.16 + 0.3 * mottle) * (1.0 - 0.75 * calm);
   float fineSeen = resolved(90.0, px);
   if (fineSeen > 0.0) {
     vec3 fineBend = vec3(noise(q * 45.0), noise(q * 45.0 + 5.2), noise(q * 45.0 + 9.7)) - 0.5;
@@ -1189,6 +1200,31 @@ void main() {
   float filament = thread(q * vec3(5.0, 14.0, 5.0) + (mottle - 0.5) * 1.5 + 31.0, 10.0);
   l *= 1.0 - 0.75 * filament * where * (1.0 - activity);
 
+  /* the sunspots, in the heart of the active regions: a near-black umbra
+     in a lighter penumbra, its edge ragged and its gas in fine radial
+     streaks */
+  float penumbra = 0.0;
+  float umbra = 0.0;
+  float streaks = 1.0;
+  for (int i = 0; i < SPOT_COUNT + uDyn; i++) {
+    vec3 c = SPOTS[i].xyz;
+    float r = SPOTS[i].w * 1.4;
+    float d = length(p - c);
+    if (d > r * 1.3) continue;
+    vec3 side = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
+    vec3 up = cross(side, c);
+    vec3 off = p - c;
+    float angle = atan(dot(off, up), dot(off, side));
+    float wobble = 1.0 + 0.22 * (noise(vec3(cos(angle), sin(angle), float(i)) * 3.0) - 0.5);
+    float pen = 1.0 - smoothstep(0.8, 1.0, d / (r * wobble));
+    float umb = 1.0 - smoothstep(0.32, 0.45, d / (r * wobble));
+    float fil = 0.65 + 0.35 * noise(vec3(cos(angle) * 40.0, sin(angle) * 40.0, d / r * 3.0 + float(i)));
+    if (pen > penumbra) { penumbra = pen; streaks = fil; }
+    umbra = max(umbra, umb);
+  }
+  l *= mix(1.0, 0.3 * streaks, penumbra);
+  l *= mix(1.0, 0.15, umbra);
+
   /* close in, the granules under it all */
   float seen = resolved(700.0, px);
   if (seen > 0.0) l *= mix(1.0, 0.45 + 0.55 * granules(q * 700.0, t * 0.6) / GRAIN_MEAN, seen);
@@ -1198,10 +1234,12 @@ void main() {
   float edge = pow(1.0 - mu, 3.0);
   l = l * (1.0 + 0.6 * edge) + 0.3 * edge * (1.0 - mu);
   l *= mix(0.6, 1.0, smoothstep(0.0, 0.06, mu));
+  /* the middle of the disc burns brighter and yellower */
+  l *= 1.0 + 1.6 * mu * mu;
   // white-hot only in knots, never in whole sheets
   l = l > 0.9 ? 0.9 + (l - 0.9) * 0.4 : l;
 
-  gl_FragColor = vec4(fire(l), 1.0);
+  gl_FragColor = vec4(fire(l, smoothstep(0.15, 0.95, mu)), 1.0);
 }`
 
 
