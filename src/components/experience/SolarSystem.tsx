@@ -4522,14 +4522,16 @@ function Hotspots({
 ============================================================ */
 type RingBand = [number, number, number, number]
 const FAINT_RINGS: Record<string, { bands: RingBand[]; color: string; arcs?: number }> = {
-  // halo, main ring, the Amalthea and Thebe gossamer rings
+  // halo, main ring, the Amalthea and Thebe gossamer rings: all but
+  // invisible (set brighter, they read as a solid, Saturn-like disc, and
+  // lit from behind as a glowing slab across the view)
   Jupiter: {
     color: '#c8a888',
     bands: [
-      [1.29, 1.71, 0.025, 1],
-      [1.72, 1.81, 0.16, 1],
-      [1.81, 2.54, 0.022, 1],
-      [2.54, 3.11, 0.012, 1],
+      [1.29, 1.71, 0.006, 1],
+      [1.72, 1.81, 0.05, 1],
+      [1.81, 2.54, 0.004, 1],
+      [2.54, 3.11, 0.0025, 1],
     ],
   },
   // 6, 5, 4, alpha, beta, eta, gamma, delta, epsilon (narrow, dark), and
@@ -4610,8 +4612,9 @@ void main() {
   // (eased across, as the Sun is near the ring plane at the equinoxes)
   float face = mix(0.35, 1.0, smoothstep(-0.01, 0.01, sunSide * sign(eyeSide)));
   // fine dust throws the light forward: bright when backlit
-  float forward = pow(max(dot(-toEye, toSun), 0.0), 6.0);
-  float glow = mix(1.0, 1.0 + forward * 14.0, dust) * mix(0.6, 1.0, abs(sunSide));
+  // (a few times brighter, not fifteen: more, and they lit up as a slab)
+  float forward = pow(max(dot(-toEye, toSun), 0.0), 8.0);
+  float glow = mix(1.0, 1.0 + forward * 6.0, dust) * mix(0.6, 1.0, abs(sunSide));
   // the planet's shadow: how far the line to the Sun passes from the
   // planet's centre, against its radius, softened over the penumbra (the
   // Sun's width, seen from here, times the distance behind the planet)
