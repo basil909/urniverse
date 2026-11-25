@@ -48,6 +48,14 @@ float shipBump = 0.0;
 /* the bells: the three main engines and the pods' two (axis x, y, radius,
    the mouth's z), set from the model as it is built */
 uniform vec4 uBells[5];
+/* the markings (the flag, "USA", "United States"), drawn once into a
+   1024 px square; a mark's rectangle there, in pixels from the top left,
+   and the point's place in the mark (0..1 across, 0..1 up) */
+uniform sampler2D uMarks;
+vec4 shipMark(vec2 local, vec4 rect) {
+  if (local.x < 0.0 || local.x > 1.0 || local.y < 0.0 || local.y > 1.0) return vec4(0.0);
+  return texture2D(uMarks, (rect.xy + vec2(local.x, 1.0 - local.y) * rect.zw) / 1024.0);
+}
 `
 
 const COLOR = /* glsl */ `
@@ -149,6 +157,25 @@ const COLOR = /* glsl */ `
         diffuseColor.rgb *= 1.0 - 0.6 * lines;
         shipBump -= lines * 0.9;
       }
+      /* the markings, as the orbiter wore them: the flag and "USA" on the
+         left wing, read with the nose up; the flag and "United States" on
+         each side of the fuselage, under the payload bay, the flag forward
+         with its stars to the front (so on the right side, reversed) */
+      vec4 mark = vec4(0.0);
+      if (p.x < -0.12 && n.y > 0.5 && p.y > -0.125) {
+        mark = shipMark(vec2((p.x + 0.2475) / 0.085, (0.1925 - p.z) / 0.045), vec4(0.0, 0.0, 950.0, 500.0));
+        vec4 usa = shipMark(vec2((p.x + 0.2575) / 0.105, (0.3125 - p.z) / 0.047), vec4(0.0, 520.0, 600.0, 270.0));
+        mark = mix(mark, usa, usa.a);
+      } else if (abs(n.x) > 0.6 && p.y > -0.1 && p.y < -0.05 && abs(p.x) > 0.06) {
+        float y = (p.y + 0.091) / 0.032;
+        mark = shipMark(vec2((p.z + 0.215) / 0.061, y), vec4(0.0, 0.0, 950.0, 500.0));
+        float across = p.x < 0.0 ? (p.z + 0.14) / 0.177 : (0.037 - p.z) / 0.177;
+        vec4 words = shipMark(vec2(across, (p.y + 0.088) / 0.026), vec4(0.0, 800.0, 1024.0, 150.0));
+        mark = mix(mark, words, words.a);
+      }
+      // (painted on, so the blankets' quilting and grime still show)
+      diffuseColor.rgb = mix(diffuseColor.rgb, mark.rgb * (0.55 + 0.45 * shade), mark.a);
+      shipBump *= 1.0 - 0.5 * mark.a;
     }
     // control surfaces: the elevons' hinge and split, the body flap, the rudder
     float wing = step(0.115, abs(p.x)) * step(p.y, -0.07);
@@ -211,13 +238,72 @@ const BUMP = /* glsl */ `
 }
 `
 
+/* The markings, drawn once into a 1024 px square (the shader's rectangles
+   for each): the flag at the top left (950 x 500, the flag's own
+   proportions), "USA" beneath it (600 x 270), "United States" along the
+   bottom (1024 x 150). Black lettering, as the orbiter's. */
+function drawMarks() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1024
+  canvas.height = 1024
+  const g = canvas.getContext('2d')!
+  // the flag: thirteen stripes, the blue union seven stripes deep and
+  // 0.76 of the flag's height across, fifty stars in rows of six and five
+  const W = 950
+  const H = 500
+  const stripe = H / 13
+  for (let i = 0; i < 13; i += 1) {
+    g.fillStyle = i % 2 === 0 ? '#b22234' : '#f4f3ef'
+    g.fillRect(0, i * stripe, W, Math.ceil(stripe))
+  }
+  const unionW = H * 0.76
+  const unionH = stripe * 7
+  g.fillStyle = '#3c3b6e'
+  g.fillRect(0, 0, unionW, unionH)
+  g.fillStyle = '#f4f3ef'
+  const star = (cx: number, cy: number, r: number) => {
+    g.beginPath()
+    for (let k = 0; k < 10; k += 1) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5
+      const rr = k % 2 === 0 ? r : r * 0.382
+      g.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr)
+    }
+    g.closePath()
+    g.fill()
+  }
+  for (let row = 0; row < 9; row += 1) {
+    const count = row % 2 === 0 ? 6 : 5
+    for (let col = 0; col < count; col += 1) {
+      const x = (unionW / 12) * (row % 2 === 0 ? 1 + col * 2 : 2 + col * 2)
+      const y = (unionH / 10) * (row + 1)
+      star(x, y, H * 0.0616 / 2)
+    }
+  }
+  // the lettering
+  g.fillStyle = '#121212'
+  g.textBaseline = 'middle'
+  g.textAlign = 'center'
+  g.font = 'bold 250px Helvetica, Arial, sans-serif'
+  g.fillText('USA', 300, 520 + 135, 590)
+  g.font = '600 128px Helvetica, Arial, sans-serif'
+  g.fillText('United States', 512, 800 + 75, 1010)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.flipY = false
+  texture.colorSpace = THREE.SRGBColorSpace
+  texture.anisotropy = 8
+  return texture
+}
+
 /** give the built Shuttle's material its surface (once); bells: each
     engine's axis x, y, radius and mouth z, in the model's units */
 export function detailShuttle(material: THREE.MeshStandardMaterial, bells: THREE.Vector4[] = []) {
   const far = new THREE.Vector4(9, 9, 0.01, 0)
   const bellList = Array.from({ length: 5 }, (_, i) => bells[i] ?? far)
+  const marks = drawMarks()
+  material.addEventListener('dispose', () => marks.dispose())
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uBells = { value: bellList }
+    shader.uniforms.uMarks = { value: marks }
     shader.vertexShader = VERTEX_HEAD + shader.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
@@ -230,6 +316,6 @@ export function detailShuttle(material: THREE.MeshStandardMaterial, bells: THREE
       .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = shipMetal;')
       .replace('#include <normal_fragment_maps>', BUMP)
   }
-  material.customProgramCacheKey = () => 'shuttle-skin-2'
+  material.customProgramCacheKey = () => 'shuttle-skin-3'
   material.needsUpdate = true
 }
