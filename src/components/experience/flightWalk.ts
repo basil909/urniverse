@@ -95,6 +95,13 @@ export const walkerBody = {
   loping: false,
   walkPace: 2,
   out: 0,
+  /** the ground's up, the way you face and your right, in the scene;
+      height off the ground in any hop (m), lope or jump; gravity (m/s2) */
+  up: new THREE.Vector3(0, 1, 0),
+  forward: new THREE.Vector3(0, 0, -1),
+  right: new THREE.Vector3(1, 0, 0),
+  hop: 0,
+  gravity: 9.81,
 }
 
 const EYE = 1.6
@@ -322,6 +329,11 @@ export function stepWalk(
   walkerBody.loping = walker.loping
   walkerBody.walkPace = walkPace
   walkerBody.out += delta
+  walkerBody.up.copy(_upWorld)
+  walkerBody.forward.copy(_fwdWorld)
+  walkerBody.right.copy(_rightWorld)
+  walkerBody.hop = walker.height
+  walkerBody.gravity = g
   walkerBody.shown = pilot.walkView === 'third'
 
   _head.copy(walker.dir).multiplyScalar(ground0 + (walker.height + EYE + bob) / R).applyMatrix4(ground.matrix)

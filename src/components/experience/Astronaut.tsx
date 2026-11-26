@@ -3,85 +3,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 import { pilot } from './pilotState'
 import { SHIP_LENGTH } from './flightShip'
 import { walkerBody } from './flightWalk'
+import { animateFigure, loadFigure, type Figure } from './astronautRig'
 
 /* ============================================================
    YOU, ON FOOT, SEEN FROM BEHIND (V)
-   Quaternius's "Astronaut" (public domain, public/models/CREDITS.txt), 1.8
-   m tall, fetched the first time you step outside, with its own
-   animations: Idle standing, Walk and Run (played at the pace you move,
-   so the feet keep to the ground), Run_Left, Run_Right and Run_Back
-   stepping sideways and backwards, a slow-motion stride in the air, and
-   a wave as you first turn to watch yourself. Until it has arrived (or
-   if it cannot), a simple suited figure stands in: a white suit, a
-   helmet with its gold visor down, the pack on its back, its limbs
-   swinging with the gait. Drawn in the ship's layer (one unit a ship
-   length, the ship at the origin), where the walker stands.
+   Quaternius's "Astronaut", animated as you move (astronautRig.ts),
+   fetched the first time you step outside; until it has arrived (or if
+   it cannot), a simple suited figure stands in. Either way the body
+   turns to face the way it is going, smoothly (standing, it stays as it
+   was while you look round), and leans a little into a turn. Drawn in
+   the ship's layer (one unit a ship length, the ship at the origin),
+   where the walker stands.
 ============================================================ */
 
 const M = 1 / 37.24 // a metre, in ship lengths
-const MODEL_URL = '/models/astronaut.glb'
-const HEIGHT = 1.8
-/* the animations' own paces (m/s): the speed at which each, played at
-   its natural rate, keeps the feet still on the ground */
-const PACE = { Walk: 1.45, Run: 4.2, Run_Left: 3.4, Run_Right: 3.4, Run_Back: 3.2 } as const
-type Clip = 'Idle' | 'Walk' | 'Run' | 'Run_Left' | 'Run_Right' | 'Run_Back' | 'Wave'
-const CLIPS: Clip[] = ['Idle', 'Walk', 'Run', 'Run_Left', 'Run_Right', 'Run_Back', 'Wave']
-
-type Figure = {
-  holder: THREE.Group
-  mixer: THREE.AnimationMixer
-  actions: Partial<Record<Clip, THREE.AnimationAction>>
-  playing: Clip | null
-  waved: boolean
-}
-
-/* the model, fetched once, scaled to 1.8 m, its feet at the origin,
-   facing -z (as the walker's frame does) */
-function loadFigure(onReady: (figure: Figure) => void, onFail: () => void) {
-  new GLTFLoader().load(
-    MODEL_URL,
-    (gltf) => {
-      const scene = gltf.scene
-      scene.updateMatrixWorld(true)
-      const box = new THREE.Box3().setFromObject(scene, true)
-      const height = Math.max(box.max.y - box.min.y, 1e-6)
-      const inner = new THREE.Group()
-      inner.add(scene)
-      scene.position.y = -box.min.y
-      // (made facing +z)
-      inner.rotation.y = Math.PI
-      inner.scale.setScalar(HEIGHT / height)
-      const holder = new THREE.Group()
-      holder.scale.setScalar(M)
-      holder.add(inner)
-      scene.traverse((object) => {
-        const mesh = object as THREE.Mesh
-        if (!mesh.isMesh) return
-        mesh.frustumCulled = false
-        const material = mesh.material as THREE.MeshStandardMaterial
-        if (material && 'roughness' in material) material.roughness = Math.max(material.roughness, 0.6)
-      })
-      const mixer = new THREE.AnimationMixer(scene)
-      const actions: Figure['actions'] = {}
-      for (const clip of gltf.animations) {
-        const name = clip.name.split('|').pop() as Clip
-        if (CLIPS.includes(name)) actions[name] = mixer.clipAction(clip)
-      }
-      if (actions.Wave) {
-        actions.Wave.setLoop(THREE.LoopOnce, 1)
-        actions.Wave.clampWhenFinished = true
-      }
-      onReady({ holder, mixer, actions, playing: null, waved: false })
-    },
-    undefined,
-    () => onFail(),
-  )
-}
+const _desired = new THREE.Vector3()
+const _right = new THREE.Vector3()
+const _basis = new THREE.Matrix4()
+const _back = new THREE.Vector3()
 
 export default function Astronaut({ jetRef }: { jetRef: React.RefObject<THREE.Object3D | null> }) {
   const look = useMemo(() => {
@@ -113,6 +56,10 @@ export default function Astronaut({ jetRef }: { jetRef: React.RefObject<THREE.Ob
   // the model: asked for the first time you step outside
   const [model, setModel] = useState<Figure | null>(null)
   const asked = useRef(false)
+  // which way the body faces (in the scene), and how fast it was turning
+  const facing = useRef(new THREE.Vector3(0, 0, -1))
+  const turning = useRef(0)
+  const wasShown = useRef(false)
   useEffect(
     () => () => {
       model?.mixer.stopAllAction()
@@ -135,13 +82,43 @@ export default function Astronaut({ jetRef }: { jetRef: React.RefObject<THREE.Ob
     figure.visible = pilot.walking && walkerBody.shown
     if (!figure.visible) {
       if (model) model.waved = false
+      wasShown.current = false
       return
     }
+    const up = walkerBody.up
+    const face = facing.current
+    // just shown: facing the way you look
+    if (!wasShown.current) {
+      face.copy(walkerBody.forward)
+      wasShown.current = true
+    }
+    // turning to face the way it goes (standing, it stays as it was)
+    if (walkerBody.speed > 0.2) {
+      _desired.copy(walkerBody.forward).multiplyScalar(walkerBody.ahead).addScaledVector(walkerBody.right, walkerBody.across)
+    } else _desired.copy(face)
+    _desired.addScaledVector(up, -_desired.dot(up))
+    face.addScaledVector(up, -face.dot(up))
+    if (_desired.lengthSq() > 1e-8 && face.lengthSq() > 1e-8) {
+      _desired.normalize()
+      face.normalize()
+      const angle = Math.atan2(_right.copy(face).cross(_desired).dot(up), face.dot(_desired))
+      // brisk when moving, a stepped-round pace otherwise
+      const rate = walkerBody.hop > 0.08 ? 2 : 8
+      const step = THREE.MathUtils.clamp(angle, -rate * delta, rate * delta)
+      face.applyAxisAngle(up, step)
+      turning.current += (step / Math.max(delta, 1e-4) - turning.current) * (1 - Math.exp(-delta * 8))
+    }
+    _right.copy(face).cross(up).normalize()
+    _basis.makeBasis(_right, up, _back.copy(face).negate())
+    figure.quaternion.setFromRotationMatrix(_basis)
+    // leaning into a turn, more the faster it goes
+    figure.rotateZ(THREE.MathUtils.clamp(-turning.current * walkerBody.speed * 0.035, -0.25, 0.25))
     figure.position.copy(walkerBody.feet).sub(jet.position).divideScalar(SHIP_LENGTH)
-    figure.quaternion.copy(walkerBody.turn)
     if (simple.current) simple.current.visible = !model
     if (model) {
-      animate(model, delta)
+      // the knees taking a landing: the body dips
+      const dip = animateFigure(model, delta, _right)
+      figure.position.addScaledVector(up, -dip * M)
       return
     }
     // the gait: a stride's swing grows with speed; in the air the knees tuck
@@ -227,51 +204,4 @@ export default function Astronaut({ jetRef }: { jetRef: React.RefObject<THREE.Ob
       </group>
     </group>
   )
-}
-
-
-/* which of the model's animations, and at what rate, for how you move */
-function animate(figure: Figure, delta: number) {
-  const { ahead, across, speed, air, loping, walkPace } = walkerBody
-  let want: Clip = 'Idle'
-  let rate = 1
-  if (air > 0.05) {
-    // in the air: a slow-motion stride
-    want = 'Run'
-    rate = 0.22
-  } else if (speed > 0.15) {
-    if (Math.abs(across) > Math.abs(ahead) * 1.2) {
-      want = across > 0 ? 'Run_Right' : 'Run_Left'
-      rate = speed / PACE[want]
-    } else if (ahead < 0) {
-      want = 'Run_Back'
-      rate = speed / PACE.Run_Back
-    } else if (loping || speed > walkPace * 1.25) {
-      want = 'Run'
-      rate = loping ? 0.62 : speed / PACE.Run
-    } else {
-      want = 'Walk'
-      rate = speed / PACE.Walk
-    }
-    rate = THREE.MathUtils.clamp(rate, 0.35, 1.6)
-  } else if (!figure.waved && figure.actions.Wave) {
-    // turning to watch yourself, standing: a wave, once
-    want = 'Wave'
-  }
-  if (want === 'Wave') figure.waved = true
-  // the wave plays out, then back to standing
-  if (figure.playing === 'Wave' && want === 'Idle') {
-    const wave = figure.actions.Wave
-    if (wave && wave.time < wave.getClip().duration * 0.98) want = 'Wave'
-  }
-  const action = figure.actions[want] ?? figure.actions.Idle
-  if (!action) return
-  if (figure.playing !== want) {
-    const last = figure.playing ? figure.actions[figure.playing] : null
-    action.reset().setEffectiveWeight(1).fadeIn(0.25).play()
-    last?.fadeOut(0.25)
-    figure.playing = want
-  }
-  if (want !== 'Wave' && want !== 'Idle') action.setEffectiveTimeScale(rate)
-  figure.mixer.update(delta)
 }
