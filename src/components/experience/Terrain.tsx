@@ -23,7 +23,9 @@ import { textureLoader } from './textures'
    centre, so 32-bit floats stay exact to centimetres where it matters. */
 
 const RINGS = 140
-const SEGMENTS = 200
+// (round the point below: at 200 the horizon, some 2 km off on foot on
+// the Moon, was drawn in 75 m chords and stepped like layers)
+const SEGMENTS = 360
 /** the finest ring, in planet radii (about a metre on Earth) */
 const INNER = 1.5e-7
 

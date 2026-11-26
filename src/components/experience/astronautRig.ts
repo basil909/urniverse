@@ -43,7 +43,7 @@ export type Figure = {
   wave: THREE.AnimationAction | null
   walk: Gait | null
   run: Gait | null
-  bones: Record<'hipL' | 'hipR' | 'kneeL' | 'kneeR' | 'armL' | 'armR' | 'spine', THREE.Object3D | null>
+  bones: Record<'hipL' | 'hipR' | 'kneeL' | 'kneeR' | 'footL' | 'footR' | 'armL' | 'armR' | 'spine', THREE.Object3D | null>
   // what it is doing
   phase: number
   weights: { idle: number; walk: number; run: number; wave: number }
@@ -169,6 +169,8 @@ export function loadFigure(onReady: (figure: Figure) => void, onFail: () => void
           hipR: bone(scene, 'UpperLeg.R'),
           kneeL: bone(scene, 'LowerLeg.L'),
           kneeR: bone(scene, 'LowerLeg.R'),
+          footL,
+          footR,
           armL: bone(scene, 'UpperArm.L'),
           armR: bone(scene, 'UpperArm.R'),
           spine: bone(scene, 'Torso') ?? bone(scene, 'Abdomen'),
@@ -196,6 +198,18 @@ function bend(bone: THREE.Object3D | null, axis: THREE.Vector3, angle: number) {
   _axis.copy(axis).applyQuaternion(_pq.invert()).normalize()
   bone.quaternion.premultiply(_q.setFromAxisAngle(_axis, angle))
 }
+
+/* a foot put back where its shin now ends (its place in the shin's frame,
+   taken before the shin was bent), its own turn left as it was */
+function follow(shin: THREE.Object3D | null, foot: THREE.Object3D | null, at: THREE.Vector3 | null) {
+  if (!shin || !foot || !foot.parent || !at) return
+  shin.updateWorldMatrix(true, false)
+  const world = shin.localToWorld(at)
+  foot.parent.updateWorldMatrix(true, false)
+  foot.position.copy(foot.parent.worldToLocal(world))
+}
+const _footL = new THREE.Vector3()
+const _footR = new THREE.Vector3()
 
 const smooth = THREE.MathUtils.smoothstep
 const frac = (x: number) => x - Math.floor(x)
@@ -261,13 +275,27 @@ export function animateFigure(figure: Figure, delta: number, right: THREE.Vector
   const a = figure.airPose
   const sq = figure.squash
   const b = figure.bones
-  // (about the figure's right: a positive turn swings a limb forward)
-  bend(b.hipL, right, 0.75 * a + 0.5 * sq)
-  bend(b.hipR, right, 0.55 * a + 0.5 * sq)
-  bend(b.kneeL, right, -1.25 * a - 0.95 * sq)
-  bend(b.kneeR, right, -1.05 * a - 0.95 * sq)
-  bend(b.armL, right, 0.55 * a)
-  bend(b.armR, right, 0.55 * a)
+  /* (about the figure's right: a positive turn swings a limb forward).
+     The thighs come forward and the knees bend just enough to keep the
+     feet under the body (bent further, the feet swung up behind, towards
+     the camera, and looked enormous), the feet kept level; a gentle
+     pose, as the Apollo crews hopped, legs fairly straight */
+  // (in this rig the feet are not the shins' children but controls of
+  // their own under the root: bent alone, the shins left the feet where
+  // the animation had put them and the boots stretched between, long and
+  // splayed. So each foot is carried with its shin, kept level.)
+  b.kneeL?.updateWorldMatrix(true, false)
+  b.kneeR?.updateWorldMatrix(true, false)
+  const footAtL = b.kneeL && b.footL ? b.kneeL.worldToLocal(b.footL.getWorldPosition(_footL)) : null
+  const footAtR = b.kneeR && b.footR ? b.kneeR.worldToLocal(b.footR.getWorldPosition(_footR)) : null
+  bend(b.hipL, right, 0.55 * a + 0.45 * sq)
+  bend(b.hipR, right, 0.42 * a + 0.45 * sq)
+  bend(b.kneeL, right, -0.62 * a - 0.75 * sq)
+  bend(b.kneeR, right, -0.5 * a - 0.75 * sq)
+  follow(b.kneeL, b.footL, footAtL)
+  follow(b.kneeR, b.footR, footAtR)
+  bend(b.armL, right, 0.35 * a)
+  bend(b.armR, right, 0.35 * a)
   // a lean: forward into the run, and over the knees as they take a landing
   bend(b.spine, right, -(0.06 * figure.runMix * moving + 0.25 * sq))
   // the body dips as the knees bend
