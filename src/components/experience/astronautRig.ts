@@ -217,15 +217,16 @@ const frac = (x: number) => x - Math.floor(x)
 /** a frame of the figure: right is its right in the scene; returns how far
     it dips (m) as the knees take a landing */
 export function animateFigure(figure: Figure, delta: number, right: THREE.Vector3) {
-  const { speed, loping, hop } = walkerBody
+  const { speed, loping, hop, walkPace } = walkerBody
   const dt = Math.min(delta, 0.05)
   const inJump = hop > 0.08 && !loping
   const grounded = hop <= 0.02
 
-  // ---- which gaits, how much: standing, walking, running (or the lope)
+  // ---- which gaits, how much: standing, walking, running (or the lope),
+  // by how much faster than this world's walking pace you go
   const walkSpeed = figure.walk?.speed ?? 1.4
   const runSpeed = figure.run?.speed ?? 4
-  const runWant = loping ? 1 : smooth(speed, walkSpeed * 1.1, Math.max(runSpeed * 0.75, walkSpeed * 1.4))
+  const runWant = loping ? 1 : smooth(speed, walkPace * 1.2, walkPace * 1.7)
   figure.runMix += (runWant - figure.runMix) * (1 - Math.exp(-dt * 6))
   const moving = smooth(speed, 0.04, 0.35)
   // a wave, once, standing, as you first turn to watch yourself
@@ -255,9 +256,15 @@ export function animateFigure(figure: Figure, delta: number, right: THREE.Vector
   }
 
   // ---- the gait's place in its cycle, from the ground covered (a slow
-  // drift in the air, the legs held mid-stride)
-  const stride = THREE.MathUtils.lerp(figure.walk?.stride ?? 1.4, figure.run?.stride ?? 2.4, figure.runMix)
-  figure.phase += ((inJump ? speed * 0.15 : speed) * dt) / stride
+  // drift in the air, the legs held mid-stride). Faster than the
+  // animation's own pace, the strides lengthen a little as well as
+  // quicken (all cadence, the legs would whirl)
+  const gaitSpeed = THREE.MathUtils.lerp(walkSpeed, runSpeed, figure.runMix)
+  const reach = Math.max(1, speed / gaitSpeed) ** 0.35
+  const stride = THREE.MathUtils.lerp(figure.walk?.stride ?? 1.4, figure.run?.stride ?? 2.4, figure.runMix) * reach
+  // a lope's bound: the legs slow while it carries you
+  const drift = inJump ? 0.15 : loping && hop > 0.03 ? 0.5 : 1
+  figure.phase += (speed * drift * dt) / stride
   for (const gait of [figure.walk, figure.run]) {
     if (gait) gait.action.time = frac(figure.phase + gait.offset) * gait.duration
   }
@@ -297,7 +304,7 @@ export function animateFigure(figure: Figure, delta: number, right: THREE.Vector
   bend(b.armL, right, 0.35 * a)
   bend(b.armR, right, 0.35 * a)
   // a lean: forward into the run, and over the knees as they take a landing
-  bend(b.spine, right, -(0.06 * figure.runMix * moving + 0.25 * sq))
+  bend(b.spine, right, -((0.05 + 0.06 * (reach - 1)) * figure.runMix * moving + 0.25 * sq))
   // the body dips as the knees bend
   return 0.16 * sq
 }

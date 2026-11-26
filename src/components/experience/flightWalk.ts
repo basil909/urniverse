@@ -12,10 +12,10 @@ import { jumpFor, SURFACES } from '../ui/landingSite'
    - W and S walk, A and D step to the side, the arrows turn; the mouse
      looks (click the view to hold it, Esc lets go) or a drag does; on a
      touch screen a thumb stick walks and a drag looks.
-   - Your pace follows the world's gravity, as a body's does: an easy
-     2 m/s on Earth, little more than a shuffle on the Moon (where the
-     Apollo crews moved faster by loping). Shift hurries: a run where
-     gravity is strong, the bounding lope where it is weak, each stride a
+   - Your pace follows the world's gravity, as a body's does, brisker
+     the stronger it is: a fast walk of 2.4 m/s on Earth, 1.7 on the
+     Moon. Shift hurries: a 6 m/s run where gravity is strong, the
+     bounding lope where it is weak (4 m/s on the Moon), each stride a
      low hop. Speed comes and goes with momentum, and with less grip the
      weaker the gravity; the head bobs a little with each step.
    - Space jumps, off the ground at 3.1 m/s (about half a metre on Earth)
@@ -234,12 +234,12 @@ export function stepWalk(
   // the pace gravity allows (a walk speeds up as the square root of g),
   // and hurrying: a run, or where gravity is weak the lope
   const lowG = g < 5
-  const walkPace = Math.max(0.6, Math.sqrt(0.5 * g * 0.9))
+  const walkPace = THREE.MathUtils.clamp(1.25 + 0.38 * Math.sqrt(g), 1.4, 2.6)
   const hurry = keys.has('shift')
-  const pace = hurry ? (lowG ? THREE.MathUtils.clamp(walkPace * 2.6, 1.2, 3.2) : 4.5) : walkPace
+  const pace = hurry ? (lowG ? THREE.MathUtils.clamp(walkPace * 2.4, 3.2, 5) : 6) : walkPace
   // momentum: grip, and so how fast pace changes, falls with gravity;
   // in the air there is none
-  const grip = onGround ? 2 + 6 * Math.min(1, Math.sqrt(g / 9.81)) : 0.15
+  const grip = onGround ? 3 + 7 * Math.min(1, Math.sqrt(g / 9.81)) : 0.15
   const ease = 1 - Math.exp(-grip * delta)
   walker.ahead += (ahead * pace - walker.ahead) * ease
   walker.across += (across * pace - walker.across) * ease
@@ -257,9 +257,9 @@ export function stepWalk(
         walker.left = !walker.left
         const sideways = _side.clone().multiplyScalar((walker.left ? -0.13 : 0.13) / R)
         surfaceEvents.footprints.push({ dir: walker.dir.clone().add(sideways).normalize(), heading: walker.heading.clone() })
-        // loping: each stride a low hop, some 20 cm
+        // loping: each stride a low hop, some 14 cm (a long, flat bound)
         if (hurry && lowG && speed > 0.8 && surface) {
-          walker.rise = Math.sqrt(2 * g * 0.2)
+          walker.rise = Math.sqrt(2 * g * 0.14)
           walker.faster = 1
           walker.loping = true
         }
