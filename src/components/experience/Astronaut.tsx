@@ -108,6 +108,8 @@ export default function Astronaut({ jetRef }: { jetRef: React.RefObject<THREE.Ob
       face.applyAxisAngle(up, step)
       turning.current += (step / Math.max(delta, 1e-4) - turning.current) * (1 - Math.exp(-delta * 8))
     }
+    // how far round your view is from the way it faces (left +), for its head
+    const lookYaw = Math.atan2(_right.copy(face).cross(walkerBody.forward).dot(up), face.dot(walkerBody.forward))
     _right.copy(face).cross(up).normalize()
     _basis.makeBasis(_right, up, _back.copy(face).negate())
     figure.quaternion.setFromRotationMatrix(_basis)
@@ -116,8 +118,8 @@ export default function Astronaut({ jetRef }: { jetRef: React.RefObject<THREE.Ob
     figure.position.copy(walkerBody.feet).sub(jet.position).divideScalar(SHIP_LENGTH)
     if (simple.current) simple.current.visible = !model
     if (model) {
-      // the knees taking a landing: the body dips
-      const dip = animateFigure(model, delta, _right)
+      // the knees bending (a landing, a crouch): the body dips
+      const dip = animateFigure(model, delta, _right, up, lookYaw)
       figure.position.addScaledVector(up, -dip * M)
       return
     }

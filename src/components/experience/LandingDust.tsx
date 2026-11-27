@@ -5,7 +5,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
 import { pilot } from './pilotState'
-import { ground, groundAltitude } from './groundState'
+import { ground, groundAltitude, sphereUv } from './groundState'
 import { ON_WHEELS, SHIP_LENGTH } from './flightShip'
 import { shipCamera } from './shipLayer'
 
@@ -19,12 +19,17 @@ import { shipCamera } from './shipLayer'
    - the roll-out: a trail from the main wheels, more the faster they go;
    - taking off: the engines' blast scouring the ground behind the ship,
      fast and low, dying away as it climbs.
+   - flying low and fast through air: the wake whips the ground up below
+     and behind the ship, dust over land and spray over the sea; and in
+     vacuum, the engines' blast scours the ground if you skim it;
+   - in Earth's moist air, a hard pull or turn draws vapour trails off the
+     wingtips (the air's pressure drops there, and its water condenses).
    With no air, dust flies on clean ballistic arcs under the world's own
    gravity and stops where it lands (no billowing, nothing hangs); in air
    it is slowed, rises a little, spreads into puffs and lingers.
 ============================================================ */
 
-const COUNT = 1400
+const COUNT = 2600
 const METRES = 37.24 // the ship's length
 
 /* surface gravity (m/s2) and the dust's colour, by world */
@@ -51,13 +56,22 @@ const WHEELS = [
   [-0.082, -ON_WHEELS, 0.21],
   [-0.104, -ON_WHEELS, 0.21],
 ] as const
+/* the wingtips' trailing corners (ship lengths, the ship's own frame) */
+const TIPS = [
+  [0.305, -0.108, 0.405],
+  [-0.305, -0.108, 0.405],
+] as const
+const SPRAY = '#eef2f5'
 
 const VERTEX = /* glsl */ `
 attribute float aSize;
 attribute float aAlpha;
+attribute float aTint;
 uniform float uScale;
 varying float vAlpha;
+varying float vTint;
 void main() {
+  vTint = aTint;
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mv;
   gl_PointSize = clamp(aSize * uScale / max(-mv.z, 1e-4), 0.0, 256.0);
@@ -65,12 +79,14 @@ void main() {
 }`
 const FRAGMENT = /* glsl */ `
 uniform vec3 uColor;
+uniform vec3 uSpray;
 varying float vAlpha;
+varying float vTint;
 void main() {
   float d = length(gl_PointCoord - 0.5) * 2.0;
   float a = vAlpha * (1.0 - smoothstep(0.35, 1.0, d));
   if (a < 0.004) discard;
-  gl_FragColor = vec4(uColor * (0.8 + 0.2 * (1.0 - d)), a);
+  gl_FragColor = vec4(mix(uColor, uSpray, vTint) * (0.8 + 0.2 * (1.0 - d)), a);
 }`
 
 const _up = new THREE.Vector3()
@@ -83,6 +99,8 @@ const _side = new THREE.Vector3()
 const _back = new THREE.Vector3()
 const _shipVel = new THREE.Vector3()
 const _toShip = new THREE.Vector3()
+const _local = new THREE.Vector3()
+const _trail = new THREE.Vector3()
 
 export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.Object3D | null> }) {
   const size = useThree((state) => state.size)
@@ -92,12 +110,14 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
     const position = new Float32Array(COUNT * 3)
     const sizes = new Float32Array(COUNT)
     const alphas = new Float32Array(COUNT)
+    const tints = new Float32Array(COUNT)
     geometry.setAttribute('position', new THREE.BufferAttribute(position, 3))
     geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1))
     geometry.setAttribute('aAlpha', new THREE.BufferAttribute(alphas, 1))
+    geometry.setAttribute('aTint', new THREE.BufferAttribute(tints, 1))
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6)
     const material = new THREE.ShaderMaterial({
-      uniforms: { uScale: { value: 400 }, uColor: { value: new THREE.Color(OTHER.color) } },
+      uniforms: { uScale: { value: 400 }, uColor: { value: new THREE.Color(OTHER.color) }, uSpray: { value: new THREE.Color(SPRAY) } },
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
       transparent: true,
@@ -109,7 +129,11 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
       position,
       sizes,
       alphas,
-      // per particle: velocity (ship lengths a second), age, life, size, growth; settled
+      tints,
+      // per particle: velocity (ship lengths a second), age, life, size, growth; settled;
+      // how much of the world's pull it feels (vapour none) and how bright (0..1)
+      weight: new Float32Array(COUNT).fill(1),
+      bright: new Float32Array(COUNT).fill(1),
       velocity: new Float32Array(COUNT * 3),
       age: new Float32Array(COUNT).fill(1e9),
       life: new Float32Array(COUNT).fill(1),
@@ -123,6 +147,8 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
       hadShip: false,
       lastLand: '',
       emitCarry: 0,
+      skimCarry: 0,
+      tipCarry: 0,
     }
   }, [])
   useEffect(
@@ -174,11 +200,17 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
     // the ship's place relative to the anchor (ship lengths)
     const shipFromAnchor = () => _toShip.copy(jet.position).sub(p.anchor).divideScalar(SHIP_LENGTH)
 
-    // a grain at a point in the ship's own frame (ship lengths)
-    const emit = (x: number, y: number, z: number, vel: THREE.Vector3, sizeM: number, life: number) => {
+    // a grain at a point in the ship's own frame (ship lengths), shifted by
+    // an offset in the scene's axes; tinted towards white (spray, vapour),
+    // feeling the world's pull by weight
+    const emit = (x: number, y: number, z: number, vel: THREE.Vector3, sizeM: number, life: number, tint = 0, weight = 1, bright = 1, offset?: THREE.Vector3) => {
       const i = p.next
       p.next = (p.next + 1) % COUNT
       _point.set(x, y, z).applyQuaternion(jet.quaternion).add(shipFromAnchor())
+      if (offset) _point.add(offset)
+      p.tints[i] = tint
+      p.weight[i] = weight
+      p.bright[i] = bright
       p.position[i * 3] = _point.x
       p.position[i * 3 + 1] = _point.y
       p.position[i * 3 + 2] = _point.z
@@ -253,6 +285,57 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
           }
         }
       }
+
+      // ---- skimming the ground: the wake (in air) or the engines' blast
+      // (in vacuum) throws it up below and behind
+      const airborne = land === 'flying' || land === 'descending' || land === 'landing'
+      const clear = above - ON_WHEELS
+      const blast = air < 0.02 ? Math.min(1, pilot.thrust * 1.5) : 1
+      const skim = airborne ? (1 - THREE.MathUtils.smoothstep(clear, 0.25, 3.4)) * THREE.MathUtils.smoothstep(shipSpeed, 25, 90) * blast : 0
+      if (skim > 0.01) {
+        anchorNow()
+        // over the sea (Earth's map), spray; else dust (thin over Earth's land: grass, fields)
+        _local.copy(jet.position).applyMatrix4(ground.inverse).normalize()
+        const [u, v] = sphereUv(_local)
+        const sea = ground.model ? 1 - ground.model.land(u, v) : 0
+        const wet = sea > 0.5
+        const rate = (wet ? 380 : pilot.nearestIndex === 2 ? 220 : 320) * skim
+        p.skimCarry += dt * rate
+        while (p.skimCarry >= 1) {
+          p.skimCarry -= 1
+          // somewhere under the ship or in its wake
+          const along = rand(-0.35, 1.6)
+          _trail.copy(_up).multiplyScalar(-above).addScaledVector(_back, along).addScaledVector(_side, rand(-0.45, 0.45) * (1 + along * 0.4))
+          _dir
+            .copy(_shipVel)
+            .multiplyScalar(rand(0.08, 0.35))
+            .addScaledVector(_side, rand(-1, 1) * rand(2, 9) * metresPerSec)
+            .addScaledVector(_up, (wet ? rand(3, 14) : rand(1, 7)) * metresPerSec)
+          emit(0, 0, 0, _dir, wet ? rand(1.6, 3.8) : rand(1.3, 3.4), rand(1.1, 2.4), wet ? 1 : 0, wet ? 0.8 : 1, wet ? 0.9 : 1, _trail)
+        }
+      }
+    }
+
+    // ---- vapour off the wingtips: Earth's moist air, fast, pulling hard
+    if (onWorld && pilot.nearestIndex === 2 && air > 0.25 && (land === 'flying' || land === 'descending' || land === 'landing')) {
+      const shipSpeed = _shipVel.length() / metresPerSec
+      const pull = Math.max(Math.abs(pilot.turn.pitch) * 1.4, Math.abs(pilot.turn.yaw) * 1.1, Math.abs(pilot.turn.roll) * 0.35)
+      const vapour = THREE.MathUtils.smoothstep(pull, 0.25, 0.9) * THREE.MathUtils.smoothstep(shipSpeed, 70, 160) * Math.min(1, (air - 0.25) * 3)
+      if (vapour > 0.02) {
+        anchorNow()
+        // laid along the path the tips took this frame, so the trail is unbroken
+        p.tipCarry += dt * 260
+        const n = Math.floor(p.tipCarry)
+        p.tipCarry -= n
+        for (let k = 0; k < n; k += 1) {
+          const back = (k + Math.random()) / Math.max(n, 1)
+          for (const tip of TIPS) {
+            _trail.copy(_shipVel).multiplyScalar(-dt * back)
+            _dir.set(rand(-0.3, 0.3), rand(-0.3, 0.3), rand(-0.3, 0.3)).multiplyScalar(metresPerSec)
+            emit(tip[0], tip[1], tip[2], _dir, rand(0.35, 0.7), rand(0.7, 1.3) * (0.5 + vapour * 0.5), 1, 0, 0.55 * vapour, _trail)
+          }
+        }
+      }
     }
     p.lastLand = land
 
@@ -279,7 +362,7 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
           p.velocity[j + 2] *= drag
         }
         // gravity (lessened in air, where fine dust floats)
-        const fall = g * (1 - lift) * dt
+        const fall = g * (1 - lift) * dt * p.weight[i]
         p.velocity[j] -= _up.x * fall
         p.velocity[j + 1] -= _up.y * fall
         p.velocity[j + 2] -= _up.z * fall
@@ -309,7 +392,7 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
       // in air a puff spreads and thins; in vacuum a grain stays a grain
       const grow = 1 + (air > 0.02 ? t * 3.5 * Math.min(air * 3, 1) : t * 0.4)
       p.sizes[i] = p.base[i] * grow
-      p.alphas[i] = (air > 0.02 ? 0.42 : 0.6) * THREE.MathUtils.smoothstep(t, 0, 0.06) * (1 - THREE.MathUtils.smoothstep(t, 0.55, 1))
+      p.alphas[i] = p.bright[i] * (air > 0.02 ? 0.42 : 0.6) * THREE.MathUtils.smoothstep(t, 0, 0.06) * (1 - THREE.MathUtils.smoothstep(t, 0.55, 1))
     }
     p.live = live
     if (live === 0) p.anchored = false
@@ -320,6 +403,7 @@ export default function LandingDust({ jetRef }: { jetRef: React.RefObject<THREE.
     p.geometry.attributes.position.needsUpdate = true
     ;(p.geometry.attributes.aSize as THREE.BufferAttribute).needsUpdate = true
     ;(p.geometry.attributes.aAlpha as THREE.BufferAttribute).needsUpdate = true
+    ;(p.geometry.attributes.aTint as THREE.BufferAttribute).needsUpdate = true
   })
 
   return <points ref={points} geometry={parts.geometry} material={parts.material} frustumCulled={false} visible={false} renderOrder={2} />

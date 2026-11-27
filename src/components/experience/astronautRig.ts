@@ -17,12 +17,25 @@ import { walkerBody } from './flightWalk'
      them never jumps; where gravity is weak, hurrying is the run played
      slow, a bounding lope.
    - On top of the animation: in a jump the knees tuck and the arms come
-     up; landing, the knees take it (a squash, the body dipping); a lean
-     into the run.
+     up; landing, the knees take it (a squash, the body dipping, the feet
+     kept on the ground); a lean into the run, and into a climb; the head
+     turns (and tilts) to look where you look; picking up a sample, a
+     crouch, leaning in, a hand reaching down.
    - A wave, once, as you first turn to watch yourself (if standing).
+   - Dressed for the surface: the model's sci-fi colours traded for a
+     white suit, grey joints and a gold visor, as EVA suits are.
 ============================================================ */
 
 const MODEL_URL = '/models/astronaut.glb'
+/* the suit's colours, by the model's material names (its own are sci-fi
+   orange and teal): a white suit, grey at the joints, a gold visor */
+const SUIT: Record<string, { color: string; roughness: number; metalness: number }> = {
+  SciFi_Light_Accent: { color: '#ebe9e4', roughness: 0.78, metalness: 0 },
+  SciFi_Main: { color: '#dddbd5', roughness: 0.85, metalness: 0 },
+  SciFi_Light: { color: '#a9a8a4', roughness: 0.6, metalness: 0.15 },
+  SciFi_MainDark: { color: '#6f7277', roughness: 0.7, metalness: 0.1 },
+  Grey: { color: '#c89a3c', roughness: 0.18, metalness: 0.85 },
+}
 const HEIGHT = 1.8
 const M = 1 / 37.24 // a metre, in ship lengths
 
@@ -43,7 +56,7 @@ export type Figure = {
   wave: THREE.AnimationAction | null
   walk: Gait | null
   run: Gait | null
-  bones: Record<'hipL' | 'hipR' | 'kneeL' | 'kneeR' | 'footL' | 'footR' | 'armL' | 'armR' | 'spine', THREE.Object3D | null>
+  bones: Record<'hipL' | 'hipR' | 'kneeL' | 'kneeR' | 'footL' | 'footR' | 'armL' | 'armR' | 'foreR' | 'spine' | 'neck' | 'head', THREE.Object3D | null>
   // what it is doing
   phase: number
   weights: { idle: number; walk: number; run: number; wave: number }
@@ -53,6 +66,9 @@ export type Figure = {
   airTime: number
   waving: boolean
   waved: boolean
+  /** the head's turn and tilt (radians), eased */
+  lookYaw: number
+  lookPitch: number
 }
 
 const _q = new THREE.Quaternion()
@@ -124,8 +140,17 @@ export function loadFigure(onReady: (figure: Figure) => void, onFail: () => void
         const mesh = object as THREE.Mesh
         if (!mesh.isMesh) return
         mesh.frustumCulled = false
-        const material = mesh.material as THREE.MeshStandardMaterial
-        if (material && 'roughness' in material) material.roughness = Math.max(material.roughness, 0.6)
+        mesh.castShadow = true
+        const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as THREE.MeshStandardMaterial[]
+        for (const material of materials) {
+          if (!material || !('roughness' in material)) continue
+          const look = SUIT[material.name]
+          if (look) {
+            material.color.set(look.color)
+            material.roughness = look.roughness
+            material.metalness = look.metalness
+          } else material.roughness = Math.max(material.roughness, 0.6)
+        }
       })
       const mixer = new THREE.AnimationMixer(scene)
       const clip = (name: string) => gltf.animations.find((c) => c.name.split('|').pop() === name) ?? null
@@ -173,7 +198,10 @@ export function loadFigure(onReady: (figure: Figure) => void, onFail: () => void
           footR,
           armL: bone(scene, 'UpperArm.L'),
           armR: bone(scene, 'UpperArm.R'),
+          foreR: bone(scene, 'LowerArm.R'),
           spine: bone(scene, 'Torso') ?? bone(scene, 'Abdomen'),
+          neck: bone(scene, 'Neck'),
+          head: bone(scene, 'Head'),
         },
         phase: 0,
         weights: { idle: 1, walk: 0, run: 0, wave: 0 },
@@ -183,6 +211,8 @@ export function loadFigure(onReady: (figure: Figure) => void, onFail: () => void
         airTime: 0,
         waving: false,
         waved: false,
+        lookYaw: 0,
+        lookPitch: 0,
       })
     },
     undefined,
@@ -210,13 +240,18 @@ function follow(shin: THREE.Object3D | null, foot: THREE.Object3D | null, at: TH
 }
 const _footL = new THREE.Vector3()
 const _footR = new THREE.Vector3()
+const _wasL = new THREE.Vector3()
+const _wasR = new THREE.Vector3()
+const _nowL = new THREE.Vector3()
+const _nowR = new THREE.Vector3()
 
 const smooth = THREE.MathUtils.smoothstep
 const frac = (x: number) => x - Math.floor(x)
 
-/** a frame of the figure: right is its right in the scene; returns how far
-    it dips (m) as the knees take a landing */
-export function animateFigure(figure: Figure, delta: number, right: THREE.Vector3) {
+/** a frame of the figure: right and up are its own in the scene, lookYaw
+    how far round (left +) your view is from the way it faces; returns how
+    far it dips (m) as the knees bend, standing */
+export function animateFigure(figure: Figure, delta: number, right: THREE.Vector3, up: THREE.Vector3, lookYaw: number) {
   const { speed, loping, hop, walkPace } = walkerBody
   const dt = Math.min(delta, 0.05)
   const inJump = hop > 0.08 && !loping
@@ -268,9 +303,27 @@ export function animateFigure(figure: Figure, delta: number, right: THREE.Vector
   for (const gait of [figure.walk, figure.run]) {
     if (gait) gait.action.time = frac(figure.phase + gait.offset) * gait.duration
   }
+  /* (the mixer writes a bone only when its animated value has changed
+     since the last frame: standing, much of the pose holds still, and
+     what is bent below would pile up frame on frame, folding the figure
+     over. So each bone bent is first put back as the animation left it) */
+  const touched = Object.values(figure.bones)
+  for (const bone of touched) {
+    const was = bone?.userData.posed as { p: THREE.Vector3; q: THREE.Quaternion } | undefined
+    if (bone && was) {
+      bone.position.copy(was.p)
+      bone.quaternion.copy(was.q)
+    }
+  }
   figure.mixer.update(dt)
+  for (const bone of touched) {
+    if (!bone) continue
+    const was = (bone.userData.posed ??= { p: new THREE.Vector3(), q: new THREE.Quaternion() }) as { p: THREE.Vector3; q: THREE.Quaternion }
+    was.p.copy(bone.position)
+    was.q.copy(bone.quaternion)
+  }
 
-  // ---- on top: a jump's tuck, a landing's squash, a lean into the run
+  // ---- on top: a jump's tuck, a landing's squash, a crouch, a lean
   const airWant = inJump ? 1 : loping && hop > 0.03 ? 0.3 : 0
   figure.airPose += (airWant - figure.airPose) * (1 - Math.exp(-dt * (airWant > figure.airPose ? 9 : 14)))
   if (inJump) figure.airTime += dt
@@ -281,30 +334,67 @@ export function animateFigure(figure: Figure, delta: number, right: THREE.Vector
   figure.squash *= Math.exp(-dt * 7)
   const a = figure.airPose
   const sq = figure.squash
+  const c = walkerBody.crouch
   const b = figure.bones
-  /* (about the figure's right: a positive turn swings a limb forward).
-     The thighs come forward and the knees bend just enough to keep the
-     feet under the body (bent further, the feet swung up behind, towards
-     the camera, and looked enormous), the feet kept level; a gentle
-     pose, as the Apollo crews hopped, legs fairly straight */
-  // (in this rig the feet are not the shins' children but controls of
-  // their own under the root: bent alone, the shins left the feet where
-  // the animation had put them and the boots stretched between, long and
-  // splayed. So each foot is carried with its shin, kept level.)
-  b.kneeL?.updateWorldMatrix(true, false)
-  b.kneeR?.updateWorldMatrix(true, false)
-  const footAtL = b.kneeL && b.footL ? b.kneeL.worldToLocal(b.footL.getWorldPosition(_footL)) : null
-  const footAtR = b.kneeR && b.footR ? b.kneeR.worldToLocal(b.footR.getWorldPosition(_footR)) : null
-  bend(b.hipL, right, 0.55 * a + 0.45 * sq)
-  bend(b.hipR, right, 0.42 * a + 0.45 * sq)
-  bend(b.kneeL, right, -0.62 * a - 0.75 * sq)
-  bend(b.kneeR, right, -0.5 * a - 0.75 * sq)
-  follow(b.kneeL, b.footL, footAtL)
-  follow(b.kneeR, b.footR, footAtR)
-  bend(b.armL, right, 0.35 * a)
-  bend(b.armR, right, 0.35 * a)
-  // a lean: forward into the run, and over the knees as they take a landing
-  bend(b.spine, right, -((0.05 + 0.06 * (reach - 1)) * figure.runMix * moving + 0.25 * sq))
-  // the body dips as the knees bend
-  return 0.16 * sq
+  /* (about the figure's right: a positive turn swings a hanging limb
+     forward, and tips an upright one back). In this rig the feet are not
+     the shins' children but controls of their own under the root: bent
+     alone, the shins left the feet where the animation had put them and
+     the boots stretched between, long and splayed. So each foot is
+     carried with its shin, kept level. */
+  const carry = () => {
+    b.kneeL?.updateWorldMatrix(true, false)
+    b.kneeR?.updateWorldMatrix(true, false)
+    return [
+      b.kneeL && b.footL ? b.kneeL.worldToLocal(b.footL.getWorldPosition(_footL)) : null,
+      b.kneeR && b.footR ? b.kneeR.worldToLocal(b.footR.getWorldPosition(_footR)) : null,
+    ] as const
+  }
+  // standing poses first (a landing's squash, a crouch): the feet stay on
+  // the ground, so the body comes down by as much as they would rise
+  let dip = 0
+  if (sq > 0.01 || c > 0.01) {
+    b.footL?.getWorldPosition(_wasL)
+    b.footR?.getWorldPosition(_wasR)
+    const [atL, atR] = carry()
+    bend(b.hipL, right, 0.45 * sq + 1.15 * c)
+    bend(b.hipR, right, 0.45 * sq + 0.95 * c)
+    bend(b.kneeL, right, -0.75 * sq - 1.7 * c)
+    bend(b.kneeR, right, -0.75 * sq - 1.45 * c)
+    follow(b.kneeL, b.footL, atL)
+    follow(b.kneeR, b.footR, atR)
+    if (b.footL && b.footR) {
+      const riseL = b.footL.getWorldPosition(_nowL).sub(_wasL).dot(up)
+      const riseR = b.footR.getWorldPosition(_nowR).sub(_wasR).dot(up)
+      dip = Math.max(0, Math.min(riseL, riseR)) / M
+    }
+  }
+  // in the air: the thighs come forward and the knees bend just enough to
+  // keep the feet under the body (a gentle pose, as the Apollo crews hopped)
+  if (a > 0.01) {
+    const [atL, atR] = carry()
+    bend(b.hipL, right, 0.55 * a)
+    bend(b.hipR, right, 0.42 * a)
+    bend(b.kneeL, right, -0.62 * a)
+    bend(b.kneeR, right, -0.5 * a)
+    follow(b.kneeL, b.footL, atL)
+    follow(b.kneeR, b.footR, atR)
+  }
+  bend(b.armL, right, 0.35 * a + 0.25 * c)
+  // crouched, the right hand reaches down for the sample
+  bend(b.armR, right, 0.35 * a + 0.75 * c)
+  bend(b.foreR, right, 0.35 * c)
+  // a lean: forward into the run, up a slope, over the knees as they take
+  // a landing, and in over a sample
+  const climb = THREE.MathUtils.clamp(walkerBody.slope, -0.4, 0.8) * moving
+  bend(b.spine, right, -((0.05 + 0.06 * (reach - 1)) * figure.runMix * moving + 0.3 * climb + 0.25 * sq + 0.55 * c))
+  // ---- the head: round to where you look (as far as a neck in a suit
+  // goes), up or down with it; down to the ground, crouched
+  const headEase = 1 - Math.exp(-dt * 6)
+  figure.lookYaw += (THREE.MathUtils.clamp(lookYaw, -1.1, 1.1) - figure.lookYaw) * headEase
+  figure.lookPitch += (THREE.MathUtils.clamp(walkerBody.pitch, -0.6, 0.6) - figure.lookPitch) * headEase
+  bend(b.neck, up, figure.lookYaw * 0.4)
+  bend(b.head, up, figure.lookYaw * 0.6)
+  bend(b.head, right, figure.lookPitch * 0.7 * (1 - c) - 0.45 * c)
+  return dip
 }

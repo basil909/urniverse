@@ -141,6 +141,10 @@ export const pilot = {
   /** on foot: by the crew hatch, near enough to climb aboard (E) */
   nearHatch: false,
   jump: { height: 0, seconds: 0, faster: 1, count: 0 },
+  /** on foot: samples picked up (F), on each world, and the last one's
+      note (count: all of them, for the HUD to notice a new one) */
+  samples: {} as Record<number, number>,
+  sample: { count: 0, text: '' },
   /** asked to plant a flag beside the ship */
   flagRequest: false,
   flagPlanted: false,

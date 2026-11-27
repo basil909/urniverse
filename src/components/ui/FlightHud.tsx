@@ -168,9 +168,13 @@ const CONTROLS: [string, [string[], string][]][] = [
   [
     'On foot (landed)',
     [
-      [['W', 'S'], 'Walk, back'],
-      [['A', 'D', 'Drag'], 'Turn, look around'],
+      [['W', 'A', 'S', 'D'], 'Walk; A and D step aside'],
+      [['Mouse', '←', '→'], 'Look and turn (click to hold the mouse)'],
+      [['Shift'], 'Run; where gravity is weak, lope'],
       [['Space'], 'Jump (the world’s own gravity)'],
+      [['F'], 'Pick up a sample of the ground'],
+      [['V'], 'See yourself, or your own eyes'],
+      [['E'], 'Climb aboard, by the hatch'],
       [['Esc'], 'Back aboard'],
     ],
   ],
@@ -368,6 +372,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
     let lastEntry = -1
     let lastBlack = false
     let lastJump = pilot.jump.count
+    let lastSample = pilot.sample.count
     // notes about where you are wait their turn (arriving somewhere and
     // entering the belt can happen at once)
     const waiting: string[] = []
@@ -464,6 +469,11 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         const up = j.height >= 10 ? `${Math.round(j.height).toLocaleString('en-GB')} m` : `${j.height.toFixed(1)} m`
         const time = j.seconds >= 120 ? `${Math.round(j.seconds / 60)} minutes` : `${j.seconds.toFixed(1)} s`
         showToast(`A jump: ${up} up, ${time} in the air${j.faster > 1.5 ? `\nshown ${Math.round(j.faster)}× faster` : ''}`)
+      }
+      // a sample picked up: what it is
+      if (pilot.sample.count !== lastSample) {
+        lastSample = pilot.sample.count
+        showToast(pilot.sample.text)
       }
       // crossing the heliopause, where the Sun's wind meets the galaxy's
       if (lastSunAU < 120 && pilot.sunAU >= 120) showToast('Leaving the heliosphere: interstellar space begins')
@@ -797,7 +807,7 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
         return
       }
       const k = key(event)
-      if (['w', 'a', 's', 'd', 'q', 'e', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
+      if (['w', 'a', 's', 'd', 'q', 'e', 'f', 'shift', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) {
         event.preventDefault()
         // (Space: on foot a jump, else thrust)
         pilot.keys.add(k === ' ' ? (pilot.walking ? 'jump' : 'w') : k)
@@ -1181,6 +1191,18 @@ export default function FlightHud({ onLand }: { onLand: () => void }) {
       {touch && walking && (
         <button type="button" className="flight-touch-land" onClick={() => (pilot.walkView = pilot.walkView === 'first' ? 'third' : 'first')}>
           {walkView === 'first' ? 'See yourself' : 'Your eyes'}
+        </button>
+      )}
+      {touch && walking && !nearHatch && (
+        <button
+          type="button"
+          className="flight-touch-land walk-board"
+          onClick={() => {
+            pilot.keys.add('f')
+            window.setTimeout(() => pilot.keys.delete('f'), 150)
+          }}
+        >
+          Sample
         </button>
       )}
       {touch && walking && nearHatch && (

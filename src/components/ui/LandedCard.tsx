@@ -138,7 +138,7 @@ export default function LandedCard({ touch }: { touch: boolean }) {
               <kbd>W</kbd>
               <kbd>A</kbd>
               <kbd>S</kbd>
-              <kbd>D</kbd> move · click to look round · <kbd>Space</kbd> jump · <kbd>Shift</kbd> run · <kbd>V</kbd> see yourself ·{' '}
+              <kbd>D</kbd> move · click to look round · <kbd>Space</kbd> jump · <kbd>Shift</kbd> run · <kbd>V</kbd> see yourself · <kbd>F</kbd> pick up a sample ·{' '}
               <kbd>E</kbd> board, by the hatch
             </>
           )}

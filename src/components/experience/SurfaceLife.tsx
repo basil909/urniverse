@@ -349,6 +349,42 @@ export default function SurfaceLife({ jetRef }: { jetRef: { current: THREE.Objec
     return out
   }
 
+  /* the boulders within reach of a point (the world's own frame), for the
+     walker to meet: each as its offset from the point (metres, the world's
+     axes), its size and squash; none where nothing is drawn */
+  useEffect(() => {
+    const found: { x: number; y: number; z: number; size: number; squash: number }[] = []
+    const at = new THREE.Vector3()
+    surfaceEvents.rocksNear = (local: THREE.Vector3, reach: number) => {
+      const s = state.current
+      found.length = 0
+      if (!s.anchored || !s.surface || s.surface.rocks <= 0 || !ground.model || ground.body !== s.body) return found
+      toSite(local, at)
+      const ax = at.x
+      const ay = at.y
+      const az = at.z
+      const cx = at.dot(s.east)
+      const cy = at.dot(s.north)
+      const span = Math.ceil(reach / BOULDER_CELL)
+      const icx = Math.floor(cx / BOULDER_CELL)
+      const icy = Math.floor(cy / BOULDER_CELL)
+      for (let dx = -span; dx <= span; dx += 1) {
+        for (let dy = -span; dy <= span; dy += 1) {
+          for (const rock of cellRocks(icx + dx, icy + dy, BOULDER_CELL, false)) {
+            const ox = rock.x - ax
+            const oy = rock.y - ay
+            const oz = rock.z - az
+            if (ox * ox + oy * oy + oz * oz < (reach + rock.size) ** 2) found.push({ x: ox, y: oy, z: oz, size: rock.size, squash: rock.squash })
+          }
+        }
+      }
+      return found
+    }
+    return () => {
+      surfaceEvents.rocksNear = null
+    }
+  }, [])
+
   const placeRocks = (mesh: THREE.InstancedMesh, cx: number, cy: number, cellSize: number, reach: number, max: number, pebble: boolean) => {
     const s = state.current
     const surface = s.surface!

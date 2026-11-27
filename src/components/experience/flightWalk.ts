@@ -4,6 +4,7 @@ import { pilot } from './pilotState'
 import { ground } from './groundState'
 import { KM_PER_UNIT, ON_WHEELS, SHIP_LENGTH } from './flightShip'
 import { jumpFor, SURFACES } from '../ui/landingSite'
+import { sampleFor } from './surfaceSamples'
 
 /* ============================================================
    ON FOOT
@@ -22,6 +23,11 @@ import { jumpFor, SURFACES } from '../ui/landingSite'
      under the world's own gravity: three metres and four seconds on the
      Moon, hundreds of metres and minutes on Phobos (shown faster, and
      said so). Footprints are left in dust.
+   - The ground pushes back: uphill you slow (on a steep slope to a
+     crawl), downhill you hurry; boulders are solid, walked round (or
+     jumped over), while stones you step over.
+   - F crouches and picks up a sample of the ground: what you have found,
+     and what it tells of the world.
    - The Shuttle is solid: you walk round its fuselage and gear (under the
      wings, three metres up, you can pass); by the crew hatch on its left
      side, E climbs back aboard.
@@ -50,6 +56,13 @@ export type Walker = {
   across: number
   phase: number
   loping: boolean
+  /** the ground's slope the way you go (rise over run, eased) */
+  slope: number
+  /** picking up a sample: seconds into it (-1 not), F held, and whether
+      this one has been taken yet */
+  scoop: number
+  scoopHeld: boolean
+  picked: boolean
 }
 
 export const newWalker = (): Walker => ({
@@ -66,6 +79,10 @@ export const newWalker = (): Walker => ({
   across: 0,
   phase: 0,
   loping: false,
+  slope: 0,
+  scoop: -1,
+  scoopHeld: false,
+  picked: false,
 })
 
 /* what the surface scene picks up: footprints and puffs of dust, each
@@ -76,6 +93,9 @@ export const surfaceEvents = {
   puffs: [] as { dir: THREE.Vector3; count: number; speed: number }[],
   /** a flag to plant: where, and which way its planter faced */
   flag: null as null | { dir: THREE.Vector3; heading: THREE.Vector3 },
+  /** the boulders near a point of the world's own frame (SurfaceLife
+      answers): offsets in metres along the world's axes */
+  rocksNear: null as null | ((local: THREE.Vector3, reach: number) => { x: number; y: number; z: number; size: number; squash: number }[]),
 }
 
 /* the suited figure seen from behind (V): where its feet are (scene
@@ -102,9 +122,19 @@ export const walkerBody = {
   right: new THREE.Vector3(1, 0, 0),
   hop: 0,
   gravity: 9.81,
+  /** looking up (+) or down (radians); crouched to pick up a sample (0..1);
+      the slope underfoot the way you go (rise over run) */
+  pitch: 0,
+  crouch: 0,
+  slope: 0,
 }
 
 const EYE = 1.6
+/* picking up a sample: the whole of it, and the moment it is taken (s) */
+const SCOOP_TIME = 1.9
+const SCOOP_PICK = 0.95
+/* a person's own width (m): how near a boulder can come */
+const PERSON = 0.32
 /* the Shuttle as a walker meets it, in its own frame (ship lengths; nose
    at -z): the fuselage's footprint (and the engines behind it), the main
    gear's legs, and the crew hatch's place on the ground, its left side */
@@ -131,6 +161,9 @@ const _inverse = new THREE.Quaternion()
 const _basis = new THREE.Matrix4()
 const _head = new THREE.Vector3()
 const _cam = new THREE.Vector3()
+const _probe = new THREE.Vector3()
+const _rock = new THREE.Vector3()
+const _move = new THREE.Vector3()
 
 /** metres per unit of the world's own frame */
 const metres = () => ground.worldRadius * KM_PER_UNIT * 1000
@@ -150,7 +183,41 @@ export function startWalk(walker: Walker, jet: THREE.Object3D) {
   walker.ahead = 0
   walker.across = 0
   walker.loping = false
+  walker.slope = 0
+  walker.scoop = -1
+  walker.picked = false
   walkerBody.out = 0
+}
+
+/** the walker kept out of the boulders: pushed out round them (unless
+    clearing them in a jump), the way into them stopped */
+function keepOffRocks(walker: Walker, R: number) {
+  const model = ground.model
+  const query = surfaceEvents.rocksNear
+  if (!model || !query) return
+  _local.copy(walker.dir).multiplyScalar(1 + model.height(walker.dir, ground.fade))
+  const rocks = query(_local, 4)
+  _side.copy(walker.heading).cross(walker.dir).normalize()
+  for (const rock of rocks) {
+    // stones you step over
+    if (rock.size < 0.35) continue
+    // (its top, over the ground it sits on)
+    const top = rock.size * rock.squash * 0.8
+    if (walker.height > top) continue
+    _rock.set(rock.x, rock.y, rock.z)
+    _rock.addScaledVector(walker.dir, -_rock.dot(walker.dir))
+    const apart = _rock.length()
+    const reach = rock.size * 0.9 + PERSON
+    if (apart >= reach || apart < 1e-5) continue
+    _rock.divideScalar(apart)
+    walker.dir.addScaledVector(_rock, -(reach - apart) / R).normalize()
+    // no more going into it
+    const into = walker.ahead * walker.heading.dot(_rock) + walker.across * _side.dot(_rock)
+    if (into > 0) {
+      walker.ahead -= into * walker.heading.dot(_rock)
+      walker.across -= into * _side.dot(_rock)
+    }
+  }
 }
 
 /** the walker kept out of the Shuttle: pushed out of its fuselage and gear
@@ -231,12 +298,38 @@ export function stepWalk(
     ahead /= amount
     across /= amount
   }
+
+  // ---- F: crouch and pick up a sample of the ground (standing still)
+  const scoopKey = keys.has('f')
+  if (scoopKey && !walker.scoopHeld && onGround && walker.scoop < 0 && !pilot.nearHatch && surface) {
+    walker.scoop = 0
+    walker.picked = false
+  }
+  walker.scoopHeld = scoopKey
+  if (walker.scoop >= 0) {
+    ahead = 0
+    across = 0
+    walker.scoop += delta
+    if (walker.scoop >= SCOOP_PICK && !walker.picked) {
+      walker.picked = true
+      const count = (pilot.samples[body] ?? 0) + 1
+      pilot.samples[body] = count
+      pilot.sample = { count: pilot.sample.count + 1, text: sampleFor(body, count) }
+      // a little dust where the scoop went in, an arm's length ahead
+      _probe.copy(walker.dir).addScaledVector(walker.heading, 0.6 / R).normalize()
+      surfaceEvents.puffs.push({ dir: _probe.clone(), count: 6, speed: 0.5 })
+    }
+    if (walker.scoop >= SCOOP_TIME) walker.scoop = -1
+  }
+  const crouch = walker.scoop < 0 ? 0 : THREE.MathUtils.smoothstep(walker.scoop, 0, 0.5) * (1 - THREE.MathUtils.smoothstep(walker.scoop, 1.3, SCOOP_TIME))
   // the pace gravity allows (a walk speeds up as the square root of g),
   // and hurrying: a run, or where gravity is weak the lope
   const lowG = g < 5
   const walkPace = THREE.MathUtils.clamp(1.25 + 0.38 * Math.sqrt(g), 1.4, 2.6)
   const hurry = keys.has('shift')
-  const pace = hurry ? (lowG ? THREE.MathUtils.clamp(walkPace * 2.4, 3.2, 5) : 6) : walkPace
+  // uphill slower (a steep one, a crawl), downhill a little quicker
+  const climb = THREE.MathUtils.clamp(1 - walker.slope * (walker.slope > 0 ? 1.8 : 0.6), 0.3, 1.25)
+  const pace = (hurry ? (lowG ? THREE.MathUtils.clamp(walkPace * 2.4, 3.2, 5) : 6) : walkPace) * climb
   // momentum: grip, and so how fast pace changes, falls with gravity;
   // in the air there is none
   const grip = onGround ? 3 + 7 * Math.min(1, Math.sqrt(g / 9.81)) : 0.15
@@ -273,6 +366,15 @@ export function stepWalk(
 
   // ---- the Shuttle: walked round, not through; the hatch within reach
   pilot.nearHatch = jet ? keepClear(walker, jet) : false
+  keepOffRocks(walker, R)
+
+  // ---- the slope the way you go: the ground 3 m ahead against here
+  if (speed > 0.05 && onGround) {
+    _move.copy(walker.heading).multiplyScalar(walker.ahead).addScaledVector(_side, walker.across).normalize()
+    _probe.copy(walker.dir).addScaledVector(_move, 3 / R).normalize()
+    const rise = (model.height(_probe, ground.fade) - model.height(walker.dir, ground.fade)) * R
+    walker.slope += (THREE.MathUtils.clamp(rise / 3, -1.5, 1.5) - walker.slope) * (1 - Math.exp(-delta * 5))
+  } else walker.slope *= Math.exp(-delta * 3)
 
   // ---- jumping (Space): the world's gravity, weaker with height on the small moons
   const jump = keys.has('jump')
@@ -308,12 +410,14 @@ export function stepWalk(
   pilot.walkHeight = walker.loping ? 0 : walker.height
 
   // ---- the eyes: 1.6 m over the ground here, bobbing a little with each step
-  const bob = onGround ? Math.abs(Math.sin(walker.phase)) * 0.035 * Math.min(1, speed / 1.5) - 0.015 * Math.min(1, speed / 1.5) : 0
+  const bob = (onGround ? Math.abs(Math.sin(walker.phase)) * 0.035 * Math.min(1, speed / 1.5) - 0.015 * Math.min(1, speed / 1.5) : 0) - crouch * 0.6
   const ground0 = 1 + model.height(walker.dir, ground.fade)
   ground.matrix.decompose(_dummyP, _bodyQuat, _dummyS)
   _upWorld.copy(walker.dir).applyQuaternion(_bodyQuat)
   _fwdWorld.copy(walker.heading).applyQuaternion(_bodyQuat)
-  _look.copy(walker.heading).multiplyScalar(Math.cos(walker.pitch)).addScaledVector(walker.dir, Math.sin(walker.pitch)).applyQuaternion(_bodyQuat)
+  // (crouched, the eyes go down to the scoop)
+  const lookPitch = walker.pitch - crouch * (pilot.walkView === 'first' ? 0.7 : 0)
+  _look.copy(walker.heading).multiplyScalar(Math.cos(lookPitch)).addScaledVector(walker.dir, Math.sin(lookPitch)).applyQuaternion(_bodyQuat)
 
   // the figure (for V): its feet, and which way it stands
   _point.copy(walker.dir).multiplyScalar(ground0 + walker.height / R).applyMatrix4(ground.matrix)
@@ -334,6 +438,9 @@ export function stepWalk(
   walkerBody.right.copy(_rightWorld)
   walkerBody.hop = walker.height
   walkerBody.gravity = g
+  walkerBody.pitch = walker.pitch
+  walkerBody.crouch = crouch
+  walkerBody.slope = walker.slope
   walkerBody.shown = pilot.walkView === 'third'
 
   _head.copy(walker.dir).multiplyScalar(ground0 + (walker.height + EYE + bob) / R).applyMatrix4(ground.matrix)

@@ -7,7 +7,7 @@ import { pilot } from './pilotState'
 import { LowResPass } from './lowRes'
 
 /* ============================================================
-   THE FRAME METER (F, or ?perf in the address)
+   THE FRAME METER (F, except on foot; or ?perf in the address)
    A quiet readout, top left: frames a second, the time a frame takes
    (average and worst over half a second), the time the graphics card
    spends on it where the browser can tell (EXT_disjoint_timer_query),
@@ -48,6 +48,8 @@ export function PerfMeter() {
       if (event.key.toLowerCase() !== 'f' || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      // (on foot, F picks up a sample)
+      if (pilot.walking && !event.shiftKey) return
       // shift+F: the marched effects at full or half size, to compare
       if (event.shiftKey) lowResPass?.setScale(lowResPass.scale === 1 ? 0.5 : 1)
       else toggle(!on.current)
