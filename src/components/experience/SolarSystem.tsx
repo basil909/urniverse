@@ -1077,6 +1077,9 @@ vec3 hash33(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p
 /* the active regions, over the sunspot groups in the two activity belts
    (some 5 to 35 degrees north and south): where each stands on the Sun
    (a direction) and how large its spots are (radii) */
+/* flares: one begins every FLARE_EVERY seconds; their size (Sun radii) */
+const float FLARE_EVERY = 14.0;
+const float FLARE_SIZE = 0.09;
 const int SPOT_COUNT = 10;
 const vec4 SPOTS[10] = vec4[](
   vec4(0.9228, 0.2419, 0.2998, 0.034),
@@ -1361,6 +1364,35 @@ void main() {
   l *= mix(0.6, 1.0, smoothstep(0.0, 0.06, mu));
   // white-hot only in knots, never in whole sheets
   l = l > 0.85 ? 0.85 + (l - 0.85) * 0.25 : l;
+
+  /* flares: every so often a patch in the active belts (within some 28
+     degrees of the equator) flares up: two bright ribbons either side of
+     a white-hot core, as real flares are, blazing within a second and
+     fading over several. One at a time; about half on the far side. */
+  {
+    float cycle = floor(t / FLARE_EVERY);
+    float age = t - cycle * FLARE_EVERY;
+    vec3 h = hash33(vec3(cycle, 3.7, 1.1));
+    float lat = (h.y - 0.5) * 1.0;
+    float lon = h.x * 6.2832;
+    vec3 c = vec3(cos(lon) * cos(lat), sin(lat), sin(lon) * cos(lat));
+    vec3 off = p - c;
+    if (dot(off, off) < 0.09) {
+      vec3 e1 = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
+      vec3 e2 = cross(c, e1);
+      float turn = h.z * 6.2832;
+      vec2 o = vec2(dot(off, e1), dot(off, e2));
+      o = vec2(cos(turn) * o.x - sin(turn) * o.y, sin(turn) * o.x + cos(turn) * o.y) / FLARE_SIZE;
+      float ribbons = exp(-pow(abs(o.y) - 0.35, 2.0) / 0.012) * exp(-o.x * o.x / 0.9);
+      ribbons *= 0.6 + 0.4 * noise(vec3(o * 6.0, cycle));
+      float core = exp(-dot(o, o) / 0.08);
+      // (and the region round it lit up too, so it reads from afar)
+      float halo = exp(-dot(o, o) / 0.7);
+      float rise = smoothstep(0.0, 0.7, age);
+      float fade = exp(-max(age - 0.7, 0.0) / 3.2);
+      l += (ribbons * 1.4 + core * 1.6 + halo * 0.4) * rise * fade;
+    }
+  }
 
   gl_FragColor = vec4(fire(l, 1.0 - pow(rho, 1.25)), 1.0);
 }`
@@ -2460,6 +2492,11 @@ void main() {
 }`
 
 const CORONA_FRAGMENT = /* glsl */ `
+/* coronal mass ejections: one every CME_EVERY seconds, the first CME_FIRST
+   seconds in, each CME_LIFE long */
+#define CME_EVERY 80.0
+#define CME_FIRST 20.0
+#define CME_LIFE 30.0
 uniform float uTime;
 uniform float uOpacity;
 uniform float uHalf;
@@ -2544,6 +2581,27 @@ void main() {
     float wide = 0.04 + 0.1 * above;
     glow += exp(-apart * apart / (wide * wide)) * exp(-above * (0.7 + 1.4 * hash1(fk * 2.3))) * smoothstep(0.0, 0.08, above) * (0.1 + 0.3 * hash1(fk * 5.1)) * (0.6 + 0.8 * cloud)
       * (1.0 - smoothstep(uHalf * 0.4, uHalf * 0.9, r));
+  }
+
+  /* now and then, rarely, a coronal mass ejection: a great loop of
+     plasma swelling slowly off the limb, its bright front and sides
+     round a darker cavity, thinning and fading as it goes */
+  {
+    float clock = uTime + CME_EVERY - CME_FIRST;
+    float cycle = floor(clock / CME_EVERY);
+    float life = (clock - cycle * CME_EVERY) / CME_LIFE;
+    if (life < 1.0 && r > 1.0) {
+      float at = hash1(cycle * 3.7 + 0.5) * 6.28318;
+      float da = mod(a - at + 3.14159, 6.28318) - 3.14159;
+      float front = 1.0 + (uHalf * 0.8 - 1.0) * (1.0 - pow(1.0 - life, 1.7));
+      float spread = 0.32 + 0.3 * life;
+      float thick = 0.05 + 0.22 * life;
+      // the loop: its front, and its two legs back down to the limb
+      float shell = exp(-pow((r - front) / thick, 2.0)) * exp(-pow(da / spread, 2.0));
+      float legs = exp(-pow((abs(da) - spread * 0.85) / (0.05 + 0.08 * life), 2.0)) * smoothstep(front + thick, front - thick * 2.0, r) * smoothstep(1.0, 1.15, r);
+      float cme = max(shell, legs * 0.7) * (0.6 + 0.4 * noise2(vec2(da * 9.0, r * 4.0 - uTime * 0.15)));
+      glow += cme * 0.32 * sin(life * 3.14159) * (1.0 - smoothstep(uHalf * 0.6, uHalf * 0.95, r));
+    }
   }
 
   /* the glowing gas of the prominences */

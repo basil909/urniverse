@@ -34,6 +34,7 @@ import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import { FinitePass } from './finitePass'
 import { SunRaysEffect } from './sunRays'
+import { EyeAdaptEffect } from './eyeAdapt'
 import { KM_PER_UNIT as FLIGHT_KM_PER_UNIT } from './flightShip'
 import SpaceStation, { stationShotPose } from './SpaceStation'
 import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
@@ -3109,6 +3110,8 @@ function Scene({
   useEffect(() => () => finite.dispose(), [finite])
   const rays = useMemo(() => new SunRaysEffect(), [])
   useEffect(() => () => rays.dispose(), [rays])
+  const eye = useMemo(() => new EyeAdaptEffect(), [])
+  useEffect(() => () => eye.dispose(), [eye])
   /* beside the Space Station, 418 km over sunlit cloud, the glow of the
      clouds spilled over its thin, dark solar wings and washed them out:
      the glow is softer there, and the exposure a little lower */
@@ -3240,6 +3243,9 @@ function Scene({
         {/* (held a little back, so the Sun's halo and the bright limbs read
             as light, not as a wash of orange over every chapter) */}
         <Bloom ref={bloomRef} intensity={GLOW} luminanceThreshold={0.76} luminanceSmoothing={0.9} mipmapBlur resolutionScale={0.5} />
+
+        {/* the eye adapts to the light (eyeAdapt.ts) */}
+        <primitive object={eye} />
 
         {/* a documentary's colour: navy blacks, cool shade, warm sun */}
         <primitive object={grade} />
