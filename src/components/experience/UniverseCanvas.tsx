@@ -97,23 +97,33 @@ const INTRO_SHIFT = -0.8
    title (on a phone, above the words). Framed afresh only when the
    screen's shape changes. */
 const POSTER_ELEVATION = THREE.MathUtils.degToRad(28)
-const poster = { aspect: 0, position: new THREE.Vector3(-21, 80, 140), target: SYSTEM_OFFSET.clone() }
+type PosterFrame = { aspect: number; position: THREE.Vector3; target: THREE.Vector3 }
+/* where the Sun sits (of the half-width across, of the half-height up)
+   and the room its planets have round it (of the half-width and
+   half-height): on a wide screen and an upright one */
+type PosterPlace = { sunX: number; sunY: number; roomX: number; roomY: number }
+const poster: PosterFrame = { aspect: 0, position: new THREE.Vector3(-21, 80, 140), target: SYSTEM_OFFSET.clone() }
+// the start: right of centre, beside the title (a phone: high, above the words)
+const POSTER_PLACE = {
+  wide: { sunX: 0.3, sunY: 0, roomX: 0.6, roomY: 0.72 },
+  tall: { sunX: 0, sunY: 0, roomX: 0.85, roomY: 0.28 },
+}
+// the return: centred, above the closing words
+const finale: PosterFrame = { aspect: 0, position: new THREE.Vector3(-21, 80, 140), target: SYSTEM_OFFSET.clone() }
+const FINALE_PLACE = {
+  wide: { sunX: 0, sunY: 0.4, roomX: 0.85, roomY: 0.38 },
+  tall: { sunX: 0, sunY: 0, roomX: 0.85, roomY: 0.28 },
+}
 const _pAway = new THREE.Vector3()
 const _pRight = new THREE.Vector3()
 const _pUp = new THREE.Vector3()
 const _pRel = new THREE.Vector3()
 const _pRels = Array.from({ length: 8 }, () => new THREE.Vector3())
-function framePoster(aspect: number, vHalfTan: number, filmShift: number) {
-  if (poster.aspect && Math.abs(aspect - poster.aspect) < 0.05 * aspect) return
-  poster.aspect = aspect
-  const wide = aspect > 1.2
+function framePoster(frame: PosterFrame, places: { wide: PosterPlace; tall: PosterPlace }, aspect: number, vHalfTan: number, filmShift: number) {
+  if (frame.aspect && Math.abs(aspect - frame.aspect) < 0.05 * aspect) return
+  frame.aspect = aspect
+  const { sunX, sunY, roomX, roomY } = aspect > 1.2 ? places.wide : places.tall
   const hHalfTan = vHalfTan * aspect
-  // the Sun's place across the frame (of the half-width), and the room the
-  // planets have round it (of the half-width and half-height)
-  const sunX = wide ? 0.3 : 0
-  const roomX = wide ? 0.6 : 0.85
-  // (on a phone the poster sits high, in the top third, above the words)
-  const roomY = wide ? 0.72 : 0.28
   for (let i = 0; i < 8; i += 1) getPlanetOrbitPosition(i, simClock.jd, _pRels[i])
   const up = _worldUp
   let best = Infinity
@@ -137,10 +147,14 @@ function framePoster(aspect: number, vHalfTan: number, filmShift: number) {
   const distance = THREE.MathUtils.clamp(best, 55, 200)
   _pAway.set(Math.sin(bestTurn) * Math.cos(POSTER_ELEVATION), Math.sin(POSTER_ELEVATION), Math.cos(bestTurn) * Math.cos(POSTER_ELEVATION))
   _pRight.crossVectors(_pRel.copy(_pAway).negate(), up).normalize()
-  poster.position.copy(SYSTEM_OFFSET).addScaledVector(_pAway, distance)
-  // looking a little to the left of the Sun puts it right of centre (the
-  // lens shift does part of it already)
-  poster.target.copy(SYSTEM_OFFSET).addScaledVector(_pRight, -(sunX - filmShift) * distance * hHalfTan)
+  _pUp.crossVectors(_pRight, _pRel).normalize()
+  frame.position.copy(SYSTEM_OFFSET).addScaledVector(_pAway, distance)
+  // looking a little aside of the Sun (and below it) puts it where it is
+  // wanted (the lens shift does part of it already)
+  frame.target
+    .copy(SYSTEM_OFFSET)
+    .addScaledVector(_pRight, -(sunX - filmShift) * distance * hHalfTan)
+    .addScaledVector(_pUp, -sunY * distance * vHalfTan)
 }
 const INTRO = poster
 const SUN = {
@@ -179,10 +193,8 @@ const GALAXY_VIEW = (() => {
   }
 })()
 
-const RETURN = {
-  position: new THREE.Vector3(4, 3.2, 9),
-  target: SYSTEM_OFFSET.clone().add(new THREE.Vector3(0, -2.6, 0)),
-}
+// the return: the whole Solar System again, as at the start (finale)
+const RETURN = finale
 
 /* ============================================================
    MODULE-LEVEL SCRATCH VECTORS
@@ -1262,12 +1274,13 @@ function CinematicCamera({
     /* the start's poster of the whole Solar System: full at the start,
        easing away on the way in to the Sun (and the fog, which fades the
        far views, pushed back while it lasts) */
-    framePoster(
-      camera.aspect,
-      Math.tan(THREE.MathUtils.degToRad(fovFor(0)) / 2) * Math.max(1, 0.75 / Math.max(camera.aspect, 0.42)),
-      camera.aspect > 1.2 ? -INTRO_SHIFT * 0.15 : 0,
-    )
-    const posterAim = opening.active ? 0 : 1 - THREE.MathUtils.smoothstep(safeProgress, 1, 1 + BLEND)
+    const posterHalfTan = Math.tan(THREE.MathUtils.degToRad(fovFor(0)) / 2) * Math.max(1, 0.75 / Math.max(camera.aspect, 0.42))
+    framePoster(poster, POSTER_PLACE, camera.aspect, posterHalfTan, camera.aspect > 1.2 ? -INTRO_SHIFT * 0.15 : 0)
+    framePoster(finale, FINALE_PLACE, camera.aspect, posterHalfTan, 0)
+    // (and the same again at the end, looking back)
+    const posterAim = opening.active
+      ? 0
+      : 1 - THREE.MathUtils.smoothstep(safeProgress, 1, 1 + BLEND) + THREE.MathUtils.smoothstep(safeProgress, 13, 13 + BLEND)
     lens.poster += (posterAim - lens.poster) * (1 - Math.exp(-delta * 4))
     if (scene.fog instanceof THREE.Fog) {
       scene.fog.near = THREE.MathUtils.lerp(40, 230, lens.poster)
