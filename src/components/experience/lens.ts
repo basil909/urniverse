@@ -7,6 +7,10 @@ export const lens = {
   backlit: 0,
   /* the journey's chapter (0 the opening, 1 the Sun, 2-9 the planets...) */
   chapter: 0,
+  /* 0..1: the start's "poster" of the whole Solar System (the camera far
+     out, the Sun drawn larger and every planet sized to be seen), easing
+     away on the way in to the Sun */
+  poster: 0,
   /* true once the loading screen starts to lift: the opening sweep waits for it */
   revealed: false,
   /* true once the loading's shaders have all compiled (UniverseCanvas's

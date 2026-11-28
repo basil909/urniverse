@@ -2292,7 +2292,8 @@ function Sun() {
     // flying, at true scale: 109 Earths wide, drawn nearer when far
     const group = sunGroup.current
     if (group) {
-      let size = 1
+      // (on the start's poster, larger: the planets' star)
+      let size = THREE.MathUtils.lerp(1, SUN_POSTER, lens.poster)
       group.position.copy(SYSTEM_BASE)
       if (layout.trueScale) {
         const far = farScale(SYSTEM_OFFSET.distanceTo(camera.position))
@@ -2925,6 +2926,14 @@ function RimRays({
    PLANET
 ============================================================ */
 
+/* the start's poster of the whole Solar System (lens.poster): the Sun
+   drawn larger (it stays inside Mercury's orbit, 3.9 out on this map),
+   and each planet a size to be seen from far out, in their true order
+   but all below the Sun (on the journey's map Jupiter, at its true size,
+   is two and a half times the Sun's radius, which is drawn small) */
+const SUN_POSTER = 2.6
+const POSTER_RADIUS = [0.26, 0.33, 0.35, 0.3, 1.7, 1.45, 0.95, 0.92]
+
 function Planet({
   planet,
   index,
@@ -3399,6 +3408,8 @@ function Planet({
       ? 0.0001
       : sunFocus
       ? 0.35
+      : subject < 0 && lens.poster > 0.001
+      ? THREE.MathUtils.lerp(1, POSTER_RADIUS[index] / getPlanetVisualRadius(index), lens.poster)
       : subject < 0 || subject === index
         ? 1
         : 0.04 // a point of light, like a planet seen from another planet

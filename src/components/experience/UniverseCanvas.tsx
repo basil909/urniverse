@@ -52,6 +52,7 @@ import { lowView, pilot } from './pilotState'
 import {
   PLANETS,
   SYSTEM_OFFSET,
+  getPlanetOrbitPosition,
   getPlanetPosition,
   getPlanetVisualRadius,
 } from './orbit'
@@ -89,10 +90,59 @@ const PLANET_CONFIG: PlanetConfig[] = [
 // Slightly above the orbital plane, system framed on the right of the screen
 /* the start's lens shift (of the planet chapters' shift, the other way) */
 const INTRO_SHIFT = -0.8
-const INTRO = {
-  position: new THREE.Vector3(-2, 11, 22),
-  target: new THREE.Vector3(-4.5, -1.5, -8),
+/* the start: the whole Solar System, as a poster of it. Raised, so the
+   orbits open out; and turned round the Sun to where today's planets fit
+   closest (the outer ones along the line of sight, where the tilt
+   foreshortens their orbits), as near as they all still fit beside the
+   title (on a phone, above the words). Framed afresh only when the
+   screen's shape changes. */
+const POSTER_ELEVATION = THREE.MathUtils.degToRad(28)
+const poster = { aspect: 0, position: new THREE.Vector3(-21, 80, 140), target: SYSTEM_OFFSET.clone() }
+const _pAway = new THREE.Vector3()
+const _pRight = new THREE.Vector3()
+const _pUp = new THREE.Vector3()
+const _pRel = new THREE.Vector3()
+const _pRels = Array.from({ length: 8 }, () => new THREE.Vector3())
+function framePoster(aspect: number, vHalfTan: number, filmShift: number) {
+  if (poster.aspect && Math.abs(aspect - poster.aspect) < 0.05 * aspect) return
+  poster.aspect = aspect
+  const wide = aspect > 1.2
+  const hHalfTan = vHalfTan * aspect
+  // the Sun's place across the frame (of the half-width), and the room the
+  // planets have round it (of the half-width and half-height)
+  const sunX = wide ? 0.3 : 0
+  const roomX = wide ? 0.6 : 0.85
+  // (on a phone the poster sits high, in the top third, above the words)
+  const roomY = wide ? 0.72 : 0.28
+  for (let i = 0; i < 8; i += 1) getPlanetOrbitPosition(i, simClock.jd, _pRels[i])
+  const up = _worldUp
+  let best = Infinity
+  let bestTurn = 0
+  for (let k = 0; k < 72; k += 1) {
+    const turn = (k / 72) * Math.PI * 2
+    _pAway.set(Math.sin(turn) * Math.cos(POSTER_ELEVATION), Math.sin(POSTER_ELEVATION), Math.cos(turn) * Math.cos(POSTER_ELEVATION))
+    _pRight.crossVectors(_pRel.copy(_pAway).negate(), up).normalize()
+    _pUp.crossVectors(_pRight, _pRel).normalize()
+    let need = 0
+    for (let i = 0; i < 8; i += 1) {
+      const x = Math.abs(_pRels[i].dot(_pRight)) + 1.5
+      const y = Math.abs(_pRels[i].dot(_pUp)) + 1.5
+      need = Math.max(need, x / (roomX * hHalfTan), y / (roomY * vHalfTan))
+    }
+    if (need < best) {
+      best = need
+      bestTurn = turn
+    }
+  }
+  const distance = THREE.MathUtils.clamp(best, 55, 200)
+  _pAway.set(Math.sin(bestTurn) * Math.cos(POSTER_ELEVATION), Math.sin(POSTER_ELEVATION), Math.cos(bestTurn) * Math.cos(POSTER_ELEVATION))
+  _pRight.crossVectors(_pRel.copy(_pAway).negate(), up).normalize()
+  poster.position.copy(SYSTEM_OFFSET).addScaledVector(_pAway, distance)
+  // looking a little to the left of the Sun puts it right of centre (the
+  // lens shift does part of it already)
+  poster.target.copy(SYSTEM_OFFSET).addScaledVector(_pRight, -(sunX - filmShift) * distance * hHalfTan)
 }
+const INTRO = poster
 const SUN = {
   position: new THREE.Vector3(0, 0.7, 5.2),
   target: SYSTEM_OFFSET.clone(),
@@ -1108,6 +1158,7 @@ function sequencePose(
    and a planet's (whose words take the lower half of the screen) */
 const PORTRAIT_SHIFT = 0.17
 const PORTRAIT_PLANET_SHIFT = 0.3
+const PORTRAIT_POSTER_SHIFT = 0.31
 
 function CinematicCamera({
   progressRef,
@@ -1117,6 +1168,7 @@ function CinematicCamera({
   const { camera: baseCamera, pointer } = useThree()
   const camera = baseCamera as THREE.PerspectiveCamera
   const size = useThree((state) => state.size)
+  const scene = useThree((state) => state.scene)
 
   // a phone held upright: the frame is shifted so the subject sits above
   // the words at the foot of the screen (a planet further up than the
@@ -1171,6 +1223,7 @@ function CinematicCamera({
   useFrame((_, delta) => {
     // flying the jet: the jet's camera has the controls
     if (pilot.active) {
+      lens.poster = 0
       piloting.current = true
       if (camera.filmOffset !== 0) {
         camera.filmOffset = 0
@@ -1205,6 +1258,21 @@ function CinematicCamera({
     )
 
     const planet = isPlanetChapter(chapter)
+
+    /* the start's poster of the whole Solar System: full at the start,
+       easing away on the way in to the Sun (and the fog, which fades the
+       far views, pushed back while it lasts) */
+    framePoster(
+      camera.aspect,
+      Math.tan(THREE.MathUtils.degToRad(fovFor(0)) / 2) * Math.max(1, 0.75 / Math.max(camera.aspect, 0.42)),
+      camera.aspect > 1.2 ? -INTRO_SHIFT * 0.15 : 0,
+    )
+    const posterAim = opening.active ? 0 : 1 - THREE.MathUtils.smoothstep(safeProgress, 1, 1 + BLEND)
+    lens.poster += (posterAim - lens.poster) * (1 - Math.exp(-delta * 4))
+    if (scene.fog instanceof THREE.Fog) {
+      scene.fog.near = THREE.MathUtils.lerp(40, 230, lens.poster)
+      scene.fog.far = THREE.MathUtils.lerp(190, 520, lens.poster)
+    }
 
     // (a phone held upright is narrow: there the backlit drift is chosen as
     // for a landscape screen, else it swung round almost to the anti-Sun
@@ -1662,7 +1730,11 @@ function CinematicCamera({
 
     if (portrait) {
       const shift = viewShift.current
-      shift.aim = planet && local >= BLEND && revealBlend.current === 0 && !shotHere && !seqActive ? PORTRAIT_PLANET_SHIFT : PORTRAIT_SHIFT
+      shift.aim = planet && local >= BLEND && revealBlend.current === 0 && !shotHere && !seqActive
+        ? PORTRAIT_PLANET_SHIFT
+        : lens.poster > 0.5
+          ? PORTRAIT_POSTER_SHIFT
+          : PORTRAIT_SHIFT
       const before = shift.now
       shift.now = before < 0 ? shift.aim : before + (shift.aim - before) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
       if (Math.abs(shift.now - before) > 1e-4) {
