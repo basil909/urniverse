@@ -191,7 +191,9 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
         float broken = 0.5;
         float ampC = 0.5;
         float fC = 1.0;
-        for (int k = 0; k < 5; k++) {
+        // (a loop kept as a loop: Direct3D unrolls a fixed count, and this
+        // shader then took minutes to compile on Windows, the page black)
+        for (int k = 0; k < 5 + uDyn; k++) {
           float seenC = 1.0 - smoothstep(0.25, 0.9, pixC * 160.0 * fC);
           broken += (cdNoise(qc * fC + float(k) * 3.7) - 0.5) * ampC * seenC;
           ampC *= 0.42;
@@ -2321,7 +2323,7 @@ void main() {
   float r = length(q) * 2.0;
   float glow = pow(max(1.0 - r, 0.0), 4.0) * 0.55 + exp(-r * 22.0) * 3.0;
   /* the Sun breaking over a planet's limb: a starburst of rays */
-  float angle = atan(q.y, q.x);
+  float angle = atan(q.y, q.x + 1e-7);
   float rays = pow(abs(cos(angle * 3.0)), 60.0) + pow(abs(cos(angle * 3.0 + 0.52)), 140.0) * 0.6;
   glow += uBurst * rays * exp(-r * 3.2) * 2.2 + uBurst * exp(-r * 6.0) * 1.2;
   vec3 color = mix(vec3(1.0, 0.74, 0.48), vec3(1.0, 0.97, 0.92), exp(-r * 9.0));
@@ -2493,7 +2495,7 @@ float prominences(float r, float a) {
     q.x += q.y * (hash1(seed + 3.0) - 0.5) * 1.2;
     q += (vec2(noise2(q * 2.3 + seed + uTime * 0.05), noise2(q * 2.3 - seed)) - 0.5) * 0.35;
     float e = length(q);
-    float along = atan(q.y, q.x);
+    float along = atan(q.y, q.x + 1e-7);
     float threads = pow(noise2(vec2(along * 11.0 + seed, uTime * 0.1 + e * 6.0)), 1.6)
       * (0.6 + 0.4 * noise2(vec2(along * 3.0 - seed, uTime * 0.04)));
     float arch = 1.0 - smoothstep(0.0, 0.11, abs(e - 1.0));
@@ -2507,7 +2509,10 @@ float prominences(float r, float a) {
 void main() {
   vec2 c = vUv * 2.0 - 1.0;
   float r = length(c) * uHalf; // distance from the centre, in Sun radii
-  float a = atan(c.y, c.x);
+  /* (+1e-7: at the very centre atan(0, 0) is undefined, and on Windows it
+     came out NaN; the glow spread that one pixel over the whole frame,
+     and the Sun's and Earth's chapters went black) */
+  float a = atan(c.y, c.x + 1e-7);
   float t = uTime * 0.04;
 
   /* faint streamers, smooth in angle (strong low-order lobes read as a
@@ -2750,7 +2755,7 @@ void main() {
   float above = length(vec2(c.x - along * uPole.x, c.y - along * uPole.y) + uPole * along / uPolar) - 1.0;
   if (above < 0.0) discard;
   vec2 radial = c / r;
-  float a = atan(c.y, c.x);
+  float a = atan(c.y, c.x + 1e-7);
   /* stronger towards the Sun, a faint ring all round */
   float sunward = pow(max(dot(radial, uSun), 0.0), 2.0);
   float weight = 0.06 + 0.94 * sunward;
