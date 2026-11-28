@@ -32,6 +32,9 @@ export const sequence = {
   chapter: -1,
   /** set by the page to end it at once (Skip, Esc) */
   skip: false,
+  /** a chapter picked from the menu, several away: its arrival is played
+      at Skip's pace (the visitor asked to be there), or -1 */
+  hurryTo: -1,
 }
 export const SEQUENCE_EVENT = 'urniverse-sequence'
 

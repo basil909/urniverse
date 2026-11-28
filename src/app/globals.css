@@ -129,6 +129,40 @@ a:focus-visible {
   border: 0;
 }
 
+/* The skip link: hidden until the keyboard reaches it (first), then a
+   quiet pill at the top left, just under the bar */
+.skip-link {
+  position: fixed;
+  top: calc(18px + var(--control-height) + 12px);
+  left: var(--pad);
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height);
+  padding: 0 16px;
+  border: 1px solid var(--surface-edge-hover);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  -webkit-backdrop-filter: var(--surface-blur);
+  backdrop-filter: var(--surface-blur);
+  font: 500 13.5px / 1 var(--sans);
+  color: var(--text-1);
+  text-decoration: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity 0.25s, transform 0.3s var(--ease);
+}
+.skip-link:focus-visible {
+  border-radius: 999px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  outline: 1.5px solid var(--planet-accent);
+  outline-offset: 3px;
+}
+#chapter:focus { outline: none; }
+
 /* ============================================================
    SCENE LAYERS
    ============================================================ */
@@ -4820,4 +4854,18 @@ html.is-photo .landed-card { opacity: 0; pointer-events: none; }
 @media (max-width: 640px) {
   .walk-stick { bottom: 92px; }
   .flight-touch-land.walk-board { bottom: 220px; }
+}
+
+/* ---- the narrowest touch screens: the top bar's round buttons stay 40px
+   to the eye (so the chapter's name still fits), but each answers a
+   finger over a full 44px (where two meet, in the 2px between them, the
+   tap goes to one of the two) ---- */
+@media (max-width: 420px) and (pointer: coarse) {
+  .tool-button { position: relative; }
+  .tool-button::before {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+  }
 }

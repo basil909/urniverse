@@ -2,7 +2,7 @@
 
 
 
-import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
 
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import Lenis from 'lenis'
@@ -871,6 +871,8 @@ export default function Journey() {
 
       snapping = true
       glideTargetRef.current = Math.abs(target - lastRest) > 1 ? target : null
+      // (a jump of several chapters: there quickly, the arrival shot sped up)
+      sequence.hurryTo = glideTargetRef.current ?? -1
       lenis.scrollTo(to * unit(), {
         // the pull-backs (the Pale Blue Dot to the galaxy, the galaxy to the
         // Local Group, and home again) take their time
@@ -1099,6 +1101,14 @@ export default function Journey() {
   }
 
   const scrollToStart = () => goToSection(1)
+  // the skip link: focus the chapter's first button (or the words, while
+  // the camera is still on its way), without scrolling the journey
+  const skipToChapter = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault()
+    const stage = document.getElementById('chapter')
+    const first = stage?.querySelector<HTMLElement>('button, a[href]')
+    ;(first ?? stage)?.focus({ preventScroll: true })
+  }
 
   /* A link to a chapter (…/#saturn): once the loading screen has lifted,
      go straight there. After that the address follows the journey, and
@@ -1857,6 +1867,11 @@ export default function Journey() {
         } as CSSProperties
       }
     >
+      {/* the first stop for the keyboard: past the 3D view's worlds, the bar
+          and the rail, straight to the chapter's own words and buttons */}
+      <a href="#chapter" className="skip-link" onClick={skipToChapter}>
+        Skip to the chapter
+      </a>
       <div className="universe-canvas">
         <UniverseCanvas progressRef={progressRef} />
       </div>
@@ -2289,7 +2304,7 @@ export default function Journey() {
       </div>
 
       {/* PINNED STAGE: text stays put and swaps only once the camera has arrived */}
-      <div className={`stage stage-${stageKind}`}>
+      <div id="chapter" tabIndex={-1} className={`stage stage-${stageKind}`}>
         <AnimatePresence mode="wait">
           {textShown && section === 0 && !openingOn && (
             <motion.div

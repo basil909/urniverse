@@ -170,6 +170,7 @@ const HERO_BACKLIT = new Set([1, 2, 5]) // Venus, Earth, Saturn
 /* half the horizontal field of view, kept current by the camera, so the
    backlit angle can be chosen to keep the Sun's disc just out of frame */
 const view = { halfWidthAngle: 0.5 }
+const LANDSCAPE_ASPECT = 1.6
 const SUN_RADIUS = 1
 
 /* Most backlit camera angle (measured from the anti-Sun direction, as seen
@@ -1096,6 +1097,11 @@ function sequencePose(
    CAMERA CONTROLLER
 ============================================================ */
 
+/* how far up a phone's frame is shifted (of its height): most chapters,
+   and a planet's (whose words take the lower half of the screen) */
+const PORTRAIT_SHIFT = 0.17
+const PORTRAIT_PLANET_SHIFT = 0.3
+
 function CinematicCamera({
   progressRef,
 }: {
@@ -1105,21 +1111,19 @@ function CinematicCamera({
   const camera = baseCamera as THREE.PerspectiveCamera
   const size = useThree((state) => state.size)
 
+  // a phone held upright: the frame is shifted so the subject sits above
+  // the words at the foot of the screen (a planet further up than the
+  // rest, clear of its chapter's text); eased as the chapters change
+  const portrait = size.width < 760 && size.height > size.width
+  const viewShift = useRef({ now: -1, aim: PORTRAIT_SHIFT })
   useEffect(() => {
-    if (size.width < 760 && size.height > size.width) {
-      camera.setViewOffset(
-        size.width,
-        size.height,
-        0,
-        size.height * 0.17,
-        size.width,
-        size.height,
-      )
+    if (portrait) {
+      viewShift.current.now = -1 // set afresh at the next frame
     } else {
       camera.clearViewOffset()
+      camera.updateProjectionMatrix()
     }
-    camera.updateProjectionMatrix()
-  }, [camera, size.width, size.height])
+  }, [camera, portrait, size.width, size.height])
   const initialized = useRef(false)
   // the opening entrance: starts as the loading screen lifts
   const entranceClock = useRef(-1)
@@ -1195,8 +1199,14 @@ function CinematicCamera({
 
     const planet = isPlanetChapter(chapter)
 
+    // (a phone held upright is narrow: there the backlit drift is chosen as
+    // for a landscape screen, else it swung round almost to the anti-Sun
+    // side and a planet showed only its night side, black on black)
     view.halfWidthAngle = Math.atan(
-      Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect,
+      Math.max(
+        Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect,
+        Math.tan(THREE.MathUtils.degToRad(fovFor(chapter)) / 2) * LANDSCAPE_ASPECT,
+      ),
     )
 
     // backlit hero drift: reset on entering a chapter, advance once arrived
@@ -1221,7 +1231,9 @@ function CinematicCamera({
     if (canDirect && !seqArmed.current && !seqDone.current && chapter > 0 && local < BLEND) {
       seqArmed.current = true
       sequence.chapter = chapter
-      sequence.skip = false
+      // (the chapters passed on the way arm and end theirs as they go by)
+      sequence.skip = sequence.hurryTo === chapter
+      if (sequence.skip) sequence.hurryTo = -1
       window.dispatchEvent(new CustomEvent(SEQUENCE_EVENT, { detail: { chapter, on: true } }))
     }
     if (seqArmed.current && !seqDone.current && !canDirect) endSequence()
@@ -1629,6 +1641,17 @@ function CinematicCamera({
       const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect
       camera.filmOffset = lensShift.current < 1e-4 ? 0 : lensShift.current * 0.15 * camera.getFilmWidth() * halfWidth
       camera.updateProjectionMatrix()
+    }
+
+    if (portrait) {
+      const shift = viewShift.current
+      shift.aim = planet && local >= BLEND && revealBlend.current === 0 && !shotHere && !seqActive ? PORTRAIT_PLANET_SHIFT : PORTRAIT_SHIFT
+      const before = shift.now
+      shift.now = before < 0 ? shift.aim : before + (shift.aim - before) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
+      if (Math.abs(shift.now - before) > 1e-4) {
+        camera.setViewOffset(size.width, size.height, 0, size.height * shift.now, size.width, size.height)
+        camera.updateProjectionMatrix()
+      }
     }
 
     // breathe: open the field of view a little with speed, settle on arrival
