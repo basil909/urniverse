@@ -33,6 +33,7 @@ import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import { FinitePass } from './finitePass'
 import { SunRaysEffect } from './sunRays'
+import { KM_PER_UNIT as FLIGHT_KM_PER_UNIT } from './flightShip'
 import SpaceStation, { stationShotPose } from './SpaceStation'
 import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
 import { dive, divePose } from './galaxyDive'
@@ -2490,6 +2491,8 @@ void main() {
 const SKY_FRAGMENT = /* glsl */ `
 uniform sampler2D uMap;
 uniform float uIntensity;
+uniform vec3 uSunDir;
+uniform float uZodiac;
 varying vec3 vDirection;
 const float PI = 3.141592653589793;
 const float EPS = 0.40909280; // obliquity of the ecliptic (J2000), radians
@@ -2565,6 +2568,26 @@ void main() {
   float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 0.5 + starClouds * 0.6) * (1.0 - rift * 0.85);
   sky = sky * (1.0 - rift * 0.6 * band) + tint * glow * 0.018;
 
+  /* the zodiacal light: sunlight scattered by the dust between the
+     planets, which lies in their plane. A band along the ecliptic through
+     the Sun, wide and bright near it, narrowing and fading away from it;
+     and opposite the Sun the faint gegenschein. (The band is taken along
+     the great circle through the Sun that lies flattest to the ecliptic,
+     so from above the plane it still leans through the Sun.) Lost in the
+     corona close to the Sun; none far out, where the dust thins away. */
+  if (uZodiac > 0.0) {
+    vec3 s = normalize(uSunDir);
+    vec3 across = cross(vec3(0.0, 1.0, 0.0), s);
+    vec3 axis = length(across) > 1e-4 ? normalize(cross(s, normalize(across))) : vec3(1.0, 0.0, 0.0);
+    float beta = asin(clamp(dot(d, axis), -1.0, 1.0));
+    float elong = acos(clamp(dot(d, s), -1.0, 1.0));
+    float halfWidth = mix(0.05, 0.2, exp(-elong / 0.5));
+    float zodiac = exp(-pow(beta / halfWidth, 2.0))
+      * (0.04 + exp(-elong / 0.3) + 0.2 * exp(-elong / 1.1));
+    zodiac *= smoothstep(0.07, 0.3, elong);
+    float gegen = exp(-pow((PI - elong) / 0.16, 2.0)) * exp(-pow(beta / 0.12, 2.0)) * 0.1;
+    sky += vec3(1.0, 0.92, 0.8) * (zodiac + gegen) * uZodiac * 0.009;
+  }
   gl_FragColor = vec4(sky * uIntensity, 1.0);
 }`
 
@@ -2583,6 +2606,8 @@ function MilkyWaySky({
         uniforms: {
           uMap: { value: null as THREE.Texture | null },
           uIntensity: { value: 0 },
+          uSunDir: { value: new THREE.Vector3(1, 0, 0) },
+          uZodiac: { value: 0 },
         },
         vertexShader: SKY_VERTEX,
         fragmentShader: SKY_FRAGMENT,
@@ -2623,6 +2648,18 @@ function MilkyWaySky({
     const target = material.uniforms.uMap.value ? (chapter === 11 || chapter === 12 ? 0.15 : SKY_BRIGHTNESS) : 0
     const u = material.uniforms.uIntensity
     u.value += (target - u.value) * (1 - Math.exp(-delta * 2))
+    /* the zodiacal light: as strong as the dust is thick where we are
+       (inside about 3 AU; gone by Saturn); none in the finale */
+    material.uniforms.uSunDir.value.copy(SYSTEM_OFFSET).sub(camera.position)
+    let dust: number
+    if (pilot.active) {
+      const au = camera.position.distanceTo(SYSTEM_OFFSET) * FLIGHT_KM_PER_UNIT / 1.496e8
+      dust = 1 - THREE.MathUtils.smoothstep(au, 2, 9)
+    } else {
+      dust = chapter <= 5 ? 1 : chapter === 6 ? 0.55 : chapter === 7 ? 0.25 : chapter <= 9 ? 0.1 : 0
+    }
+    const z = material.uniforms.uZodiac
+    z.value += (dust - z.value) * (1 - Math.exp(-delta * 1.5))
   })
 
   return (
