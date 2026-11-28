@@ -1713,9 +1713,9 @@ vec3 neptuneWeather(vec3 base, vec2 uv) {
   /* high methane cirrus: thin white streaks in two mid-latitude bands */
   float belt = exp(-pow((abs(lat) - 0.5) / 0.12, 2.0)) + 0.6 * exp(-pow((lat + 1.05) / 0.08, 2.0));
   /* short, soft wisps rather than long lines: stretched noise, broken up */
-  float streak = smoothstep(0.58, 0.78, fbm(vec3(uv.x * 22.0 - uTime * 0.012, lat * 26.0, 1.7)));
-  streak *= smoothstep(0.45, 0.7, noise(vec3(uv.x * 9.0 + 3.1, lat * 4.0, uTime * 0.01)));
-  float white = max(companion * 0.9, streak * belt * 0.6);
+  float streak = smoothstep(0.53, 0.75, fbm(vec3(uv.x * 22.0 - uTime * 0.012, lat * 26.0, 1.7)));
+  streak *= smoothstep(0.4, 0.68, noise(vec3(uv.x * 9.0 + 3.1, lat * 4.0, uTime * 0.01)));
+  float white = max(companion * 0.95, streak * belt * 0.85);
   return mix(base, vec3(0.92, 0.96, 1.0), white);
 }
 #endif
@@ -1760,9 +1760,12 @@ vec3 saturnPole(vec3 base, vec2 uv) {
 #if PLANET == 6
 vec3 uranusWeather(vec3 base, vec2 uv) {
   float lat = (uv.y - 0.5) * 3.14159;
-  /* faint banding and a bright cap over the sunward (north) pole */
-  base *= 0.94 + 0.06 * sin(lat * 14.0 + 0.6);
-  base = mix(base, vec3(0.86, 0.97, 0.97), smoothstep(0.85, 1.35, lat) * 0.45);
+  /* faint banding and a bright cap over the sunward (north) pole, with
+     the darker collar round it (as Keck and JWST see it) */
+  base *= 0.91 + 0.09 * sin(lat * 14.0 + 0.6);
+  base = mix(base, vec3(0.88, 0.98, 0.98), smoothstep(0.85, 1.3, lat) * 0.6);
+  base *= 1.0 - 0.1 * exp(-pow((lat - 0.82) / 0.07, 2.0));
+  base = mix(base, base * 1.08, exp(-pow((lat + 0.35) / 0.1, 2.0)));
   /* a few small bright storms drifting with the winds */
   float storms = 0.0;
   for (int i = 0; i < 3; i++) {
@@ -1933,6 +1936,13 @@ void main() {
          contrast-enhanced Voyager images; the planet is a pale azure */
       float lum = dot(surface, vec3(0.299, 0.587, 0.114));
       surface = mix(surface, vec3(0.62, 0.8, 0.9) * (0.55 + lum * 0.8), 0.7);
+      /* its banding, faint but there: broad zones of slightly darker and
+         lighter blue, and the south polar region dimmer, ringed by a
+         brighter band (as Voyager and Hubble show it) */
+      float latN = (vUv.y - 0.5) * 3.14159;
+      surface *= 0.89 + 0.11 * (0.5 + 0.5 * sin(latN * 7.0 + 1.1 + 0.25 * noise(vec3(vUv * vec2(4.0, 2.0), 2.0))));
+      surface *= 1.0 - 0.16 * (1.0 - smoothstep(-1.35, -0.95, latN));
+      surface = mix(surface, surface * 1.18, exp(-pow((latN + 1.15) / 0.06, 2.0)));
       surface = neptuneWeather(surface, vUv);
     }
 #elif PLANET == 6
@@ -4471,6 +4481,7 @@ uniform vec3 uPlanetCenter;
 uniform float uPlanetRadius;
 uniform float uTime;
 uniform float uLocalRadius;
+uniform float uSpokeAt;
 varying vec2 vUv;
 varying vec3 vWorld;
 varying vec3 vRingNormal;
@@ -4531,6 +4542,36 @@ void main() {
   float through = (1.0 - ring.a) * 1.7 + 0.08;
   vec3 color = ring.rgb * uTint * lit * glow * mix(1.0, through, unlitFace);
 
+  /* the opposition surge: with the Sun right behind you, the ice
+     particles hide their own shadows and the rings brighten sharply
+     (steeply within a few degrees, gently out to some fifteen) */
+  float phase = acos(clamp(dot(toSun, toCamera), -1.0, 1.0));
+  color *= 1.0 + (0.55 * exp(-phase / 0.05) + 0.22 * exp(-phase / 0.26)) * (1.0 - unlitFace);
+
+  /* spokes: faint radial wedges over the B ring, as Voyager and Cassini
+     saw them, a cluster of them on one side, leaning as the ring shears
+     them, drifting round with it, each lasting some half a minute here.
+     Dark seen from the lit side, bright with the light behind them. */
+  if (rr > 1.55 && rr < 1.92) {
+    float theta = atan(vLocal.y, vLocal.x);
+    float sector = uSpokeAt + 0.12 * sin(uTime * 0.02);
+    float spokes = 0.0;
+    for (int k = 0; k < 6; k++) {
+      float fk = float(k);
+      float at = sector + (fk - 2.5) * 0.09 + (ringHash(vec2(fk, 3.0)) - 0.5) * 0.05;
+      float life = fract(uTime / (28.0 + fk * 3.0) + ringHash(vec2(fk, 7.0)));
+      float alive = sin(life * 3.14159);
+      float centre = mix(1.62, 1.8, ringHash(vec2(fk, 11.0)));
+      float reach = mix(0.07, 0.13, ringHash(vec2(fk, 13.0)));
+      float lean = (rr - centre) * 0.35;
+      float d = mod(theta - at - lean + 3.14159, 6.28318) - 3.14159;
+      float wedge = exp(-pow(d / (0.016 + 0.035 * abs(rr - centre)), 2.0));
+      spokes += wedge * exp(-pow((rr - centre) / reach, 2.0)) * alive;
+    }
+    spokes = clamp(spokes, 0.0, 1.0);
+    color *= 1.0 - 0.5 * spokes * (1.0 - forward) + 0.9 * spokes * forward;
+  }
+
   /* glitter: now and then a single ice grain catches the Sun */
   vec2 cell = floor(vLocal * 900.0);
   float flick = floor(uTime * 3.0 + ringHash(cell) * 50.0);
@@ -4543,6 +4584,7 @@ void main() {
 type RingShadowUniforms = { uRingMap: { value: THREE.Texture | null }; uSunPosition?: { value: THREE.Vector3 } }
 
 const _ringScale = new THREE.Vector3()
+const _spokeSun = new THREE.Vector3()
 
 function SaturnRing({
   radius,
@@ -4560,6 +4602,7 @@ function SaturnRing({
   })
   const baseRing = useRef<THREE.Texture | null>(null)
   const ringMesh = useRef<THREE.Mesh>(null)
+  const camera = useThree((state) => state.camera)
   const inner = radius * SATURN_D_RING_INNER
   const outer = radius * SATURN_RING_OUTER
 
@@ -4592,6 +4635,7 @@ function SaturnRing({
           uPlanetCenter: { value: new THREE.Vector3() },
           uPlanetRadius: { value: radius },
           uLocalRadius: { value: radius },
+          uSpokeAt: { value: 0 },
           uTime: { value: 0 },
         },
         vertexShader: RING_VERTEX,
@@ -4655,6 +4699,17 @@ function SaturnRing({
     mesh.getWorldScale(_ringScale)
     material.uniforms.uPlanetRadius.value = radius * _ringScale.x
     mesh.visible = material.uniforms.uMap.value !== null
+    // the spokes: on the tip of the rings (as seen from here) nearer the
+    // morning side, a quarter turn from the Sun, where the ring comes out
+    // of Saturn's shadow and spokes are mostly seen
+    _spokeSun.copy(material.uniforms.uSunPosition.value)
+    mesh.worldToLocal(_spokeSun)
+    const morning = Math.atan2(_spokeSun.y, _spokeSun.x) - Math.PI / 2
+    _spokeSun.copy(camera.position)
+    mesh.worldToLocal(_spokeSun)
+    const seen = Math.atan2(_spokeSun.y, _spokeSun.x)
+    const apart = (a: number) => Math.abs(Math.atan2(Math.sin(a - morning), Math.cos(a - morning)))
+    material.uniforms.uSpokeAt.value = apart(seen + Math.PI / 2) < apart(seen - Math.PI / 2) ? seen + Math.PI / 2 : seen - Math.PI / 2
   })
 
   return (
@@ -4844,8 +4899,11 @@ const FAINT_RINGS: Record<string, { bands: RingBand[]; color: string; arcs?: num
   },
   // 6, 5, 4, alpha, beta, eta, gamma, delta, epsilon (narrow, dark), and
   // the faint dusty nu and mu rings far out
+  // (the narrow rings are made of very dark material, a few percent of
+  // the light reflected: dense enough to show dark against the planet,
+  // faint against space, never the bright hoops they were drawn as)
   Uranus: {
-    color: '#9aa4a6',
+    color: '#3c4142',
     bands: [
       [1.637, 1.641, 0.22, 0],
       [1.652, 1.656, 0.22, 0],
