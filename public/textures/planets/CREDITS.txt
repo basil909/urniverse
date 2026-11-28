@@ -48,3 +48,17 @@ Galilean moon surfaces - public domain, USGS Astrogeology, downloaded 2026-11-10
 - public/textures/moons/europa.webp, ganymede.webp, callisto.webp: Voyager /
   Galileo SSI global mosaics (greyscale), no-data gaps filled and tinted to
   each moon's colour.
+
+Phobos, Deimos and Titan surfaces - downloaded 2026-11-28, resampled to
+1024 x 512, unlit / unmapped gaps filled from the surface around them, and
+tinted to each moon's colour
+- public/textures/moons/phobos.webp: Phobos Mars Express SRC Global Mosaic
+  12m (Phobos_ME_SRC_Mosaic_Global_16ppd.tif), Mars Express SRC and Viking
+  images. Public domain, USGS Astrogeology; ESA/DLR/FU Berlin, NASA.
+- public/textures/moons/deimos.webp: Deimos map from Viking images
+  (mar2kuu2.tif), NASA JPL map catalogue. Credit: Caltech/JPL/USGS.
+- public/textures/moons/titan.webp: Titan Cassini ISS Global Mosaic 4005m
+  (Titan_ISS_P19658_Mosaic_Global_4km.tif), Cassini near-infrared (938 nm)
+  images, recentred on longitude 0 and drawn faintly (Titan's surface is
+  hidden by its haze in visible light). Public domain, USGS Astrogeology;
+  NASA/JPL-Caltech/Space Science Institute.

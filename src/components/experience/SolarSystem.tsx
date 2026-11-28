@@ -4094,8 +4094,8 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
   Mars: {
     baseSeconds: 26,
     moons: [
-      { name: 'Phobos', color: '#a39484', radius: 0.09, distance: 1.9, periodDays: 0.319, phase: 0.4, shape: [1, 0.74, 0.86] },
-      { name: 'Deimos', color: '#b3a594', radius: 0.06, distance: 2.8, periodDays: 1.263, phase: 2.7, shape: [1, 0.82, 0.9] },
+      { name: 'Phobos', map: '/textures/moons/phobos.webp', color: '#a39484', radius: 0.09, distance: 1.9, periodDays: 0.319, phase: 0.4, shape: [1, 0.74, 0.86] },
+      { name: 'Deimos', map: '/textures/moons/deimos.webp', color: '#b3a594', radius: 0.06, distance: 2.8, periodDays: 1.263, phase: 2.7, shape: [1, 0.82, 0.9] },
     ],
   },
   Jupiter: {
@@ -4110,7 +4110,7 @@ const MOON_SYSTEMS: Record<string, MoonSystemSpec> = {
   Saturn: {
     baseSeconds: 70,
     moons: [
-      { name: 'Titan', color: '#d29d55', radius: 0.11, distance: 2.75, periodDays: 15.945, phase: 1.2, haze: '#e8a050' },
+      { name: 'Titan', map: '/textures/moons/titan.webp', color: '#d29d55', radius: 0.11, distance: 2.75, periodDays: 15.945, phase: 1.2, haze: '#e8a050' },
     ],
   },
 }
@@ -4171,7 +4171,7 @@ function MoonSystem({
   // loading screen's progress mid-render)
   const [moonMaps, setMoonMaps] = useState<(THREE.Texture | null)[]>([])
   useEffect(() => {
-    // loaded with everything else (332 KB for the four), so their shaders
+    // loaded with everything else (100-340 KB a planet), so their shaders
     // compile behind the loading screen: after it, all four at once
     // stalled the opening for some 650 ms, and on first sight one by one
     // they stalled the glides
@@ -4236,9 +4236,9 @@ function MoonSystem({
       const body = bodies.current[i]
       if (satellite && body) {
         // locked to their planet, the same face always turned to it: its
-        // longitude 0 (Io's and Titan's maps are centred on it, the
-        // others' on 180 degrees)
-        body.rotation.y = moon.name === 'Io' || moon.name === 'Titan' ? Math.PI : 0
+        // longitude 0 (Io's, Phobos's and Titan's maps are centred on it,
+        // the others' on 180 degrees)
+        body.rotation.y = moon.name === 'Io' || moon.name === 'Phobos' || moon.name === 'Titan' ? Math.PI : 0
         if (layout.trueScale) {
           const kmPerUnit = EARTH_RADIUS_KM / EARTH_RENDER_RADIUS
           // the group above may be scaled (a far planet drawn smaller)
