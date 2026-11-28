@@ -375,6 +375,9 @@ const _sun = new THREE.Vector3()
 const _scale = new THREE.Vector3()
 const _anchor = new THREE.Vector3()
 
+/* the ground models, by world (see where Terrain makes one) */
+const groundModels: Record<number, GroundModel> = {}
+
 export default function Terrain({
   index,
   map,
@@ -400,7 +403,10 @@ export default function Terrain({
   const camera = useThree((state) => state.camera)
   const seaTime = useRef(0)
   const config = GROUND[index]
-  const model = useMemo(() => new GroundModel(config), [config])
+  // (one per world, kept past this component: it is only numbers, and a
+  // canvas built afresh, after the graphics context was lost, finds the
+  // ground under a landed ship at once instead of fetching it again)
+  const model = useMemo(() => (groundModels[index] ??= new GroundModel(config)), [config, index])
   const geometry = useMemo(terrainGeometry, [])
   const reliefTexture = useMemo(() => {
     if (!config.heightMap && !config.seaMap) return null

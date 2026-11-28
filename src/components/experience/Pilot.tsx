@@ -1823,6 +1823,74 @@ function Shuttle({ model, thrust }: { model: ShuttleModel; thrust: { current: nu
   )
 }
 
+/* ============================================================
+   FLIGHT KEPT
+   If the graphics card is overworked the browser can take the drawing
+   context back; the canvas is then built afresh, and every component in
+   it starts over. The flight is kept here, outside them, so the new
+   canvas carries on where the old one stopped (on foot on the Moon, say)
+   instead of taking off again from the journey's camera. The ship and
+   the camera are new objects: where they were is noted each frame.
+============================================================ */
+type Orbit = {
+  body: number
+  radius: number
+  axisA: THREE.Vector3
+  axisB: THREE.Vector3
+  angle: number
+  rate: number // radians per second of real time
+  kms: number
+}
+
+const box = <T,>(current: T) => ({ current })
+
+const newFlight = () => ({
+  savedCamera: box({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }),
+  savedFog: box<THREE.Fog | THREE.FogExp2 | null>(null),
+  wasActive: box(false),
+  speed: box(0),
+  thrust: box(0),
+  bank: box(0),
+  rates: box(new THREE.Vector3()), // pitch, yaw, roll (rad/s)
+  velocity: box(new THREE.Vector3()),
+  savedFov: box(40),
+  savedNear: box(0.08),
+  camOffset: box(new THREE.Vector3(0, SHIP_LENGTH, SHIP_LENGTH * 3)),
+  shineFor: box(-2),
+  warp: box<Warp | null>(null),
+  orbit: box<Orbit | null>(null),
+  // landing: where the ship stands, in the planet's own frame (it turns)
+  landedAt: box(new THREE.Vector3()),
+  landedTurn: box(new THREE.Quaternion()),
+  liftTime: box(0),
+  // a mission: the launch from Kennedy, or the flight home there
+  mission: box(newMission()),
+  // the heading along the ground while landing, rolling out and taking off
+  heading: box(new THREE.Vector3()),
+  heat: box(0),
+  // on foot (flightWalk.ts)
+  walker: box(newWalker()),
+  orbitAngle: box(0),
+  flyby: box<THREE.Vector3 | null>(null), // relative to the Sun
+  streaks: box({ velocity: new THREE.Vector3(), amount: 0 }),
+  dust: box({ velocity: new THREE.Vector3(), amount: 0 }),
+  startDpr: box(0),
+  quality: box({ level: 3, frameTime: 1 / 60, since: 0 }),
+  viewDistance: box(VIEW_NEAR),
+  // where the ship, the camera and the Solar System were, last frame
+  at: {
+    ship: new THREE.Vector3(),
+    shipTurn: new THREE.Quaternion(),
+    camera: new THREE.Vector3(),
+    cameraTurn: new THREE.Quaternion(),
+    fov: 42,
+    offset: new THREE.Vector3(),
+  },
+})
+
+let keptFlight: ReturnType<typeof newFlight> | null = null
+const keepFlight = () => (keptFlight ??= newFlight())
+
 export default function Pilot() {
   const { model: shuttle, failed: shuttleFailed } = useShuttle()
   const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera
@@ -1851,52 +1919,21 @@ export default function Pilot() {
     light.shadow.normalBias = 0.004
     light.shadow.radius = 3
   }, [gl])
-  const savedCamera = useRef({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() })
-  const savedFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null)
+  // the flight's own state (kept outside this component: see FLIGHT KEPT)
+  const kept = useState(keepFlight)[0]
+  const {
+    savedCamera, savedFog, wasActive, speed, thrust, bank, rates, velocity, savedFov, savedNear,
+    camOffset, shineFor, warp, orbit, landedAt, landedTurn, liftTime, mission, heading, heat,
+    walker, orbitAngle, flyby, streaks, dust, startDpr, quality, viewDistance,
+  } = kept
+  // this canvas has yet to take the flight over from the one before
+  const resumed = useRef(false)
   const ship = useRef<THREE.Group>(null)
-  const wasActive = useRef(false)
-  const speed = useRef(0)
-  const thrust = useRef(0)
-  const bank = useRef(0)
-  const rates = useRef(new THREE.Vector3()) // pitch, yaw, roll (rad/s)
-  const velocity = useRef(new THREE.Vector3())
-  const savedFov = useRef(40)
-  const savedNear = useRef(0.08)
-  const camOffset = useRef(new THREE.Vector3(0, SHIP_LENGTH, SHIP_LENGTH * 3))
   const visual = useRef<THREE.Group>(null)
   const sunLight = useRef<THREE.DirectionalLight>(null)
   const shine = useRef<THREE.DirectionalLight>(null)
-  const shineFor = useRef(-2)
-  const warp = useRef<Warp | null>(null)
-  const orbit = useRef<{
-    body: number
-    radius: number
-    axisA: THREE.Vector3
-    axisB: THREE.Vector3
-    angle: number
-    rate: number // radians per second of real time
-    kms: number
-  } | null>(null)
-  // landing: where the ship stands, in the planet's own frame (it turns)
-  const landedAt = useRef(new THREE.Vector3())
-  const landedTurn = useRef(new THREE.Quaternion())
-  const liftTime = useRef(0)
-  // a mission: the launch from Kennedy, or the flight home there
-  const mission = useRef(newMission())
-  // the heading along the ground while landing, rolling out and taking off
-  const heading = useRef(new THREE.Vector3())
-  const heat = useRef(0)
-  // on foot (flightWalk.ts)
-  const walker = useRef(newWalker())
-  const orbitAngle = useRef(0)
-  const flyby = useRef<THREE.Vector3 | null>(null) // relative to the Sun
-  const streaks = useRef({ velocity: new THREE.Vector3(), amount: 0 })
-  const dust = useRef({ velocity: new THREE.Vector3(), amount: 0 })
   // automatic quality: the pixel ratio steps down when frames run long
   const setDpr = useThree((state) => state.setDpr)
-  const startDpr = useRef(0)
-  const quality = useRef({ level: 3, frameTime: 1 / 60, since: 0 })
-  const viewDistance = useRef(VIEW_NEAR)
   const beacon = useRef<THREE.Sprite>(null)
   const beaconMaterial = useMemo(() => {
     const canvas = document.createElement('canvas')
@@ -1930,6 +1967,7 @@ export default function Pilot() {
     const delta = Math.min(rawDelta, 0.05)
 
     if (!pilot.active) {
+      resumed.current = true
       if (wasActive.current) {
         // landing: hand the camera back to the journey
         wasActive.current = false
@@ -1960,6 +1998,25 @@ export default function Pilot() {
       return
     }
 
+    if (!resumed.current) {
+      resumed.current = true
+      if (wasActive.current) {
+        // a fresh canvas mid-flight (FLIGHT KEPT): the ship and the camera
+        // back where they were, and the scene as the flight had it
+        const at = kept.at
+        SYSTEM_OFFSET.copy(at.offset)
+        jet.position.copy(at.ship)
+        jet.quaternion.copy(at.shipTurn)
+        camera.position.copy(at.camera)
+        camera.quaternion.copy(at.cameraTurn)
+        camera.fov = at.fov
+        camera.updateProjectionMatrix()
+        savedFog.current = scene.fog
+        scene.fog = null
+        const dpr = QUALITY_DPR[quality.current.level]
+        if (dpr) setDpr(dpr)
+      }
+    }
     if (!wasActive.current) {
       // take off from where the camera is, facing where it looks
       wasActive.current = true
@@ -1997,6 +2054,15 @@ export default function Pilot() {
       rates.current.set(0, 0, 0)
       velocity.current.set(0, 0, 0)
       camOffset.current.copy(camera.position).sub(jet.position)
+    }
+    {
+      const at = kept.at
+      at.offset.copy(SYSTEM_OFFSET)
+      at.ship.copy(jet.position)
+      at.shipTurn.copy(jet.quaternion)
+      at.camera.copy(camera.position)
+      at.cameraTurn.copy(camera.quaternion)
+      at.fov = camera.fov
     }
     getShipPass().enabled = true
     pilotObjects.jet = jet

@@ -182,6 +182,32 @@ function standing(up: THREE.Vector3, along: THREE.Vector3, out: THREE.Quaternion
 const GEAR_POINTS = [new THREE.Vector3(-0.093, -0.195, 0.21), new THREE.Vector3(0.093, -0.195, 0.21)]
 const ENGINE_POINT = new THREE.Vector3(0, -0.19, 0.62)
 
+/* the site: kept outside the component, so that a canvas built afresh
+   (after the graphics context was lost) puts every rock back where it
+   was, and the flag, rather than laying the rocks out anew about you */
+const surfaceKept = {
+  body: -2,
+  surface: null as Surface | null,
+  // the anchor (the world's own frame), the ground's tangent there, and
+  // metres per unit of that frame
+  anchor: new THREE.Vector3(),
+  up: new THREE.Vector3(0, 1, 0),
+  east: new THREE.Vector3(1, 0, 0),
+  north: new THREE.Vector3(0, 0, 1),
+  metres: 1,
+  anchored: false,
+  boulderCell: '',
+  pebbleCell: '',
+  cache: new Map<string, { x: number; y: number; z: number; size: number; spin: number; tint: number; squash: number }[]>(),
+  grains: [] as Grain[],
+  printsShown: -1,
+  lastLand: 'flying',
+  flag: null as null | { dir: THREE.Vector3; heading: THREE.Vector3; time: number },
+  flagShown: false,
+  // the world the rock and print meshes are dressed for
+  dressed: -2,
+}
+
 export default function SurfaceLife({ jetRef }: { jetRef: { current: THREE.Object3D | null } }) {
   const gl = useThree((state) => state.gl)
   const site = useRef<THREE.Group>(null)
@@ -260,26 +286,17 @@ export default function SurfaceLife({ jetRef }: { jetRef: { current: THREE.Objec
     [parts],
   )
 
-  const state = useRef({
-    body: -2,
-    surface: null as Surface | null,
-    // the anchor (the world's own frame), the ground's tangent there, and
-    // metres per unit of that frame
-    anchor: new THREE.Vector3(),
-    up: new THREE.Vector3(0, 1, 0),
-    east: new THREE.Vector3(1, 0, 0),
-    north: new THREE.Vector3(0, 0, 1),
-    metres: 1,
-    anchored: false,
-    boulderCell: '',
-    pebbleCell: '',
-    cache: new Map<string, { x: number; y: number; z: number; size: number; spin: number; tint: number; squash: number }[]>(),
-    grains: [] as Grain[],
-    printsShown: -1,
-    lastLand: 'flying',
-    flag: null as null | { dir: THREE.Vector3; heading: THREE.Vector3; time: number },
-    flagShown: false,
-  })
+  // (kept past this component: see surfaceKept)
+  const state = useRef(surfaceKept)
+  useEffect(() => {
+    // new meshes: refilled, and dressed for the world, on the next frame
+    const s = state.current
+    s.boulderCell = ''
+    s.pebbleCell = ''
+    s.printsShown = -1
+    s.flagShown = false
+    s.dressed = -2
+  }, [])
 
   // where a point of the world's own frame is, in the site's metres
   const toSite = (local: THREE.Vector3, out: THREE.Vector3) => out.copy(local).sub(state.current.anchor).multiplyScalar(state.current.metres)
@@ -467,9 +484,13 @@ export default function SurfaceLife({ jetRef }: { jetRef: { current: THREE.Objec
       s.grains.length = 0
       s.flag = null
       surfaceEvents.footprints.length = 0
-      parts.dustMaterial.uniforms.uColor.value.set(s.surface.dust)
-      parts.printMaterial.color.set(s.surface.dust).multiplyScalar(0.42)
-      const smooth = s.surface.rounded > 0.6
+    }
+    if (s.dressed !== s.body) {
+      s.dressed = s.body
+      const dressFor = s.surface!
+      parts.dustMaterial.uniforms.uColor.value.set(dressFor.dust)
+      parts.printMaterial.color.set(dressFor.dust).multiplyScalar(0.42)
+      const smooth = dressFor.rounded > 0.6
       if (boulders.current) {
         boulders.current.geometry = smooth ? parts.roundRock : parts.sharpRock
         boulders.current.material = smooth ? parts.smoothBoulderMaterial : parts.boulderMaterial
