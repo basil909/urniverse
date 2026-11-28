@@ -31,6 +31,7 @@ import NightSky from './NightSky'
 import { lens, SHADERS_READY_EVENT } from './lens'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
+import { FinitePass } from './finitePass'
 import SpaceStation, { stationShotPose } from './SpaceStation'
 import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
 import { dive, divePose } from './galaxyDive'
@@ -3020,6 +3021,8 @@ function Scene({
 }) {
   const grade = useMemo(() => new GradeEffect(), [])
   useEffect(() => () => grade.dispose(), [grade])
+  const finite = useMemo(() => new FinitePass(), [])
+  useEffect(() => () => finite.dispose(), [finite])
   /* beside the Space Station, 418 km over sunlit cloud, the glow of the
      clouds spilled over its thin, dark solar wings and washed them out:
      the glow is softer there, and the exposure a little lower */
@@ -3140,6 +3143,9 @@ function Scene({
 
         {/* the Shuttle, at its true size, in a layer of its own (flight only) */}
         <primitive object={getShipPass()} />
+
+        {/* only finite light reaches the glow (finitePass.ts) */}
+        <primitive object={finite} />
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
         {/* (held a little back, so the Sun's halo and the bright limbs read

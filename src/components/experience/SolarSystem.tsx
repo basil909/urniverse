@@ -2509,9 +2509,7 @@ float prominences(float r, float a) {
 void main() {
   vec2 c = vUv * 2.0 - 1.0;
   float r = length(c) * uHalf; // distance from the centre, in Sun radii
-  /* (+1e-7: at the very centre atan(0, 0) is undefined, and on Windows it
-     came out NaN; the glow spread that one pixel over the whole frame,
-     and the Sun's and Earth's chapters went black) */
+  /* (+1e-7: at the very centre atan(0, 0) is undefined) */
   float a = atan(c.y, c.x + 1e-7);
   float t = uTime * 0.04;
 
@@ -2553,7 +2551,14 @@ void main() {
 
   /* hotter and more golden just over the limb, a deep orange further out */
   vec3 hue = mix(vec3(1.0, 0.36, 0.08), vec3(1.0, 0.66, 0.26), exp(-above * 9.0));
-  gl_FragColor = vec4((hue * glow + plasma) * uOpacity, 1.0);
+  vec3 light = (hue * glow + plasma) * uOpacity;
+  /* never anything but a finite light: on Windows (Direct3D) a pixel of
+     this glow now and then came out NaN, and the bloom spread that one
+     pixel over the whole frame (the Sun's and Earth's chapters went black).
+     Tested on the bits, which the compiler's fast maths cannot drop. */
+  uvec3 bits = floatBitsToUint(light) & 0x7f800000u;
+  if (any(equal(bits, uvec3(0x7f800000u)))) light = vec3(0.0);
+  gl_FragColor = vec4(min(light, vec3(64.0)), 1.0);
 }`
 
 /* ============================================================
