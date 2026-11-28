@@ -63,7 +63,7 @@ export const SURFACES: Record<number, Surface> = {
     temperature: '120 °C by day, −130 °C at night', air: 'None',
     sky: 'Black; on the near side Earth hangs almost still', dayHours: 708.7, other: { name: 'Earth', width: 1.9 },
     note: 'No wind and no rain: a footprint here can last millions of years.',
-    dust: '#9d9a94', rock: '#77736d', rocks: 1.4, rounded: 0.2, windy: false,
+    dust: '#9d9a94', rock: '#6f6e6b', rocks: 1.4, rounded: 0.2, windy: false,
   },
   13: {
     name: 'Io', radiusKm: 1821.6, gravity: 1.8,

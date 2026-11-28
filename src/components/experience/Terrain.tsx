@@ -15,6 +15,8 @@ import { CLOUD_GLSL, cloudVolume } from './clouds'
 import { earthToday } from './earthToday'
 import { earthEclipse, MOON_SHADOW_GLSL } from './eclipse'
 import { textureLoader } from './textures'
+import { getBodyPosition } from './orbit'
+import { simClock } from './simClock'
 
 /* The patch of ground under the ship (see groundState.ts). A child of the
    planet's sphere, so it turns with it; its vertices are placed on the
@@ -95,6 +97,10 @@ uniform sampler2D uMap; uniform int uPlanetId;
 uniform vec3 uSunL; uniform float uLight; uniform vec3 uLightTint;
 uniform vec3 uSky; uniform float uSkyLight; uniform vec3 uHaze; uniform float uHazeK; uniform float uWorldRadius;
 uniform float uEarth; uniform float uAlbedo; uniform float uCracks;
+/* the Moon: Earth in its sky (the direction, in the Moon's own frame) and
+   how much light it sheds there: earthshine, strongest at the Moon's night
+   (when Earth, seen from it, is full) */
+uniform vec3 uEarthL; uniform float uEarthshine;
 uniform sampler2D uNight; uniform float uHasNight;
 uniform sampler2D uImgFine; uniform vec4 uImgFineRect; uniform sampler2D uImgCoarse; uniform vec4 uImgCoarseRect;
 uniform vec3 uShipView; uniform vec3 uShipFwd; uniform vec3 uShipRight; uniform float uShipLen; uniform float uShipShadow;
@@ -246,6 +252,14 @@ void main() {
   // fine tone below the maps, and bare rock on steep slopes
   vec3 cd = closeDetail(d, 0.6, 1.0);
   base *= 1.0 + cd.y * (uEarth > 0.5 ? 0.12 : 0.3) * land;
+  // the airless worlds: the ground's tone wanders, a few hundred metres
+  // and some tens across (fresher, brighter ejecta; older, darker soil),
+  // so the plain between your feet and the horizon is not one grey
+  if (uEarth < 0.5) {
+    float wide = gNoise(d * uDetailFreq * 180.0) * 0.6 + gNoise(d * uDetailFreq * 520.0 + 7.3) * 0.4;
+    float near = gNoise(d * uDetailFreq * 1900.0 + 3.1);
+    base *= 0.84 + 0.3 * wide + 0.1 * (near - 0.5) * land;
+  }
   float slope = 1.0 - dot(n, d);
   base = mix(base, base * vec3(0.8, 0.76, 0.72), smoothstep(0.03, 0.2, slope) * land);
   if (uEarth > 0.5 && uHasSnow > 0.5) {
@@ -289,6 +303,11 @@ void main() {
   if (uEarth > 0.5) lit *= 1.0 - moonShadow(d, 0.0);
   // sunlight, plus light from the sky itself (none on airless Mercury)
   vec3 color = base * (vec3(0.02) + lit * uLight * uLightTint + uSky * uSkyLight * day * (0.6 + 0.4 * dot(n, d)));
+  // earthshine: a cool, faint light from Earth (lost in full sunlight)
+  if (uEarthshine > 0.0) {
+    float facing = max(dot(n, uEarthL), 0.0) * smoothstep(-0.02, 0.06, dot(d, uEarthL));
+    color += base * vec3(0.62, 0.74, 1.0) * uEarthshine * facing * (1.0 - 0.85 * day);
+  }
   // Earth's sea: waves, the sky mirrored in it, the Sun's moving glint
   if (uEarth > 0.5 && land < 0.99) {
     vec3 slope = seaSlope(d);
@@ -374,6 +393,17 @@ const _e2 = new THREE.Vector3()
 const _sun = new THREE.Vector3()
 const _scale = new THREE.Vector3()
 const _anchor = new THREE.Vector3()
+
+/* earthshine on the Moon: the Moon's body index, Earth's, and how bright
+   a full Earth lights its ground (of full sunlight; far more than true,
+   as the eye adapts to the dark) */
+const MOON = 12
+const EARTH = 2
+const EARTHSHINE = 0.05
+const _earth = new THREE.Vector3()
+const _moon = new THREE.Vector3()
+const _toSun = new THREE.Vector3()
+const _toMoon = new THREE.Vector3()
 
 /* the ground models, by world (see where Terrain makes one) */
 const groundModels: Record<number, GroundModel> = {}
@@ -471,6 +501,8 @@ export default function Terrain({
           uEarth: { value: earth ? 1 : 0 },
           uAlbedo: { value: look.albedo ?? 1 },
           uCracks: { value: index === 14 ? 1 : 0 },
+          uEarthL: { value: new THREE.Vector3(0, 1, 0) },
+          uEarthshine: { value: 0 },
           uNight: { value: null as THREE.Texture | null },
           uHasNight: { value: 0 },
           uSnow: { value: null as THREE.Texture | null },
@@ -609,6 +641,16 @@ export default function Terrain({
     u.uWorldRadius.value = _scale.x
     _sun.copy(sunPosition).applyMatrix4(ground.inverse).normalize()
     u.uSunL.value.copy(_sun)
+    if (index === MOON) {
+      // Earth from the Moon: where, and how full (its phase)
+      getBodyPosition(EARTH, simClock.jd, _earth)
+      body.getWorldPosition(_moon)
+      _toSun.copy(sunPosition).sub(_earth).normalize()
+      _toMoon.copy(_moon).sub(_earth).normalize()
+      const full = (1 + _toSun.dot(_toMoon)) / 2
+      u.uEarthL.value.copy(_earth).applyMatrix4(ground.inverse).normalize()
+      u.uEarthshine.value = EARTHSHINE * full
+    }
     // for the pilot: the ground's height function and this frame
     ground.body = index
     ground.model = model

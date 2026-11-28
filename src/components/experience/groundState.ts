@@ -43,7 +43,8 @@ export const GROUND: Record<number, GroundConfig> = {
   18: { radiusKm: 11.27, reliefKm: 0, roughKm: 0.9, ridged: 0.3 }, // Phobos
   19: { radiusKm: 6.2, reliefKm: 0, roughKm: 0.45, ridged: 0.3 }, // Deimos
   // the Moon (body 12): LRO's elevation
-  12: { heightMap: '/textures/moon-height.webp', radiusKm: 1737.4, reliefKm: 18, roughKm: 1.1, ridged: 0.3 },
+  // (rough enough that the skyline, a couple of km off on foot, rolls)
+  12: { heightMap: '/textures/moon-height.webp', radiusKm: 1737.4, reliefKm: 18, roughKm: 1.45, ridged: 0.3 },
   3: { heightMap: '/textures/relief/mars-height.webp', radiusKm: 3389.5, reliefKm: 26, roughKm: 1.8, ridged: 0.55 },
 }
 

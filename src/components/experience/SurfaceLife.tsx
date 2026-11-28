@@ -52,10 +52,11 @@ function hash(a: number, b: number, c: number) {
    flat base sitting at y = 0 */
 function rockGeometry(rounded: number) {
   const smooth = rounded > 0.6
-  let geometry: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, smooth ? 2 : 1)
+  // (finer facets, less deeply dented: a weathered stone, not a cut gem)
+  let geometry: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 2)
   const position = geometry.getAttribute('position')
   const v = new THREE.Vector3()
-  const dent = smooth ? 0.07 : 0.3
+  const dent = smooth ? 0.07 : 0.22
   for (let i = 0; i < position.count; i += 1) {
     v.fromBufferAttribute(position, i)
     const n = hash(Math.round(v.x * 97), Math.round(v.y * 97), Math.round(v.z * 97))
@@ -70,14 +71,32 @@ function rockGeometry(rounded: number) {
   return geometry
 }
 
-/* rocks shrink away to nothing towards the edge of their reach */
+/* the world's dust, which settles on its rocks (set as each world is dressed) */
+const rockDust = { value: new THREE.Color('#9d9a94') }
+
+/* rocks shrink away to nothing towards the edge of their reach; each sits
+   in the ground: dust banked round its foot, darker there (less of the
+   sky reaches it), and a little dust on what faces up */
 function fadingMaterial(fade: { value: THREE.Vector2 }, flat: boolean) {
   const material = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.96, metalness: 0, flatShading: flat })
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uFade = fade
-    shader.vertexShader = `uniform vec2 uFade;\n${shader.vertexShader}`.replace(
+    shader.uniforms.uDust = rockDust
+    shader.fragmentShader = `uniform vec3 uDust;\nvarying float vRockY;\nvarying float vRockUp;\n${shader.fragmentShader}`.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+      {
+        float foot = 1.0 - smoothstep(0.02, 0.32, vRockY);
+        float dusted = smoothstep(0.55, 0.95, vRockUp) * 0.35;
+        diffuseColor.rgb = mix(diffuseColor.rgb, uDust * 0.72, max(foot * 0.75, dusted));
+        diffuseColor.rgb *= 1.0 - 0.3 * foot;
+      }`,
+    )
+    shader.vertexShader = `uniform vec2 uFade;\nvarying float vRockY;\nvarying float vRockUp;\n${shader.vertexShader}`.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
+      vRockY = position.y;
+      vRockUp = normal.y;
       {
         vec4 at = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
         transformed *= 1.0 - smoothstep(uFade.x, uFade.y, length(at.xyz) * ${SHIP_M.toFixed(2)});
@@ -418,8 +437,8 @@ export default function SurfaceLife({ jetRef }: { jetRef: { current: THREE.Objec
           if (n >= max) break
           _spin.setFromAxisAngle(_yAxis, rock.spin)
           _q.copy(_align).multiply(_spin)
-          // set a little into the ground
-          _p.set(rock.x, rock.y, rock.z).addScaledVector(s.up, -rock.size * 0.12)
+          // set into the ground: a boulder deeper, half buried in its dust
+          _p.set(rock.x, rock.y, rock.z).addScaledVector(s.up, -rock.size * (pebble ? 0.12 : 0.22))
           _m.compose(_p, _q, _scale.set(rock.size, rock.size * rock.squash, rock.size * (0.8 + 0.4 * rock.tint)))
           mesh.setMatrixAt(n, _m)
           const shade = 0.72 + rock.tint * 0.45
@@ -490,6 +509,7 @@ export default function SurfaceLife({ jetRef }: { jetRef: { current: THREE.Objec
       const dressFor = s.surface!
       parts.dustMaterial.uniforms.uColor.value.set(dressFor.dust)
       parts.printMaterial.color.set(dressFor.dust).multiplyScalar(0.42)
+      rockDust.value.set(dressFor.dust)
       const smooth = dressFor.rounded > 0.6
       if (boulders.current) {
         boulders.current.geometry = smooth ? parts.roundRock : parts.sharpRock

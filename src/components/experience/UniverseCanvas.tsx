@@ -10,7 +10,7 @@ import {
   ToneMapping,
   Vignette,
 } from '@react-three/postprocessing'
-import { BloomEffect, ToneMappingMode } from 'postprocessing'
+import { BlendFunction, BloomEffect, ToneMappingMode } from 'postprocessing'
 import { Html, PerformanceMonitor, useProgress } from '@react-three/drei'
 import { Component, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
@@ -82,6 +82,8 @@ const PLANET_CONFIG: PlanetConfig[] = [
 ]
 
 // Slightly above the orbital plane, system framed on the right of the screen
+/* the start's lens shift (of the planet chapters' shift, the other way) */
+const INTRO_SHIFT = -0.8
 const INTRO = {
   position: new THREE.Vector3(-2, 11, 22),
   target: new THREE.Vector3(-4.5, -1.5, -8),
@@ -1330,10 +1332,13 @@ function CinematicCamera({
         _scratchPos.lerpVectors(_prevPos, _currPos, t)
       }
 
+      // (to a planet: the camera turns to it in the first half of the
+      // flight and then holds it, so it grows ahead of you all the way in,
+      // rather than looking at the empty space between two worlds)
       _scratchTarget.lerpVectors(
         _prevTarget,
         _currTarget,
-        t,
+        planet ? THREE.MathUtils.smoothstep(t, 0, 0.5) : t,
       )
     } else {
       _scratchPos.copy(_currPos)
@@ -1633,13 +1638,20 @@ function CinematicCamera({
     // planet sits left of the words (as a film frames a subject off-centre)
     const wide = camera.aspect > 1.2
     heroFrame.closer = wide ? 0.8 : 1
-    const shiftTarget = planet && wide && revealBlend.current === 0 && !shotHere && !seqActive ? 1 : 0
+    // (the start: the other way, the Solar System nudged right, clear of
+    // the title on the left)
+    const shiftTarget = planet && wide && revealBlend.current === 0 && !shotHere && !seqActive
+      ? 1
+      : chapter === 0 && wide && !openingOn && local < 0.5
+        ? INTRO_SHIFT
+        : 0
     const shiftBefore = lensShift.current
     lensShift.current += (shiftTarget - lensShift.current) * (1 - Math.exp(-delta * (reducedMotion ? 30 : 2.2)))
-    if (Math.abs(lensShift.current - shiftBefore) > 1e-5 || (shiftTarget === 0 && camera.filmOffset !== 0 && lensShift.current < 1e-4)) {
+    const shiftGone = Math.abs(lensShift.current) < 1e-4
+    if (Math.abs(lensShift.current - shiftBefore) > 1e-5 || (shiftTarget === 0 && camera.filmOffset !== 0 && shiftGone)) {
       // 0.15 of the half-width, in the film's millimetres
       const halfWidth = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * camera.aspect
-      camera.filmOffset = lensShift.current < 1e-4 ? 0 : lensShift.current * 0.15 * camera.getFilmWidth() * halfWidth
+      camera.filmOffset = shiftGone ? 0 : lensShift.current * 0.15 * camera.getFilmWidth() * halfWidth
       camera.updateProjectionMatrix()
     }
 
@@ -3016,7 +3028,7 @@ function Scene({
   useFrame(({ gl }, delta) => {
     const station = shot.index === 4 && shot.chapter === 4 && !pilot.active
     glowLevel.current += ((station ? 0 : 1) - glowLevel.current) * (1 - Math.exp(-delta * 4))
-    if (bloomRef.current) bloomRef.current.intensity = THREE.MathUtils.lerp(0.22, 0.82, glowLevel.current)
+    if (bloomRef.current) bloomRef.current.intensity = THREE.MathUtils.lerp(0.22, GLOW, glowLevel.current)
     gl.toneMappingExposure = THREE.MathUtils.lerp(0.92, 1.12, glowLevel.current)
   })
 
@@ -3130,7 +3142,9 @@ function Scene({
         <primitive object={getShipPass()} />
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
-        <Bloom ref={bloomRef} intensity={0.82} luminanceThreshold={0.70} luminanceSmoothing={0.90} mipmapBlur resolutionScale={0.5} />
+        {/* (held a little back, so the Sun's halo and the bright limbs read
+            as light, not as a wash of orange over every chapter) */}
+        <Bloom ref={bloomRef} intensity={GLOW} luminanceThreshold={0.76} luminanceSmoothing={0.9} mipmapBlur resolutionScale={0.5} />
 
         {/* a documentary's colour: navy blacks, cool shade, warm sun */}
         <primitive object={grade} />
@@ -3139,8 +3153,12 @@ function Scene({
         <SMAA />
 
 
-        {/* the only film grain on the page (the CSS grain layer was removed) */}
-        <Noise opacity={0.032} />
+        {/* the only film grain on the page (the CSS grain layer was removed);
+            lightening and darkening in proportion to the light, as grain
+            shows on film: screened on, it only lightened, and on the dark
+            (a planet's night side, the sky) it read as a scatter of bright
+            specks, like dust over everything */}
+        <Noise blendFunction={BlendFunction.OVERLAY} opacity={0.12} />
 
         {/* a lens's colour fringe, only towards the corners */}
         <ChromaticAberration offset={CA_OFFSET} radialModulation modulationOffset={0.42} />
@@ -3218,6 +3236,8 @@ class CanvasBoundary extends Component<{ children: ReactNode }, { failed: boolea
 }
 
 const CA_OFFSET = new THREE.Vector2(0.0009, 0.0006)
+/* the glow's strength, everywhere but beside the Space Station */
+const GLOW = 0.7
 
 function UniverseCanvas({ progressRef }: { progressRef: MutableRefObject<number> }) {
   // Adaptive resolution: drops pixel ratio when frame rate dips, restores when healthy

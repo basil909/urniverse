@@ -183,7 +183,20 @@ function detailClouds(shader: THREE.WebGLProgramParametersWithUniforms) {
          between them, closing up into a solid deck as the cover nears full */
       {
         vec3 Pc = normalize(vSurfaceP);
-        float broken = cdNoise(Pc * 160.0) * 0.55 + cdNoise(Pc * 640.0 + 7.1) * 0.3 + cdNoise(Pc * 2560.0 + 3.3) * 0.15;
+        /* the cells drawn along the weather's flow (warped, so they run in
+           streets and swirls, not round blobs), their edges frayed by finer
+           and finer octaves, each only once it is larger than a pixel */
+        float pixC = length(fwidth(Pc));
+        vec3 qc = Pc * 160.0 + vec3(cdNoise(Pc * 40.0), cdNoise(Pc * 40.0 + 5.2), cdNoise(Pc * 40.0 + 9.7)) * 1.5;
+        float broken = 0.5;
+        float ampC = 0.5;
+        float fC = 1.0;
+        for (int k = 0; k < 5; k++) {
+          float seenC = 1.0 - smoothstep(0.25, 0.9, pixC * 160.0 * fC);
+          broken += (cdNoise(qc * fC + float(k) * 3.7) - 0.5) * ampC * seenC;
+          ampC *= 0.42;
+          fC *= 2.6;
+        }
         float c2 = cloudCover + (broken - 0.5) * 0.8 * (1.0 - cloudCover * 0.7);
         /* the cells are far smaller than a pixel from orbit, where they only
            break the map into hard white blobs: there, the map's own soft
@@ -1852,7 +1865,11 @@ void main() {
       /* fine filaments drawn out along the jets (detail finer than any
          map: invented, but following the real bands' flow) */
       vec3 fq = p * vec3(1.0, 9.0, 1.0) * 70.0 + vec3(uTime * 0.012, 0.0, 0.0);
-      float filament = fbm(fq) - 0.5;
+      /* (two octaves, each only once it spans pixels north-south: five
+         at once, far finer than a pixel, sparkled into specks) */
+      float pxF = length(fwidth(p)) * 630.0;
+      float filament = (noise(fq) - 0.5) * (1.0 - smoothstep(0.25, 0.9, pxF)) * 0.62
+        + (noise(fq * 2.03 + vec3(1.7, 9.2, 3.1)) - 0.5) * (1.0 - smoothstep(0.25, 0.9, pxF * 2.03)) * 0.38;
       float streaks = uPlanet == 5 ? 0.3 : uPlanet == 4 ? 0.28 : 0.12;
       surface *= 1.0 + filament * streaks * swirl;
       /* close up the bright zones sit just below the glow (bloom), which

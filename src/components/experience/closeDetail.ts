@@ -22,7 +22,10 @@ vec3 closeDetail(vec3 p, float rugged, float stretch) {
   float f = 300.0;
   // (a loop kept as a loop: unrolled, sixteen copies of the noise)
   for (int i = 0; i < 4 + uDyn; i++) {
-    float a = 1.0 - smoothstep(0.22, 0.9, px * f);
+    /* (each octave only once it spans pixels, along its finest axis:
+       stretched north-south for the banded giants, it is that much
+       finer there, and seen at a distance it scattered into specks) */
+    float a = 1.0 - smoothstep(0.22, 0.9, px * f * max(stretch, 1.0));
     if (a > 0.002) {
       vec3 c = q * f + float(i) * 31.7;
       /* a little warp, so the pattern never reads as a regular grain */
