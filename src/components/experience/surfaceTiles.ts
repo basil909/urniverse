@@ -1,6 +1,6 @@
 'use client'
 
-import { type RefObject } from 'react'
+import { type RefObject, useEffect } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 
@@ -31,6 +31,16 @@ import { lowOver } from './pilotState'
    the tiles are drawn into; the shaders blend it over the map, fading at
    its edges, and show the map wherever a tile has not arrived. Offline,
    nothing changes.
+
+   THE WHOLE GLOBE, SHARPER
+   Earth, Mars, Mercury and the Moon take the same imagery from afar too:
+   whenever the camera is close enough that a screen pixel (a device
+   pixel, so a sharp screen counts) is finer than the map's own, in the
+   journey's zoom and close-up shots as well as in flight. Only as sharp
+   as the screen can show, only the part in view, from NASA's servers (the
+   site itself sends nothing more), and only on a desktop with memory to
+   spare and no data saver; further out, the patches are let go and the
+   planet is just its map again.
 ============================================================ */
 
 export type Source = {
@@ -90,10 +100,13 @@ const SOURCES: Record<
     radiusKm: number
     mapWidth: number
     gain: [number, number, number]
+    /** streamed whenever the camera is close enough, not only flying low */
+    globe?: boolean
   }
 > = {
   0: {
     day: trek('Mercury', 'Mercury_MESSENGER_MDIS_Basemap_BDR_Mosaic_Global_166m', 7),
+    globe: true,
     radiusKm: 2439.7,
     mapWidth: 4096,
     gain: [1.86, 1.84, 1.85],
@@ -101,6 +114,7 @@ const SOURCES: Record<
   2: {
     day: gibs('BlueMarble_NextGeneration', 'jpeg'),
     night: gibs('VIIRS_CityLights_2012', 'jpeg'),
+    globe: true,
     radiusKm: 6371,
     mapWidth: 4096,
     gain: [1, 1, 1],
@@ -135,6 +149,7 @@ const SOURCES: Record<
   // the Moon (body 12): LRO's wide-angle camera mosaic, ~100 m a pixel
   12: {
     day: trek('Moon', 'LRO_WAC_Mosaic_Global_303ppd_v02', 8),
+    globe: true,
     radiusKm: 1737.4,
     mapWidth: 4096,
     // the mosaic is darker than the map (gain in linear light: sRGB)
@@ -143,6 +158,7 @@ const SOURCES: Record<
   3: {
     day: trek('Mars', 'Mars_Viking_MDIM21_ClrMosaic_global_232m', 7),
     detail: ctx,
+    globe: true,
     radiusKm: 3389.5,
     mapWidth: 4096,
     gain: [1.48, 0.946, 0.659],
@@ -398,6 +414,11 @@ export class PatchLayer {
       })
   }
 
+  /** a patch is aimed (tiles shown or on their way) */
+  get shown() {
+    return this.layout !== null
+  }
+
   private dropArrived() {
     this.arrived.forEach((tile) => tile.bitmap.close())
     this.arrived = []
@@ -479,12 +500,19 @@ function getLayers() {
 let streamingAllowed: boolean | null = null
 function allowed(gl: THREE.WebGLRenderer) {
   if (streamingAllowed !== null) return streamingAllowed
-  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory
+  const nav = navigator as Navigator & {
+    deviceMemory?: number
+    connection?: { saveData?: boolean; effectiveType?: string }
+  }
+  const memory = nav.deviceMemory
+  // (a visitor saving data, or on a slow link, keeps the maps)
+  const thrifty = nav.connection?.saveData === true || /(^|-)2g|3g/.test(nav.connection?.effectiveType ?? '')
   streamingAllowed =
     window.matchMedia('(min-width: 768px)').matches &&
     gl.capabilities.maxTextureSize >= CANVAS &&
     typeof createImageBitmap === 'function' &&
-    (memory === undefined || memory >= 4)
+    (memory === undefined || memory >= 4) &&
+    !thrifty
   return streamingAllowed
 }
 
@@ -512,29 +540,48 @@ const _up = new THREE.Vector3()
 
 let owner = -1
 
+/* the patches go back to no planet, their textures freed */
+function releaseAll() {
+  owner = -1
+  surfacePatch.uPatchPlanet.value = -1
+  surfacePatch.uPatchDetail.value = 0
+  if (!layers) return
+  layers.dayFine.release()
+  layers.dayCoarse.release()
+  layers.nightFine.release()
+  layers.nightCoarse.release()
+}
+
+/* a patch is worth showing while its pixels are finer than the map's:
+   taken up below 0.8 of the map's pixel, let go only past it (so a camera
+   hovering at the edge does not fetch and drop it frame after frame) */
+const TAKE_UP = 0.8
+const LET_GO = 1.05
+
 /* Called by each planet that has imagery to stream: while you are flying
-   low over it, keeps the patches on the ground you are looking at. */
+   low over it, or (Earth, Mars, Mercury, the Moon) close enough anywhere
+   that its map is coarser than the screen, keeps the patches on the
+   ground you are looking at. One planet has them at a time. */
 export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | null>, sunPosition: THREE.Vector3) {
   const gl = useThree((state) => state.gl)
+  useEffect(
+    () => () => {
+      if (owner === index) releaseAll()
+    },
+    [index],
+  )
   useFrame((state, delta) => {
     setTileRenderer(gl)
     const source = SOURCES[index]
     const mesh = body.current
     if (!source || !mesh) return
-    const engaged = lowOver(index) >= 0 && allowed(gl)
+    const engaged = (lowOver(index) >= 0 || source.globe === true) && allowed(gl)
     if (!engaged) {
-      if (owner === index) {
-        owner = -1
-        surfacePatch.uPatchPlanet.value = -1
-        surfacePatch.uPatchDetail.value = 0
-        const all = getLayers()
-        all.dayFine.release()
-        all.dayCoarse.release()
-        all.nightFine.release()
-        all.nightCoarse.release()
-      }
+      if (owner === index) releaseAll()
       return
     }
+    // another world has them (it lets go once it no longer needs them)
+    if (owner !== -1 && owner !== index) return
 
     const camera = state.camera as THREE.PerspectiveCamera
     mesh.getWorldPosition(_center)
@@ -551,7 +598,11 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     _tangent.copy(_view).addScaledVector(up, -_view.dot(up))
     if (_tangent.lengthSq() < 1e-8) _tangent.set(1, 0, 0).cross(up)
     _tangent.normalize()
-    let ahead = (2 * altitude) / radius // radians from the point below
+    // (never past the horizon: from high up, the view may miss the world
+    // altogether, and then the patch goes on the near side, towards
+    // where the view passes)
+    const horizon = Math.acos(THREE.MathUtils.clamp(radius / distance, -1, 1))
+    let ahead = Math.min((2 * altitude) / radius, horizon * 0.5) // radians from the point below
     const b = _point.copy(_camera).sub(_center).dot(_view)
     const c = distance * distance - radius * radius
     const disc = b * b - c
@@ -561,13 +612,26 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
         _point.copy(_camera).addScaledVector(_view, t).sub(_center).normalize()
         ahead = Math.min(ahead, Math.acos(THREE.MathUtils.clamp(_point.dot(up), -1, 1)))
       }
+    } else if (b < 0) {
+      // the nearest the view comes to the world's centre: lean that way
+      _point.copy(_camera).addScaledVector(_view, -b).sub(_center)
+      _point.addScaledVector(up, -_point.dot(up))
+      if (_point.lengthSq() > 1e-12) _tangent.copy(_point).normalize()
     }
     _point.copy(up).multiplyScalar(Math.cos(ahead)).addScaledVector(_tangent, Math.sin(ahead))
-    // how big a screen pixel is on the ground there
+    // how big a screen pixel (a device pixel) is on the ground there
     const groundDistance = _local.copy(_point).multiplyScalar(radius).add(_center).distanceTo(_camera)
     const pixel =
-      (groundDistance * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / state.size.height
+      (groundDistance * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) /
+      (state.size.height * gl.getPixelRatio())
     const pixelKm = (pixel / radius) * source.radiusKm
+    const mapKm = (2 * Math.PI * source.radiusKm) / source.mapWidth
+    // the map is sharp enough here: no patches (and no fetching) at all
+    const firstLevel = levelFor(source.day, source.radiusKm, pixelKm)
+    if (kmPerPixel(source.day, source.radiusKm, firstLevel) >= mapKm * (owner === index ? LET_GO : TAKE_UP)) {
+      if (owner === index) releaseAll()
+      return
+    }
     // is it day there?
     _toSun.copy(sunPosition).sub(_center).normalize()
     const sunUp = _point.dot(_toSun)
@@ -584,17 +648,18 @@ export function useSurfacePatches(index: number, body: RefObject<THREE.Mesh | nu
     surfacePatch.uPatchPlanet.value = index
     surfacePatch.uPatchGain.value.fromArray(source.gain)
     surfacePatch.uPatchDetail.value = source.detail ? 1 : 0
-    const mapKm = (2 * Math.PI * source.radiusKm) / source.mapWidth
 
     const space = index === 2 || index >= 12 ? THREE.SRGBColorSpace : THREE.NoColorSpace
+    const worth = (layer: PatchLayer, src: Source, z: number) =>
+      kmPerPixel(src, source.radiusKm, z) < mapKm * (layer.shown ? LET_GO : TAKE_UP)
     const aimPair = (src: Source, fine: PatchLayer, coarse: PatchLayer, wanted: boolean) => {
       fine.setColorSpace(space)
       coarse.setColorSpace(space)
       const zFine = levelFor(src, source.radiusKm, pixelKm)
       const zCoarse = Math.max(0, zFine - 2)
-      if (wanted && kmPerPixel(src, source.radiusKm, zFine) < mapKm * 0.8) fine.aim(src, zFine, lon, lat)
+      if (wanted && worth(fine, src, zFine)) fine.aim(src, zFine, lon, lat)
       else fine.hide()
-      if (wanted && kmPerPixel(src, source.radiusKm, zCoarse) < mapKm * 0.8) coarse.aim(src, zCoarse, lon, lat)
+      if (wanted && worth(coarse, src, zCoarse)) coarse.aim(src, zCoarse, lon, lat)
       else coarse.hide()
       fine.update(delta)
       coarse.update(delta)
