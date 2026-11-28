@@ -2594,7 +2594,15 @@ export default function Journey() {
                 >
                   Solar System Scope
                 </a>
-                , licensed{' '}
+                ; the Milky Way:{' '}
+                <a
+                  href="https://www.eso.org/public/images/eso0932a/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  ESO/S. Brunier
+                </a>
+                ; both licensed{' '}
                 <a
                   href="https://creativecommons.org/licenses/by/4.0/"
                   target="_blank"

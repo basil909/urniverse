@@ -29,6 +29,7 @@ import LocalGroup, { LOCAL_GROUP_VIEW, NEIGHBOURS } from './LocalGroup'
 import PlanetPicker from './PlanetPicker'
 import NightSky from './NightSky'
 import { lens, SHADERS_READY_EVENT } from './lens'
+import { bigSkyAllowed, useSharpTexture } from './sharpMaps'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import { FinitePass } from './finitePass'
@@ -2467,7 +2468,7 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
 
 /* ============================================================
    MILKY WAY SKY
-   A real panorama of our galaxy (Solar System Scope, CC BY 4.0) on a
+   A real panorama of our galaxy (ESO/S. Brunier, CC BY 4.0) on a
    sphere that travels with the camera, so it sits at infinity. The map
    is in galactic coordinates; the shader turns each viewing direction
    from ecliptic (our scene) into galactic latitude/longitude, so the
@@ -2475,7 +2476,12 @@ function Clock({ progressRef }: { progressRef: MutableRefObject<number> }) {
    It fades in the finale, where the camera has left the galaxy.
 ============================================================ */
 
-const SKY_TEXTURE = '/textures/milky-way-sky.webp'
+/* ESO's photograph of the whole sky (ESO/S. Brunier, CC BY 4.0): a light
+   copy with the page, the full 6000-pixel one on a desktop once the page
+   is up (decoded off the main thread, sent up in tiles: sharpMaps.ts) */
+const SKY_TEXTURE = '/textures/sky/milky-way-small.webp'
+const SKY_SHARP = '/textures/sky/milky-way.webp'
+const SKY_SHARP_AFTER = 3 // seconds after the page is revealed
 // kept low: the sky is atmosphere, never competing with the planets
 const SKY_BRIGHTNESS = 2.4
 
@@ -2496,6 +2502,9 @@ uniform float uZodiac;
 varying vec3 vDirection;
 const float PI = 3.141592653589793;
 const float EPS = 0.40909280; // obliquity of the ecliptic (J2000), radians
+const float SKY_FLOOR = 0.0006; // the photograph's faint sky background (linear)
+const float SKY_GAIN = 0.065;
+const float PAINTED = 0.3; // how much of the drawn Milky Way stays
 const mat3 EQ_TO_GAL = mat3(
   -0.0548755604, 0.4941094279, -0.8676661490,
   -0.8734370902, -0.4448296300, -0.1980763734,
@@ -2533,8 +2542,10 @@ void main() {
   vec2 uv = vec2(uWrap, 0.5 - b / PI);
   // the photo is sRGB; the pipeline brightens shader output as if it were
   // linear, so decode first (otherwise the dark sky is lifted and its
-  // compression blocks show)
-  vec3 sky = pow(texture2D(uMap, uv).rgb, vec3(2.2));
+  // compression blocks show). Its faint sky background is taken off, so
+  // space stays black, and it is brought down to the quiet level the sky
+  // keeps (the photograph is a bright print of the Milky Way)
+  vec3 sky = max(pow(texture2D(uMap, uv).rgb, vec3(2.2)) - SKY_FLOOR, vec3(0.0)) * SKY_GAIN;
 
   /* the luminous band of the Milky Way, drawn smooth on top of the photo:
      thicker and golden around the centre (Sagittarius, l = 0), thinner and
@@ -2566,7 +2577,9 @@ void main() {
   /* clumpy, not a flat haze: star clouds stand out, gaps stay dark */
   float clumps = smoothstep(0.35, 0.8, clouds);
   float glow = (band * along * (0.15 + 1.2 * clumps) + bulge * 0.5 + starClouds * 0.6) * (1.0 - rift * 0.85);
-  sky = sky * (1.0 - rift * 0.6 * band) + tint * glow * 0.018;
+  /* (the photograph now carries the band's own structure; the drawn band
+     only deepens it a little) */
+  sky = sky * (1.0 - rift * 0.6 * band * PAINTED) + tint * glow * 0.018 * PAINTED;
 
   /* the zodiacal light: sunlight scattered by the dust between the
      planets, which lies in their plane. A band along the ecliptic through
@@ -2599,6 +2612,10 @@ function MilkyWaySky({
   const sphere = useRef<THREE.Mesh>(null)
   const camera = useThree((state) => state.camera)
   const gl = useThree((state) => state.gl)
+  const baseMap = useRef<THREE.Texture | null>(null)
+  const revealedFor = useRef(0)
+  const [wantSharp, setWantSharp] = useState(false)
+  const sharpSky = useSharpTexture(wantSharp ? SKY_SHARP : undefined, wantSharp, { colorSpace: THREE.NoColorSpace })
 
   const material = useMemo(
     () =>
@@ -2631,6 +2648,7 @@ function MilkyWaySky({
       texture.wrapS = THREE.RepeatWrapping
       texture.anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy())
       loaded = texture
+      baseMap.current = texture
       material.uniforms.uMap.value = texture
     })
     return () => {
@@ -2643,6 +2661,13 @@ function MilkyWaySky({
   useFrame((_, delta) => {
     if (!sphere.current) return
     sphere.current.position.copy(camera.position)
+    // the sharp photograph, once the page has been up a moment
+    if (!wantSharp && lens.revealed && bigSkyAllowed(gl)) {
+      revealedFor.current += delta
+      if (revealedFor.current > SKY_SHARP_AFTER) setWantSharp(true)
+    }
+    const map = sharpSky ?? baseMap.current
+    if (map && material.uniforms.uMap.value !== map) material.uniforms.uMap.value = map
     // full inside the Solar System; fade out once we have left the galaxy
     const chapter = Math.floor(progressRef.current ?? 0)
     const target = material.uniforms.uMap.value ? (chapter === 11 || chapter === 12 ? 0.15 : SKY_BRIGHTNESS) : 0

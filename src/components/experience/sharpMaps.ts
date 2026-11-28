@@ -48,6 +48,12 @@ function sharpMapsAllowed(gl: THREE.WebGLRenderer) {
   return sharpAllowed
 }
 
+/* the sky's 6000-pixel photograph: where sharp maps are, and the card
+   takes a texture that wide */
+export function bigSkyAllowed(gl: THREE.WebGLRenderer) {
+  return sharpMapsAllowed(gl) && gl.capabilities.maxTextureSize >= 8192
+}
+
 /* A 4K map sent to the graphics card in one go costs a frame 30–80 ms (a
    visible jolt just as the camera settles on a planet). So it goes up in
    tiles instead: the texture's memory is reserved empty, the decoded map
