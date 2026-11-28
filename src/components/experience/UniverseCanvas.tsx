@@ -32,6 +32,7 @@ import { lens, SHADERS_READY_EVENT } from './lens'
 import TextShield from './TextShield'
 import { GradeEffect } from './grade'
 import { FinitePass } from './finitePass'
+import { SunRaysEffect } from './sunRays'
 import SpaceStation, { stationShotPose } from './SpaceStation'
 import { himalayaClock, himalayaShotPose, isHimalayaShot } from './himalaya'
 import { dive, divePose } from './galaxyDive'
@@ -2643,6 +2644,8 @@ const _sunNdc = new THREE.Vector3()
 const _forward = new THREE.Vector3()
 const _sunDir = new THREE.Vector3()
 
+/* how strong the sunbeams are, at their strongest (sunRays.ts) */
+const RAYS = 0.75
 const _flareRay = new THREE.Vector3()
 const _flarePlanet = new THREE.Vector3()
 
@@ -2650,12 +2653,17 @@ function Lens({
   progressRef,
   glare,
   flare,
+  rays,
 }: {
   progressRef: MutableRefObject<number>
   glare: RefObject<HTMLDivElement | null>
   flare?: RefObject<HTMLDivElement | null>
+  rays?: SunRaysEffect
 }) {
   const flareLevel = useRef(0)
+  const raysLevel = useRef(0)
+  // (not on a phone or tablet: some 3 ms a frame on a laptop's own graphics)
+  const raysAllowed = useMemo(() => typeof window !== 'undefined' && !window.matchMedia('(pointer: coarse)').matches, [])
   const camera = useThree((state) => state.camera)
   const level = useRef(0)
 
@@ -2690,6 +2698,20 @@ function Lens({
       target *= THREE.MathUtils.clamp(14 / distance, 0.3, 1)
     }
     level.current += (target - level.current) * (1 - Math.exp(-delta * 2.5))
+
+    /* sunbeams: with the Sun in the frame or just outside it (its rays
+       still reach in), fainter from far out; none in the finale */
+    if (rays) {
+      let raysTarget = 0
+      if (raysAllowed && facing > 0 && progress < 10.95) {
+        const outside = Math.max(Math.abs(_sunNdc.x), Math.abs(_sunNdc.y)) - 1
+        raysTarget = (1 - THREE.MathUtils.smoothstep(outside, 0, 0.45)) * THREE.MathUtils.clamp(14 / distance, 0.35, 1)
+        if (pilot.active) raysTarget *= 0.6
+      }
+      raysLevel.current += (raysTarget - raysLevel.current) * (1 - Math.exp(-delta * 3))
+      const strength = raysLevel.current < 0.01 ? 0 : raysLevel.current * RAYS
+      rays.set(_sunNdc.x * 0.5 + 0.5, _sunNdc.y * 0.5 + 0.5, strength, (camera as THREE.PerspectiveCamera).aspect || 1)
+    }
 
     const x = THREE.MathUtils.clamp(_sunNdc.x, -2.5, 2.5)
     const y = THREE.MathUtils.clamp(_sunNdc.y, -2.5, 2.5)
@@ -3023,6 +3045,8 @@ function Scene({
   useEffect(() => () => grade.dispose(), [grade])
   const finite = useMemo(() => new FinitePass(), [])
   useEffect(() => () => finite.dispose(), [finite])
+  const rays = useMemo(() => new SunRaysEffect(), [])
+  useEffect(() => () => rays.dispose(), [rays])
   /* beside the Space Station, 418 km over sunlit cloud, the glow of the
      clouds spilled over its thin, dark solar wings and washed them out:
      the glow is softer there, and the exposure a little lower */
@@ -3042,7 +3066,7 @@ function Scene({
       {/* first, so the date is advanced before planets and camera read it */}
       <Clock progressRef={progressRef} />
 
-      <Lens progressRef={progressRef} glare={glare} flare={flare} />
+      <Lens progressRef={progressRef} glare={glare} flare={flare} rays={rays} />
       <RevealEarth />
       <ExplorerShip />
       <SpaceStation progressRef={progressRef} />
@@ -3146,6 +3170,9 @@ function Scene({
 
         {/* only finite light reaches the glow (finitePass.ts) */}
         <primitive object={finite} />
+
+        {/* sunbeams from the Sun's disc, cut by the worlds before it */}
+        <primitive object={rays} />
 
         {/* glow is soft, so half resolution looks identical and costs a quarter */}
         {/* (held a little back, so the Sun's halo and the bright limbs read
